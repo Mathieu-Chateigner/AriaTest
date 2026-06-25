@@ -1,0 +1,1816 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#050608;}
+  @keyframes ariaPulse{0%,100%{opacity:1}50%{opacity:.3}}
+  @keyframes ariaGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.13)}}
+  @keyframes critGlow{0%,100%{box-shadow:inset 0 0 0 1px rgba(226,90,79,.30), inset 0 0 16px rgba(226,90,79,.20)}50%{box-shadow:inset 0 0 0 1px rgba(236,164,86,.60), inset 0 0 30px rgba(226,90,79,.48)}}
+  @keyframes hitShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(3px)}30%,50%,70%{transform:translateX(-4px)}40%,60%{transform:translateX(4px)}}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#1c2230;border-radius:5px}
+  .aria-frame{position:relative;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--bg);box-shadow:0 40px 90px -34px var(--frameShadow);}
+  .aria-grain{position:absolute;inset:0;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22160%22 height=%22160%22%3E%3Cfilter id=%22n%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.85%22 numOctaves=%222%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23n)%22/%3E%3C/svg%3E');mix-blend-mode:soft-light;pointer-events:none;z-index:6;}
+</style>
+</helmet>
+<div style="{{ rootStyle }}">
+
+  <!-- gallery masthead -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:14px;">
+    <div>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:40px;font-weight:600;letter-spacing:.18em;color:var(--warm);text-indent:.18em;">ARIA</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.3em;color:var(--faint);text-transform:uppercase;margin-top:6px;">Refonte visuelle &mdash; système complet</div>
+    </div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;text-align:right;line-height:2;">
+      Encre froide &middot; accent = action<br>chiffres chirurgicaux &middot; matière, pas ornement
+    </div>
+  </div>
+
+  <!-- ════════ SECTION I · ONBOARDING ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--ember);">I</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Onboarding</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:360px;text-align:right;line-height:1.7;">Clé de sauvegarde &rarr; sélection. Deux étapes, une identité.</div>
+  </div>
+
+  <!-- 01 · Clé de sauvegarde -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">01 &mdash; Clé de sauvegarde</div>
+    <div class="aria-frame" style="height:560px;background:radial-gradient(120% 70% at 50% 0%, rgba(236,164,86,.05), transparent 55%), var(--bg);display:flex;align-items:center;justify-content:center;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:600;letter-spacing:.2em;color:var(--warm);text-indent:.2em;margin-bottom:6px;">ARIA</div>
+        <div style="width:54px;height:1px;background:linear-gradient(90deg,transparent,var(--ember),transparent);margin-bottom:40px;"></div>
+        <div style="display:flex;gap:22px;align-items:stretch;">
+          <!-- new key -->
+          <div style="width:360px;padding:30px 30px 26px;background:var(--panel);border:1px solid var(--line);border-radius:4px;display:flex;flex-direction:column;">
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.24em;color:var(--ember);text-transform:uppercase;margin-bottom:12px;">Nouvelle clé</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;color:var(--warm);margin-bottom:8px;">Clé de sauvegarde</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:15.5px;font-style:italic;color:var(--dim);line-height:1.5;margin-bottom:18px;">Votre clé identifie votre progression. Notez-la précieusement &mdash; elle sera nécessaire sur un autre appareil.</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px;letter-spacing:.04em;color:var(--ember2);background:var(--field);border:1px solid var(--embersoft);border-radius:3px;padding:13px 14px;text-align:center;margin-bottom:18px;word-break:break-all;">a7f3c9e2-4b81-44d0-9e3a-1c5f8b2d6e90</div>
+            <div style="display:flex;gap:9px;margin-top:auto;">
+              <div style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:11px 0;cursor:pointer;">Copier</div>
+              <div style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);background:var(--ember);border-radius:3px;padding:11px 0;cursor:pointer;">Continuer &rarr;</div>
+            </div>
+          </div>
+          <!-- existing key -->
+          <div style="width:360px;padding:30px 30px 26px;background:var(--panel);border:1px solid var(--line);border-radius:4px;display:flex;flex-direction:column;">
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.24em;color:var(--faint);text-transform:uppercase;margin-bottom:12px;">Clé existante</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;color:var(--warm);margin-bottom:8px;">Retrouver une partie</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:15.5px;font-style:italic;color:var(--dim);line-height:1.5;margin-bottom:18px;">Saisissez votre clé pour retrouver votre progression sur cet appareil.</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px;letter-spacing:.02em;color:var(--faint);background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:13px 14px;margin-bottom:18px;">xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</div>
+            <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:11px 0;cursor:pointer;margin-top:auto;">Charger &rarr;</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 · Sélection -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">02 &mdash; Sélection du personnage</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Identique en violet pour le MJ → campagnes</div>
+    </div>
+    <div class="aria-frame" style="height:600px;background:radial-gradient(120% 70% at 50% 0%, rgba(236,164,86,.04), transparent 55%), var(--bg);">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:absolute;top:22px;left:22px;z-index:3;width:34px;height:34px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:16px;">&#8962;</div>
+      <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;padding:44px 40px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;letter-spacing:.2em;color:var(--warm);text-indent:.2em;">ARIA</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-style:italic;color:var(--ember2);margin-top:4px;margin-bottom:34px;">Choisissez votre personnage</div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;justify-content:center;">
+          <sc-for list="{{ gmPlayers }}" as="c" hint-placeholder-count="3">
+            <div style="width:240px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:26px 24px;display:flex;flex-direction:column;gap:14px;cursor:pointer;transition:border-color .2s,transform .2s;" style-hover="border-color:rgba(236,164,86,.4);transform:translateY(-3px);">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="width:14px;height:14px;border:1.5px solid var(--ember);transform:rotate(45deg);"></div>
+                <div style="display:flex;align-items:center;gap:6px;"><div style="width:6px;height:6px;border-radius:50%;background:{{ c.col }};"></div><span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.1em;color:var(--dim);">{{ c.hp }}/{{ c.max }}</span></div>
+              </div>
+              <div>
+                <div style="font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;color:var(--warm);line-height:1.1;">{{ c.name }}</div>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-top:3px;">{{ c.cls }}</div>
+              </div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.18em;color:var(--ember);text-transform:uppercase;margin-top:6px;">Incarner &rarr;</div>
+            </div>
+          </sc-for>
+          <div style="width:240px;border:1px dashed var(--line2);border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--faint);cursor:pointer;min-height:174px;">
+            <div style="font-size:26px;font-weight:300;line-height:1;">+</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:.14em;text-transform:uppercase;">Nouveau personnage</div>
+          </div>
+        </div>
+        <div style="margin-top:auto;display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:11px 18px;">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;">Clé</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dim);">a7f3c9e2…6e90</span>
+          <div style="width:1px;height:16px;background:var(--line2);"></div>
+          <span style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;">Copier</span>
+          <span style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;">Changer…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ════════ SECTION II · JOUEUR ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--ember);">II</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Joueur</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:380px;text-align:right;line-height:1.7;">Barre de commande unifiée : 3 bandes &rarr; 1. L’ember ne marque que ce qu’on lance.</div>
+  </div>
+
+  <!-- 03 · Coquille + Compétences -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">03 &mdash; Coquille &middot; Compétences</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Fusion : topbar + bonus/malus + musique</div>
+    </div>
+    <div class="aria-frame" style="height:730px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+
+      <!-- UNIFIED COMMAND BAR -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:0;height:58px;padding:0 18px;background:linear-gradient(180deg,var(--chrome1),var(--rail));border-bottom:1px solid var(--line2);">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;letter-spacing:.16em;color:var(--ember2);">ARIA</div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 16px;"></div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--text);line-height:1.1;">Kaelen Vorr</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;">Rôdeur</span>
+        </div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 18px;"></div>
+        <!-- modifier cluster -->
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-right:10px;">Mod</span>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--bad);border:1px solid rgba(226,90,79,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">&minus;20</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--bad);border:1px solid rgba(226,90,79,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">&minus;10</div>
+          <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--dim);min-width:42px;text-align:center;border:1px solid var(--line2);border-radius:3px;padding:3px 0;background:var(--field2);">±0</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--ok);border:1px solid rgba(91,201,142,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">+10</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--ok);border:1px solid rgba(91,201,142,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">+20</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--faint);padding:4px 7px;cursor:pointer;" title="Contrôles avancés">&#8943;</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;margin-left:14px;">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;">Karma</span>
+          <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--ember2);">3</span>
+        </div>
+        <div style="flex:1;"></div>
+        <!-- music mini -->
+        <div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:20px;padding:5px 14px;background:var(--field2);">
+          <span style="color:var(--ember);font-size:12px;">&#9834;</span>
+          <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Taverne — ambiance</span>
+          <div style="width:54px;height:3px;background:var(--track2);border-radius:2px;"><div style="width:62%;height:100%;background:var(--dim);border-radius:2px;"></div></div>
+        </div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 14px;"></div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.2em;color:var(--ember);border:1px solid rgba(236,164,86,.3);padding:5px 11px;border-radius:3px;">X7K2M</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-left:12px;"><div style="width:7px;height:7px;border-radius:50%;background:var(--ok);animation:ariaPulse 2.4s infinite;"></div></div>
+        <div style="width:30px;height:30px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;margin-left:10px;">&#9881;</div>
+      </div>
+
+      <!-- MAIN -->
+      <div style="position:relative;z-index:2;display:flex;flex:1;min-height:0;">
+        <!-- SIDEBAR -->
+        <div style="width:258px;flex-shrink:0;background:var(--rail);border-right:1px solid var(--line2);padding:18px 16px;display:flex;flex-direction:column;gap:15px;overflow-y:auto;">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:15px 14px;text-align:center;">
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:7px;">Points de vie</div>
+            <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:58px;font-weight:700;line-height:.9;color:var(--ok);">18</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--dim);margin-top:3px;">/ 24</div>
+            <div style="height:4px;background:var(--track);border-radius:2px;margin-top:12px;overflow:hidden;"><div style="width:75%;height:100%;background:linear-gradient(90deg,var(--hp1),var(--ok));"></div></div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-top:7px;opacity:.7;">géré par le MJ</div>
+          </div>
+          <div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">Réactions</div>
+            <div style="display:flex;gap:8px;">
+              <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 6px;text-align:center;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-color:rgba(236,164,86,.5);background:var(--embersoft);">
+                <div style="font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text);">Parade</div>
+                <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;color:var(--ember2);margin-top:2px;">52%</div>
+              </div>
+              <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 6px;text-align:center;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-color:rgba(236,164,86,.5);background:var(--embersoft);">
+                <div style="font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text);">Esquive</div>
+                <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;color:var(--ember2);margin-top:2px;">58%</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">Protection</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 13px;">
+              <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:var(--text);">Cuir clouté</span>
+              <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--ember2);border:1px solid var(--line2);padding:2px 9px;border-radius:2px;">04</span>
+            </div>
+          </div>
+          <div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">Armes</div>
+            <sc-for list="{{ weapons }}" as="w" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;justify-content:space-between;border-left:2px solid var(--line2);padding:8px 0 8px 11px;margin-bottom:5px;cursor:pointer;transition:border-color .18s;" style-hover="border-left-color:var(--ember);">
+                <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:var(--text);">{{ w.name }}</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);">{{ w.dmg }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- CONTENT -->
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <!-- tab strip -->
+          <div style="display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:22px;flex-wrap:wrap;">
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ember2);padding-bottom:11px;border-bottom:2px solid var(--ember);margin-bottom:-1px;">Compétences</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Caractéristiques</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Jet libre</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Inventaire</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Notes</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Cartes</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Alchimie</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding-bottom:11px;">Personnage</div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:14px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--warm);">Compétences</div>
+            <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;">cliquer pour lancer</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:24px;">
+            <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--line2);border-radius:3px;padding:11px 15px;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-left-color:var(--ember);background:var(--embersoft);">
+                <span style="flex:1;font-family:'Archivo',sans-serif;font-size:15px;font-weight:500;color:var(--text);">{{ s.name }}</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;">{{ s.link }}</span>
+                <div style="width:56px;height:3px;background:var(--track);border-radius:1px;overflow:hidden;"><div style="{{ s.barStyle }}"></div></div>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:18px;font-weight:700;color:var(--text);min-width:44px;text-align:right;">{{ s.pct }}%</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:14px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--warm);">Spéciaux</div>
+            <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <sc-for list="{{ specials }}" as="s" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--embersoft);border-radius:3px;padding:11px 15px;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-left-color:var(--ember);background:var(--embersoft);">
+                <div style="flex:1;">
+                  <div style="font-family:'Archivo',sans-serif;font-size:15px;font-weight:500;color:var(--text);">{{ s.name }}</div>
+                  <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);margin-top:1px;">{{ s.desc }}</div>
+                </div>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:18px;font-weight:700;color:var(--ember2);min-width:44px;text-align:right;">{{ s.pct }}%</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 04 · Caractéristiques -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">04 &mdash; Caractéristiques</div>
+    <div class="aria-frame" style="height:430px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;padding:24px 28px;">
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:16px;">Joueur / Caractéristiques</div>
+        <div style="display:flex;align-items:center;gap:13px;margin-bottom:18px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--warm);">Caractéristiques</div>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-right:6px;">Multiplicateur</span>
+          <div style="display:flex;gap:5px;">
+            <sc-for list="{{ mults }}" as="m" hint-placeholder-count="5">
+              <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;width:30px;height:28px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line2);border-radius:3px;color:var(--dim);cursor:pointer;">×{{ m }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:14px;">cliquer une caractéristique pour lancer (valeur × multiplicateur)</div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:11px;">
+          <sc-for list="{{ stats }}" as="st" hint-placeholder-count="6">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:22px 6px 18px;text-align:center;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-color:rgba(236,164,86,.5);background:var(--embersoft);">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:12px;">{{ st.k }}</div>
+              <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:42px;font-weight:700;color:var(--text);line-height:.9;">{{ st.v }}</div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.1em;color:var(--ember);text-transform:uppercase;margin-top:12px;opacity:.8;">jet ×3 = {{ st.v }}3%</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 · Jet libre + historique -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">05 &mdash; Jet libre &amp; historique</div>
+    <div class="aria-frame" style="height:520px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <!-- form -->
+        <div style="width:380px;flex-shrink:0;border-right:1px solid var(--line2);padding:24px 26px;background:var(--rail);">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:16px;">Joueur / Jet libre</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:7px;">Nom du jet</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:11px 13px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:var(--dim);margin-bottom:16px;">ex : Perception</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:7px;">Seuil (%)</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:11px 13px;font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;color:var(--text);margin-bottom:18px;">60</div>
+          <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);background:var(--ember);border-radius:3px;padding:13px 0;cursor:pointer;margin-bottom:24px;">Lancer</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:10px;">Dés simples</div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d4</div>
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d6</div>
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d8</div>
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d10</div>
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d20</div>
+            <div style="flex:1;min-width:48px;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:10px 0;cursor:pointer;transition:border-color .18s,color .18s;" style-hover="border-color:var(--ember);color:var(--ember2);">d100</div>
+          </div>
+        </div>
+        <!-- history -->
+        <div style="flex:1;padding:24px 26px;display:flex;flex-direction:column;min-height:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Historique</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);cursor:pointer;">Effacer</div>
+          </div>
+          <div style="display:flex;gap:7px;margin-bottom:14px;">
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);background:var(--ember);border-radius:20px;padding:5px 13px;cursor:pointer;">Tous</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Succès</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Échec</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Critique</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Dés</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;">
+            <sc-for list="{{ rollHistory }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);border-left:2px solid {{ r.color }};border-radius:3px;padding:11px 15px;">
+                <span style="flex:1;font-family:'Archivo',sans-serif;font-size:14.5px;color:var(--text);">{{ r.name }}</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;">{{ r.txt }}</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:22px;font-weight:700;color:{{ r.color }};min-width:44px;text-align:right;">{{ r.roll }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 · Inventaire -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">06 &mdash; Inventaire</div>
+    <div class="aria-frame" style="height:470px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;padding:24px 28px;">
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:16px;">Joueur / Inventaire</div>
+        <!-- money -->
+        <div style="display:flex;gap:12px;margin-bottom:20px;">
+          <sc-for list="{{ money }}" as="mo" hint-placeholder-count="3">
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:12px 16px;">
+              <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;">{{ mo.k }}</span>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-family:'Archivo',sans-serif;color:var(--faint);font-size:16px;cursor:pointer;">&minus;</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:22px;font-weight:700;color:var(--ember2);min-width:38px;text-align:center;">{{ mo.v }}</span>
+                <span style="font-family:'Archivo',sans-serif;color:var(--faint);font-size:16px;cursor:pointer;">+</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <!-- list header -->
+        <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;padding:0 15px 9px;border-bottom:1px solid var(--line);">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;">Objet</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;text-align:center;">Quantité</span>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <sc-for list="{{ inventory }}" as="it" hint-placeholder-count="6">
+            <div style="display:grid;grid-template-columns:1fr 120px;gap:12px;align-items:center;padding:10px 15px;border-bottom:1px solid var(--line);">
+              <span style="font-family:'Archivo',sans-serif;font-size:15px;color:var(--text);">{{ it.name }}</span>
+              <div style="display:flex;align-items:center;justify-content:center;gap:10px;">
+                <span style="font-family:'Archivo',sans-serif;color:var(--faint);font-size:15px;cursor:pointer;">&minus;</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:600;color:var(--text);min-width:24px;text-align:center;">{{ it.qty }}</span>
+                <span style="font-family:'Archivo',sans-serif;color:var(--faint);font-size:15px;cursor:pointer;">+</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:14px;font-family:'Archivo',sans-serif;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ember);cursor:pointer;">+ Ajouter un objet</div>
+      </div>
+    </div>
+  </div>
+  <!-- 07 · Notes (partagé) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">07 &mdash; Notes</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Design partagé Joueur &amp; MJ</div>
+    </div>
+    <div class="aria-frame" style="height:440px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <div style="width:260px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--rail);padding:18px 14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <span style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--warm);">Notes</span>
+            <div style="width:24px;height:24px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--ember);font-size:15px;cursor:pointer;">+</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <sc-for list="{{ notes }}" as="n" hint-placeholder-count="4">
+              <div style="font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);padding:10px 12px;border-left:2px solid var(--line2);border-radius:0 3px 3px 0;cursor:pointer;">{{ n.title }}</div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex:1;padding:22px 26px;display:flex;flex-direction:column;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:600;color:var(--warm);border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px;">Le pacte de Veldros</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:16px;color:var(--dim);line-height:1.7;flex:1;">Veldros exige le sceau avant la prochaine lune. Maelis pense qu’il s’agit d’un piège — l’encre du contrat change de couleur sous la flamme.<br><br>Ne pas mentionner la clef d’argent devant l’aubergiste.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 08 · Cartes (tirage) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">08 &mdash; Cartes &middot; tirage</div>
+    <div class="aria-frame" style="height:460px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;align-items:center;gap:40px;padding:24px 40px;">
+        <!-- deck -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+          <div style="width:120px;height:168px;border-radius:8px;background:linear-gradient(135deg,var(--deck1),var(--deck2));border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 12px 30px -12px rgba(0,0,0,.8);position:relative;">
+            <div style="width:88%;height:88%;border:1px solid rgba(236,164,86,.25);border-radius:5px;display:flex;align-items:center;justify-content:center;color:rgba(236,164,86,.4);font-size:34px;font-family:'Cormorant Garamond',serif;">&#9819;</div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.14em;color:var(--dim);">42 cartes</div>
+          <div style="display:flex;flex-direction:column;gap:6px;width:120px;">
+            <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:7px 0;cursor:pointer;">&#8635; Mélanger</div>
+            <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:7px 0;cursor:pointer;">&#10005; Exclusions</div>
+          </div>
+        </div>
+        <!-- drawn card -->
+        <div style="width:160px;height:224px;border-radius:10px;background:linear-gradient(160deg,var(--cardFace1),var(--cardFace2));display:flex;flex-direction:column;justify-content:space-between;padding:14px 16px;box-shadow:0 20px 50px -18px rgba(0,0,0,.85);">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:700;color:var(--cardRed);line-height:1;">D<br><span style="font-size:26px;">&#9829;</span></div>
+          <div style="text-align:center;font-family:'Cormorant Garamond',serif;font-size:54px;color:var(--cardRed);line-height:1;">&#9829;</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:700;color:var(--cardRed);line-height:1;text-align:right;transform:rotate(180deg);">D<br><span style="font-size:26px;">&#9829;</span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;">Dernier tirage</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:600;color:var(--warm);">Dame de Cœur</div>
+        </div>
+        <!-- tracker -->
+        <div style="margin-left:auto;width:230px;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:12px;">Suivi du talon</div>
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <sc-for list="{{ tracker }}" as="t" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span style="font-size:18px;color:{{ t.col }};width:20px;text-align:center;">{{ t.s }}</span>
+                <div style="flex:1;height:5px;background:var(--track);border-radius:3px;overflow:hidden;"><div style="width:{{ t.used }}0%;height:100%;background:var(--dim);border-radius:3px;"></div></div>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);min-width:42px;text-align:right;">{{ t.used }}/13</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 09 · Alchimie -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">09 &mdash; Alchimie</div>
+    <div class="aria-frame" style="height:400px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;padding:24px 28px;">
+        <div style="display:flex;align-items:center;gap:13px;margin-bottom:18px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--warm);">Potions</div>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+          <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ember);cursor:pointer;">+ Potion personnalisée</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+          <sc-for list="{{ potions }}" as="p" hint-placeholder-count="3">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                <span style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);line-height:1.1;">{{ p.name }}</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);border:1px solid var(--line2);border-radius:2px;padding:2px 7px;">×{{ p.qty }}</span>
+              </div>
+              <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--dim);line-height:1.4;flex:1;">{{ p.desc }}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:11px;">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;">Succès {{ p.chance }}%</span>
+                <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ember);cursor:pointer;">Utiliser &rarr;</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 10 · Fiche personnage (éditeur) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">10 &mdash; Fiche personnage &middot; éditeur</div>
+    <div class="aria-frame" style="height:640px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;height:100%;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:18px;">
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;">Joueur / Personnage</div>
+        <!-- Identité + Attributs row -->
+        <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:18px;">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:var(--ember2);margin-bottom:14px;">Identité</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Nom du personnage</div>
+            <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:10px 12px;font-family:'Cormorant Garamond',serif;font-size:17px;color:var(--text);margin-bottom:13px;">Kaelen Vorr</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Classe / Description</div>
+            <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:10px 12px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">Rôdeur des Marches grises</div>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:var(--ember2);margin-bottom:14px;">Attributs</div>
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:9px;">
+              <sc-for list="{{ stats }}" as="st" hint-placeholder-count="6">
+                <div style="text-align:center;">
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">{{ st.k }}</div>
+                  <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:11px 0;font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;color:var(--text);">{{ st.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <!-- Traits physiques -->
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:var(--ember2);margin-bottom:14px;">Traits physiques</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:13px;">
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Âge</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">31</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Taille</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">1m81</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Yeux</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">Gris ardoise</div></div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Histoire</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:11px 12px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--dim);line-height:1.6;min-height:60px;">Né dans les Marches grises, Kaelen traque les bêtes qui franchissent le Voile depuis l’enfance…</div>
+        </div>
+        <!-- Compétences editor -->
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:var(--ember2);margin-bottom:6px;">Compétences <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--faint);font-weight:500;">— seuil (%) · mod (±)</span></div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px 22px;margin-top:12px;">
+            <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="flex:1;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">{{ s.name }}</span>
+                <div style="width:54px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:6px 0;text-align:center;font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--text);">{{ s.pct }}</div>
+                <div style="width:44px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:6px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;color:var(--faint);">±0</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="align-self:flex-end;font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.16em;color:var(--ok);text-transform:uppercase;">&#10003; Sauvegardé</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11 · Carte de jet (reveal) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">11 &mdash; Carte de jet &middot; révélation</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Tweak « rollResult » : crit / succès / échec</div>
+    </div>
+    <div class="aria-frame" style="height:460px;background:radial-gradient(80% 80% at 50% 50%, rgba(8,10,14,.4), rgba(4,5,8,.9));display:flex;align-items:center;justify-content:center;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;width:360px;padding:40px 36px 30px;background:rgba(10,12,17,.9);border:1px solid var(--line2);border-radius:8px;text-align:center;box-shadow:{{ rollShadow }};animation:ariaGlow 2.6s infinite;">
+        <div style="position:absolute;top:12px;left:12px;width:16px;height:16px;border-top:1.5px solid {{ rollColor }};border-left:1.5px solid {{ rollColor }};opacity:.7;"></div>
+        <div style="position:absolute;top:12px;right:12px;width:16px;height:16px;border-top:1.5px solid {{ rollColor }};border-right:1.5px solid {{ rollColor }};opacity:.7;"></div>
+        <div style="position:absolute;bottom:12px;left:12px;width:16px;height:16px;border-bottom:1.5px solid {{ rollColor }};border-left:1.5px solid {{ rollColor }};opacity:.7;"></div>
+        <div style="position:absolute;bottom:12px;right:12px;width:16px;height:16px;border-bottom:1.5px solid {{ rollColor }};border-right:1.5px solid {{ rollColor }};opacity:.7;"></div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:19px;font-style:italic;color:var(--warm);margin-bottom:4px;">Kaelen Vorr</div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:{{ rollColor }};margin-bottom:10px;">{{ rollSkill }}</div>
+        <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:118px;font-weight:800;line-height:.82;color:{{ rollColor }};text-shadow:{{ rollTextGlow }};">{{ rollNum }}</div>
+        <div style="width:50px;height:1px;background:{{ rollColor }};margin:16px auto;opacity:.5;"></div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:600;color:var(--warm);">{{ rollVerdict }}</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--dim);margin-top:4px;">{{ rollSub }} &middot; seuil {{ rollSeuil }}</div>
+      </div>
+    </div>
+  </div>
+  <!-- ════════ SECTION III · MAÎTRE DE JEU ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--violet);">III</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Maître de Jeu</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:380px;text-align:right;line-height:1.7;">Même langage en violet. Jets + Jet MJ fusionnés en une console.</div>
+  </div>
+
+  <!-- 12 · Joueurs -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">12 &mdash; Coquille MJ &middot; Joueurs</div>
+    <div class="aria-frame" style="height:640px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <!-- GM command bar -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:16px;height:56px;padding:0 20px;background:linear-gradient(180deg,var(--chromeV1),var(--chromeV2));border-bottom:1px solid var(--line2);">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;letter-spacing:.16em;color:var(--violet);">ARIA</div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.16em;color:var(--violet);text-transform:uppercase;border:1px solid rgba(169,139,221,.3);padding:3px 8px;border-radius:3px;">MJ</div>
+        <div style="width:1px;height:22px;background:var(--line);"></div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:19px;color:var(--text);">Campagne des Cendres</div>
+        <div style="flex:1;"></div>
+        <div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:20px;padding:5px 14px;background:var(--field2);">
+          <span style="color:var(--violet);font-size:12px;">&#9834;</span>
+          <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);">Taverne — ambiance</span>
+        </div>
+        <div style="width:1px;height:22px;background:var(--line);"></div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.2em;color:var(--violet);border:1px solid rgba(169,139,221,.3);padding:5px 13px;border-radius:3px;">X7K2M</div>
+        <div style="width:30px;height:30px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;">&#9881;</div>
+      </div>
+      <!-- tab strip -->
+      <div style="position:relative;z-index:2;display:flex;gap:22px;padding:0 20px;background:var(--railV);border-bottom:1px solid var(--line);flex-wrap:wrap;">
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--violet2);padding:13px 0;border-bottom:2px solid var(--violet);margin-bottom:-1px;">Joueurs</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Monstres</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Jets</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Cartes</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Alchimie</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Fichiers</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Musique</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:13px 0;">Notes</div>
+      </div>
+      <!-- content -->
+      <div style="position:relative;z-index:2;flex:1;overflow-y:auto;padding:20px;">
+        <!-- bulk bar -->
+        <div style="display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:11px 16px;margin-bottom:18px;">
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;">Tous les joueurs</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:3px 10px;">démo interactive &mdash; cliquez</span>
+          <div style="flex:1;"></div>
+          <div onClick="{{ resetPlayers }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:8px 14px;cursor:pointer;transition:background .15s;" style-hover="background:var(--field2);">&#8635; Réinit.</div>
+          <div onClick="{{ damageAll }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bad);border:1px solid rgba(226,90,79,.3);border-radius:3px;padding:8px 14px;cursor:pointer;transition:background .15s;" style-hover="background:rgba(226,90,79,.13);">&#9876; Tous</div>
+          <div onClick="{{ healAll }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ok);border:1px solid rgba(91,201,142,.3);border-radius:3px;padding:8px 14px;cursor:pointer;transition:background .15s;" style-hover="background:rgba(91,201,142,.13);">&#9829; Tous</div>
+        </div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">Joueurs connectés</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+          <sc-for list="{{ gmPlayers }}" as="p" hint-placeholder-count="4">
+            <div style="position:relative;background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow:hidden;filter:{{ p.cardFilter }};opacity:{{ p.cardOpacity }};transform:{{ p.cardTransform }};transition:filter .55s ease,opacity .55s ease;">
+              <div style="{{ p.glowStyle }}"></div>
+              <div style="{{ p.flashStyle }}"></div>
+              <div style="position:relative;height:118px;background:repeating-linear-gradient(135deg,var(--feed1) 0 12px,var(--feed2) 12px 24px);display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--line);">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:rgba(120,134,158,.4);text-transform:uppercase;">caméra</span>
+                <div style="position:absolute;top:9px;left:9px;width:6px;height:6px;border-radius:50%;background:{{ p.col }};animation:ariaPulse 2.4s infinite;"></div>
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,6,9,.55);opacity:{{ p.deadOpacity }};transition:opacity .55s ease;pointer-events:none;"><span style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:700;letter-spacing:.34em;color:var(--bad);text-indent:.34em;">MORT</span></div>
+              </div>
+              <div style="padding:13px 15px;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+                  <span style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:{{ p.nameColor }};">{{ p.name }}</span>
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;">{{ p.cls }}</span>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:5px;margin-bottom:6px;">
+                  <span style="{{ p.numStyle }}">{{ p.displayHp }}</span>
+                  <span style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--dim);">/ {{ p.max }} PV</span>
+                </div>
+                <div style="height:5px;background:var(--track);border-radius:3px;overflow:hidden;margin-bottom:12px;"><div style="{{ p.hpStyle }}"></div></div>
+                <div style="display:flex;gap:7px;">
+                  <div onClick="{{ p.onDmg }}" style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--bad);border:1px solid rgba(226,90,79,.3);border-radius:3px;padding:7px 0;cursor:pointer;transition:background .15s;" style-hover="background:rgba(226,90,79,.13);">&#9876; Coup</div>
+                  <div onClick="{{ p.onCrit }}" style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ember2);border:1px solid var(--embersoft);border-radius:3px;padding:7px 0;cursor:pointer;transition:background .15s;" style-hover="background:var(--embersoft);">&#10022; Crit</div>
+                  <div onClick="{{ p.onHeal }}" style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ok);border:1px solid rgba(91,201,142,.3);border-radius:3px;padding:7px 0;cursor:pointer;transition:background .15s;" style-hover="background:rgba(91,201,142,.13);">&#9829; Soin</div>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13 · Monstres -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">13 &mdash; Monstres</div>
+    <div class="aria-frame" style="height:560px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <!-- add form -->
+        <div style="width:340px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--railV);padding:22px 24px;overflow-y:auto;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--violet2);margin-bottom:16px;">+ Nouveau monstre</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Nom</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:10px 12px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--dim);margin-bottom:14px;">ex : Gobelin éclaireur</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">PV max</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">20</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Armure</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">2</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:18px;">
+            <sc-for list="{{ stats }}" as="st" hint-placeholder-count="5">
+              <div style="text-align:center;"><div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">{{ st.k }}</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">10</div></div>
+            </sc-for>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">Attaques</div>
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px;">
+            <div style="flex:1;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 10px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Dague rouillée</div>
+            <div style="width:42px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">45</div>
+            <div style="width:52px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">1d4</div>
+          </div>
+          <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--violet);cursor:pointer;margin-bottom:18px;">+ Attaque</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);background:var(--violet);border-radius:3px;padding:11px 0;cursor:pointer;">Ajouter</div>
+            <div style="display:flex;align-items:center;gap:5px;"><span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint);">×</span><div style="width:42px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:8px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">1</div></div>
+          </div>
+        </div>
+        <!-- monster list -->
+        <div style="flex:1;padding:22px 24px;overflow-y:auto;">
+          <div style="display:flex;align-items:center;gap:13px;margin-bottom:14px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Monstres actifs</div>
+            <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+          </div>
+          <div style="display:flex;gap:7px;margin-bottom:14px;">
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--violet2);border:1px solid rgba(169,139,221,.35);border-radius:20px;padding:5px 13px;cursor:pointer;">Groupe A</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Groupe B</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Groupe C</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;">
+            <sc-for list="{{ monsters }}" as="m" hint-placeholder-count="4">
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px 16px;opacity:{{ m.cardOpacity }};">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:9px;">
+                  <span style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:{{ m.nameColor }};">{{ m.name }}</span>
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;">Armure {{ m.armor }} · Grp {{ m.grp }}</span>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:5px;margin-bottom:6px;">
+                  <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:22px;font-weight:700;color:{{ m.col }};line-height:1;">{{ m.hp }}</span>
+                  <span style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--dim);">/ {{ m.max }}</span>
+                </div>
+                <div style="height:5px;background:var(--track);border-radius:3px;overflow:hidden;"><div style="{{ m.hpStyle }}"></div></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 14 · Jets (console + fil fusionnés) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">14 &mdash; Jets</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--violet);text-transform:uppercase;border:1px solid rgba(169,139,221,.25);border-radius:20px;padding:4px 12px;">Fusion : « Jet MJ » (console) + « Jets » (fil)</div>
+    </div>
+    <div class="aria-frame" style="height:580px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <!-- console -->
+        <div style="width:380px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--railV);padding:22px 24px;overflow-y:auto;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:14px;">Console de jet</div>
+          <!-- free roll -->
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px;margin-bottom:14px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:600;color:var(--violet2);margin-bottom:12px;">Jet libre</div>
+            <div style="display:flex;gap:9px;margin-bottom:12px;">
+              <div style="flex:1;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);">Nom du jet</div>
+              <div style="width:70px;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 0;text-align:center;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">50</div>
+            </div>
+            <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink);background:var(--violet);border-radius:3px;padding:10px 0;cursor:pointer;">Lancer</div>
+          </div>
+          <!-- combat -->
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px;margin-bottom:14px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:600;color:var(--violet2);margin-bottom:12px;">Combat — Monstre</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 12px;margin-bottom:8px;cursor:pointer;"><span style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Ogre des cavernes</span><span style="color:var(--faint);font-size:11px;">&#9662;</span></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 12px;margin-bottom:12px;cursor:pointer;"><span style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Massue — 55% · 2d8</span><span style="color:var(--faint);font-size:11px;">&#9662;</span></div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <div style="flex:1;background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:8px 11px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--faint);">Dégâts</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bad);border:1px solid rgba(226,90,79,.3);border-radius:3px;padding:9px 13px;cursor:pointer;">&#9876; Attaquer</div>
+            </div>
+          </div>
+          <!-- dice tray -->
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:9px;">Dés simples</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d4</div>
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d6</div>
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d8</div>
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d10</div>
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d20</div>
+            <div style="flex:1;min-width:46px;text-align:center;font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;color:var(--text);border:1px solid var(--line2);border-radius:3px;padding:9px 0;cursor:pointer;">d100</div>
+          </div>
+        </div>
+        <!-- live feed -->
+        <div style="flex:1;padding:22px 24px;display:flex;flex-direction:column;min-height:0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Fil des jets</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);cursor:pointer;">Effacer</div>
+          </div>
+          <div style="display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;">
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);background:var(--violet);border-radius:20px;padding:5px 13px;cursor:pointer;">Tous</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Succès</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Échec</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Critique</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;overflow-y:auto;">
+            <sc-for list="{{ rollsFeed }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--line);border-left:2px solid {{ r.color }};border-radius:3px;padding:12px 16px;">
+                <div style="flex:1;">
+                  <div style="font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:var(--warm);line-height:1.1;">{{ r.who }}</div>
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase;margin-top:2px;">{{ r.skill }} · seuil {{ r.seuil }}</div>
+                </div>
+                <div style="text-align:right;">
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.1em;color:{{ r.color }};text-transform:uppercase;">{{ r.txt }}</div>
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;color:var(--faint);margin-top:2px;">{{ r.t }}</div>
+                </div>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:26px;font-weight:700;color:{{ r.color }};min-width:48px;text-align:right;">{{ r.roll }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 15 · Cartes (MJ) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">15 &mdash; Cartes (MJ)</div>
+    <div class="aria-frame" style="height:470px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <!-- GM deck -->
+        <div style="width:340px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--railV);padding:22px 24px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;"><span style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--violet2);">Deck MJ</span><span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:13px;color:var(--faint);">privé</span></div>
+          <div style="display:flex;gap:20px;align-items:center;">
+            <div style="width:96px;height:134px;border-radius:7px;background:linear-gradient(135deg,var(--deckV1),var(--deckV2));border:1px solid rgba(169,139,221,.3);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 10px 26px -12px rgba(0,0,0,.8);">
+              <div style="width:86%;height:86%;border:1px solid rgba(169,139,221,.3);border-radius:4px;display:flex;align-items:center;justify-content:center;color:rgba(169,139,221,.5);font-size:28px;font-family:'Cormorant Garamond',serif;">&#9819;</div>
+            </div>
+            <div style="flex:1;">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.14em;color:var(--dim);margin-bottom:12px;">54 cartes</div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:6px 0;cursor:pointer;">&#8635; Mélanger</div>
+                <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:6px 0;cursor:pointer;">&#10005; Exclusions</div>
+              </div>
+            </div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin:20px 0 12px;">Suivi du talon</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <sc-for list="{{ tracker }}" as="t" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:11px;">
+                <span style="font-size:16px;color:{{ t.col }};width:18px;text-align:center;">{{ t.s }}</span>
+                <div style="flex:1;height:5px;background:var(--track);border-radius:3px;overflow:hidden;"><div style="width:{{ t.used }}0%;height:100%;background:var(--dim);border-radius:3px;"></div></div>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;color:var(--dim);min-width:40px;text-align:right;">{{ t.used }}/13</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <!-- player draw + history -->
+        <div style="flex:1;padding:22px 24px;display:flex;flex-direction:column;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:14px;">Tirages joueurs — en direct</div>
+          <div style="display:flex;gap:16px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px;margin-bottom:18px;">
+            <div style="width:80px;height:112px;border-radius:7px;background:linear-gradient(160deg,var(--cardFace1),var(--cardFace2));display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:700;color:var(--cardInk);box-shadow:0 10px 24px -12px rgba(0,0,0,.7);">7<span style="color:var(--cardInk);font-size:24px;">&#9824;</span></div>
+            <div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">Kaelen Vorr vient de tirer</div>
+              <div style="font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:600;color:var(--warm);">7 de Pique</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--warm);">Historique des tirages</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);cursor:pointer;">Effacer</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;">
+            <div style="display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 14px;"><span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Kaelen Vorr</span><span style="font-family:'Cormorant Garamond',serif;font-size:15px;color:var(--text);">7 de Pique</span></div>
+            <div style="display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 14px;"><span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Maelis Doré</span><span style="font-family:'Cormorant Garamond',serif;font-size:15px;color:var(--cardRed);">Dame de Cœur</span></div>
+            <div style="display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 14px;"><span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">Brogan Tael</span><span style="font-family:'Cormorant Garamond',serif;font-size:15px;color:var(--text);">Roi de Trèfle</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 16 · Alchimie (grimoire) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">16 &mdash; Alchimie &middot; grimoire (MJ)</div>
+    <div class="aria-frame" style="height:440px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;display:flex;height:100%;">
+        <div style="width:340px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--railV);padding:22px 24px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--violet2);margin-bottom:16px;">+ Nouvelle potion</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Nom</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--dim);margin-bottom:13px;">ex : Potion de soin</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Effet</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);margin-bottom:13px;">Restaure 1d6+2 PV</div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Ingrédients</div>
+          <div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:9px 11px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);margin-bottom:18px;">Herbe d’éclat, eau de source</div>
+          <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);background:var(--violet);border-radius:3px;padding:11px 0;cursor:pointer;">Ajouter au grimoire</div>
+        </div>
+        <div style="flex:1;padding:22px 24px;overflow-y:auto;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:14px;">Grimoire — accorder aux joueurs</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <sc-for list="{{ potions }}" as="p" hint-placeholder-count="3">
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:15px 17px;display:flex;align-items:center;gap:16px;">
+                <div style="flex:1;">
+                  <div style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--warm);">{{ p.name }}</div>
+                  <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);margin-top:1px;">{{ p.desc }} · succès {{ p.chance }}%</div>
+                </div>
+                <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--violet);border:1px solid rgba(169,139,221,.3);border-radius:3px;padding:8px 14px;cursor:pointer;">Accorder à…</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 17 · Fichiers -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">17 &mdash; Fichiers de campagne</div>
+    <div class="aria-frame" style="height:400px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;padding:24px 28px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Fichiers de campagne</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--violet);border:1px solid rgba(169,139,221,.3);border-radius:3px;padding:8px 16px;cursor:pointer;">+ Ajouter un fichier</div>
+        </div>
+        <div style="display:flex;gap:7px;margin-bottom:16px;">
+          <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--violet2);border:1px solid rgba(169,139,221,.35);border-radius:20px;padding:5px 13px;cursor:pointer;">Tous</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Cartes</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">Documents</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:5px 13px;cursor:pointer;">PNJ</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <sc-for list="{{ files }}" as="f" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:15px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:12px 16px;">
+              <div style="width:38px;height:38px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.06em;color:var(--violet);text-transform:uppercase;">{{ f.kind }}</div>
+              <div style="flex:1;">
+                <div style="font-family:'Archivo',sans-serif;font-size:14.5px;color:var(--text);">{{ f.name }}</div>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;margin-top:1px;">{{ f.grp }} · {{ f.size }}</div>
+              </div>
+              <div style="font-family:'Archivo',sans-serif;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ok);border:1px solid rgba(91,201,142,.3);border-radius:3px;padding:6px 12px;cursor:pointer;">Partagé</div>
+              <div style="color:var(--faint);font-size:16px;cursor:pointer;">&#10005;</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 18 · Musique -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">18 &mdash; Musique</div>
+    <div class="aria-frame" style="height:500px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;padding:24px 28px;">
+        <!-- now playing -->
+        <div style="background:linear-gradient(180deg,var(--raise),var(--panel));border:1px solid var(--line2);border-radius:5px;padding:20px 22px;margin-bottom:20px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <span style="color:var(--violet);font-size:18px;">&#9834;</span>
+            <div style="flex:1;">
+              <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--warm);">Taverne — ambiance</div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.14em;color:var(--dim);text-transform:uppercase;">Playlist : Exploration</div>
+            </div>
+            <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);">2:18 / 3:42</span>
+          </div>
+          <div style="height:4px;background:var(--track);border-radius:2px;overflow:hidden;margin-bottom:16px;"><div style="width:62%;height:100%;background:linear-gradient(90deg,var(--violet),var(--violet2));"></div></div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="color:var(--dim);font-size:15px;cursor:pointer;">&#9198;</span>
+            <div style="width:42px;height:42px;border-radius:50%;background:var(--violet);display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:14px;cursor:pointer;">&#9208;</div>
+            <span style="color:var(--dim);font-size:15px;cursor:pointer;">&#9209;</span>
+            <span style="color:var(--dim);font-size:15px;cursor:pointer;">&#9197;</span>
+            <span style="color:var(--dim);font-size:14px;cursor:pointer;">&#8635;</span>
+            <div style="flex:1;"></div>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;">Fondu 3s</span>
+            <span style="color:var(--dim);font-size:13px;">&#9834;</span>
+            <div style="width:90px;height:4px;background:var(--track2);border-radius:2px;"><div style="width:80%;height:100%;background:var(--dim);border-radius:2px;"></div></div>
+          </div>
+        </div>
+        <!-- playlists + tracks -->
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <sc-for list="{{ playlists }}" as="pl" hint-placeholder-count="3">
+            <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:20px;padding:6px 15px;cursor:pointer;">{{ pl.n }}</div>
+          </sc-for>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          <sc-for list="{{ tracks }}" as="tr" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:13px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 15px;cursor:pointer;transition:border-color .18s;" style-hover="border-color:rgba(169,139,221,.4);">
+              <span style="color:var(--faint);font-size:12px;width:14px;">&#9834;</span>
+              <span style="flex:1;font-family:'Archivo',sans-serif;font-size:14px;color:var(--text);">{{ tr.title }}</span>
+              <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:12px;color:var(--dim);">{{ tr.dur }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- 19 · Détails joueur (modal) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">19 &mdash; Détails joueur (vue MJ)</div>
+    <div class="aria-frame" style="height:520px;background:radial-gradient(90% 90% at 50% 40%, rgba(12,10,18,.5), rgba(5,4,8,.92));display:flex;align-items:center;justify-content:center;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;width:620px;background:var(--panel);border:1px solid var(--line2);border-radius:6px;box-shadow:0 30px 80px -30px var(--frameShadow);overflow:hidden;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:22px 26px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--chromeV1),var(--chromeV2));">
+          <div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:600;color:var(--warm);line-height:1.05;">Maelis Doré</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.18em;color:var(--violet);text-transform:uppercase;margin-top:3px;">Mage · Cercle d’ambre</div>
+          </div>
+          <div style="width:30px;height:30px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;cursor:pointer;">&#10005;</div>
+        </div>
+        <div style="padding:22px 26px;">
+          <div style="display:flex;gap:14px;margin-bottom:20px;">
+            <div style="flex:1;background:var(--field2);border:1px solid var(--line);border-radius:4px;padding:14px;text-align:center;">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:7px;">Points de vie</div>
+              <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:38px;font-weight:700;color:var(--warn);line-height:.9;">11<span style="font-size:15px;color:var(--dim);font-weight:400;"> / 16</span></div>
+            </div>
+            <div style="flex:2;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;">
+              <sc-for list="{{ stats }}" as="st" hint-placeholder-count="6">
+                <div style="background:var(--field2);border:1px solid var(--line);border-radius:3px;padding:11px 0;text-align:center;">
+                  <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;">{{ st.k }}</div>
+                  <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:18px;font-weight:700;color:var(--text);">{{ st.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-bottom:11px;">Compétences</div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;">
+            <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+              <div style="display:flex;align-items:center;gap:10px;padding:5px 0;">
+                <span style="flex:1;font-family:'Archivo',sans-serif;font-size:13.5px;color:var(--text);">{{ s.name }}</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--dim);">{{ s.pct }}%</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ SECTION IV · DIFFUSION ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--ember);">IV</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Diffusion</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:380px;text-align:right;line-height:1.7;">Le pôle public, conçu en premier. Le reste de l’UI en hérite.</div>
+  </div>
+
+  <!-- 20 · Overlay OBS -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">20 &mdash; Overlay OBS · sortie diffusion</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Tweak « rollResult »</div>
+    </div>
+    <div class="aria-frame" style="height:600px;background:repeating-linear-gradient(135deg,var(--feed1) 0 16px,var(--rail) 16px 32px);">
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.3em;color:rgba(120,134,158,.3);text-transform:uppercase;">flux caméra — 1920 × 1080</div></div>
+      <div style="position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 50%, transparent 40%, rgba(5,6,9,.55) 100%);pointer-events:none;"></div>
+      <!-- roll card -->
+      <div style="position:absolute;top:50%;right:60px;transform:translateY(-50%);width:316px;padding:28px 28px 24px;background:rgba(10,12,17,.84);border:1px solid var(--line2);border-radius:6px;text-align:center;box-shadow:{{ rollShadow }};animation:ariaGlow 2.6s infinite;">
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:{{ rollColor }};margin-bottom:6px;">{{ rollSkill }}</div>
+        <div style="width:42px;height:1px;background:{{ rollColor }};margin:0 auto 14px;opacity:.6;"></div>
+        <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:100px;font-weight:800;line-height:.84;color:{{ rollColor }};text-shadow:{{ rollTextGlow }};">{{ rollNum }}</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:25px;font-weight:600;color:var(--warm);margin-top:13px;">{{ rollVerdict }}</div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-top:7px;">seuil {{ rollSeuil }} · d100</div>
+      </div>
+      <!-- lower third -->
+      <div style="position:absolute;left:46px;bottom:42px;display:flex;align-items:stretch;background:rgba(10,12,17,.84);border:1px solid var(--line2);border-radius:5px;overflow:hidden;min-width:420px;">
+        <div style="width:4px;background:var(--ember);"></div>
+        <div style="padding:15px 22px;display:flex;align-items:center;gap:26px;flex:1;">
+          <div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:600;color:var(--warm);line-height:1.1;">Kaelen Vorr</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;margin-top:2px;">Rôdeur</div>
+          </div>
+          <div style="flex:1;">
+            <div style="display:flex;align-items:baseline;justify-content:flex-end;gap:5px;margin-bottom:6px;"><span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:29px;font-weight:700;color:var(--ok);line-height:1;">18</span><span style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);">/ 24 PV</span></div>
+            <div style="height:6px;background:var(--track);border-radius:3px;overflow:hidden;"><div style="width:75%;height:100%;background:linear-gradient(90deg,var(--hp1),var(--ok));"></div></div>
+          </div>
+        </div>
+      </div>
+      <div style="position:absolute;top:32px;right:34px;font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase;border:1px solid var(--line2);border-radius:20px;padding:6px 14px;background:rgba(10,12,17,.7);">&#9683; dés 3D</div>
+    </div>
+  </div>
+
+  <!-- 21 · Éditeur d'overlay -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">21 &mdash; Éditeur d'overlay</div>
+    <div class="aria-frame" style="height:560px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <!-- editor topbar -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:14px;height:52px;padding:0 20px;background:linear-gradient(180deg,var(--chromeV1),var(--chromeV2));border-bottom:1px solid var(--line2);">
+        <span style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--violet2);">Éditeur d'overlay</span>
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;">Campagne des Cendres</span>
+        <div style="flex:1;"></div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:7px 13px;cursor:pointer;">&#8862; Grille</div>
+        <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);background:var(--violet);border-radius:3px;padding:7px 15px;cursor:pointer;">Sauvegarder</div>
+      </div>
+      <div style="position:relative;z-index:2;display:flex;flex:1;min-height:0;">
+        <!-- palette -->
+        <div style="width:190px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--railV);padding:16px 14px;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:10px;">Persistants</div>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px;">
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 11px;cursor:grab;">Barre de PV</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 11px;cursor:grab;">Plaque nominative</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 11px;cursor:grab;">Caméra joueur</div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:10px;">Événements</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 11px;cursor:grab;">Carte de jet</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 11px;cursor:grab;">Tirage de carte</div>
+          </div>
+        </div>
+        <!-- canvas -->
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:24px;background:repeating-conic-gradient(var(--rail) 0% 25%, var(--feed1) 0% 50%) 0 0 / 28px 28px;">
+          <div style="width:100%;max-width:620px;aspect-ratio:16/9;background:repeating-linear-gradient(135deg,var(--feed1) 0 14px,var(--rail) 14px 28px);border:1px solid var(--line2);border-radius:4px;position:relative;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:100% 100%, 34px 34px, 34px 34px;">
+            <!-- placed widgets -->
+            <div style="position:absolute;left:6%;bottom:9%;width:46%;background:rgba(10,12,17,.85);border:1px solid var(--line2);border-radius:3px;padding:9px 12px;"><div style="font-family:'Cormorant Garamond',serif;font-size:14px;color:var(--warm);">Kaelen Vorr</div><div style="height:5px;background:rgba(255,255,255,.08);border-radius:3px;margin-top:6px;"><div style="width:75%;height:100%;background:var(--ok);border-radius:3px;"></div></div></div>
+            <!-- selected -->
+            <div style="position:absolute;right:7%;top:18%;width:30%;background:rgba(10,12,17,.85);border:1.5px solid var(--ember);border-radius:4px;padding:12px;text-align:center;box-shadow:0 0 0 3px var(--embersoft);">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;">Tir à l'arc</div>
+              <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:34px;font-weight:800;color:var(--ember);line-height:1;margin-top:4px;">07</div>
+              <div style="position:absolute;width:8px;height:8px;background:var(--ember);border-radius:50%;top:-4px;left:-4px;"></div>
+              <div style="position:absolute;width:8px;height:8px;background:var(--ember);border-radius:50%;top:-4px;right:-4px;"></div>
+              <div style="position:absolute;width:8px;height:8px;background:var(--ember);border-radius:50%;bottom:-4px;left:-4px;"></div>
+              <div style="position:absolute;width:8px;height:8px;background:var(--ember);border-radius:50%;bottom:-4px;right:-4px;"></div>
+            </div>
+          </div>
+        </div>
+        <!-- props -->
+        <div style="width:210px;flex-shrink:0;border-left:1px solid var(--line2);background:var(--railV);padding:16px 16px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:600;color:var(--ember2);margin-bottom:14px;">Carte de jet</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px;">
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">X (%)</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">63</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">Y (%)</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">18</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">Largeur</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">30</div></div>
+            <div><div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">Hauteur</div><div style="background:var(--field);border:1px solid var(--line2);border-radius:3px;padding:7px 9px;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">22</div></div>
+          </div>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">Opacité</div>
+          <div style="height:4px;background:var(--track2);border-radius:2px;margin-bottom:6px;"><div style="width:88%;height:100%;background:var(--ember);border-radius:2px;"></div></div>
+          <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:11px;color:var(--dim);margin-bottom:18px;">0.88</div>
+          <div style="text-align:center;font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--bad);border:1px solid rgba(226,90,79,.3);border-radius:3px;padding:9px 0;cursor:pointer;">Supprimer</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ════════ SECTION V · PROPOSITION ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--ember);">V</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Proposition &mdash; Vue scind&eacute;e</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:430px;text-align:right;line-height:1.7;">Deux panneaux, un onglet. La coquille reste ; seul le contenu se divise.</div>
+  </div>
+
+  <!-- intent note -->
+  <div style="width:1240px;max-width:100%;margin-bottom:26px;display:flex;gap:22px;align-items:flex-start;">
+    <div style="flex:1;font-family:'Cormorant Garamond',serif;font-size:18px;font-style:italic;color:var(--dim);line-height:1.6;max-width:720px;">Mon parti&nbsp;: ne jamais scinder la <span style="color:var(--ember2);font-style:normal;">barre de commande</span> ni la <span style="color:var(--ember2);font-style:normal;">colonne du personnage</span> &mdash; ce sont des rep&egrave;res permanents. On ne divise que la <span style="color:var(--ember2);font-style:normal;">zone de contenu</span>, celle qui porte d&eacute;j&agrave; les onglets. Chaque panneau garde sa propre barre d&rsquo;onglets&nbsp;: &agrave; gauche les Comp&eacute;tences, &agrave; droite les Notes &mdash; tout en lan&ccedil;ant ses jets dans la m&ecirc;me partie.</div>
+    <div style="width:230px;flex-shrink:0;border-left:1px solid var(--line2);padding-left:18px;display:flex;flex-direction:column;gap:11px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;">Trois r&egrave;gles</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">01</span>&nbsp;&nbsp;Coquille intacte, contenu scind&eacute;.</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">02</span>&nbsp;&nbsp;Onglets ind&eacute;pendants par panneau.</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">03</span>&nbsp;&nbsp;Sous 900&nbsp;px&nbsp;: repli en onglets.</div>
+    </div>
+  </div>
+
+  <!-- 22 · Vue scindée (hero) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">22 &mdash; Vue scind&eacute;e &middot; Comp&eacute;tences | Notes</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Coquille partag&eacute;e &middot; s&eacute;parateur glissable</div>
+    </div>
+    <div class="aria-frame" style="height:720px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+
+      <!-- COMMAND BAR (shared, unsplit) -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:0;height:56px;padding:0 18px;background:linear-gradient(180deg,var(--chrome1),var(--rail));border-bottom:1px solid var(--line2);">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;letter-spacing:.16em;color:var(--ember2);">ARIA</div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 16px;"></div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--text);line-height:1.1;">Kaelen Vorr</span>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;">R&ocirc;deur</span>
+        </div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 18px;"></div>
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-right:10px;">Mod</span>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--bad);border:1px solid rgba(226,90,79,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">&minus;10</div>
+          <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--dim);min-width:42px;text-align:center;border:1px solid var(--line2);border-radius:3px;padding:3px 0;background:var(--field2);">&plusmn;0</div>
+          <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--ok);border:1px solid rgba(91,201,142,.25);padding:5px 9px;border-radius:3px;cursor:pointer;">+10</div>
+        </div>
+        <div style="flex:1;"></div>
+        <div style="display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:20px;padding:5px 14px;background:var(--field2);">
+          <span style="color:var(--ember);font-size:12px;">&#9834;</span>
+          <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:var(--dim);">Taverne &mdash; ambiance</span>
+          <div style="width:54px;height:3px;background:var(--track2);border-radius:2px;"><div style="width:62%;height:100%;background:var(--dim);border-radius:2px;"></div></div>
+        </div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 14px;"></div>
+        <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.2em;color:var(--ember);border:1px solid rgba(236,164,86,.3);padding:5px 11px;border-radius:3px;">X7K2M</div>
+        <div style="width:30px;height:30px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:14px;margin-left:12px;">&#9881;</div>
+      </div>
+
+      <!-- MAIN -->
+      <div style="position:relative;z-index:2;display:flex;flex:1;min-height:0;">
+        <!-- SIDEBAR (shared, unsplit) -->
+        <div style="width:248px;flex-shrink:0;background:var(--rail);border-right:1px solid var(--line2);padding:18px 16px;display:flex;flex-direction:column;gap:15px;">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:15px 14px;text-align:center;">
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:7px;">Points de vie</div>
+            <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:54px;font-weight:700;line-height:.9;color:var(--ok);">18</div>
+            <div style="font-family:'Archivo',sans-serif;font-size:12px;color:var(--dim);margin-top:3px;">/ 24</div>
+            <div style="height:4px;background:var(--track);border-radius:2px;margin-top:12px;overflow:hidden;"><div style="width:75%;height:100%;background:linear-gradient(90deg,var(--hp1),var(--ok));"></div></div>
+          </div>
+          <div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">R&eacute;actions</div>
+            <div style="display:flex;gap:8px;">
+              <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 6px;text-align:center;"><div style="font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text);">Parade</div><div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;color:var(--ember2);margin-top:2px;">52%</div></div>
+              <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 6px;text-align:center;"><div style="font-family:'Archivo',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text);">Esquive</div><div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;color:var(--ember2);margin-top:2px;">58%</div></div>
+            </div>
+          </div>
+          <div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;">Armes</div>
+            <sc-for list="{{ weapons }}" as="w" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;justify-content:space-between;border-left:2px solid var(--line2);padding:8px 0 8px 11px;margin-bottom:5px;">
+                <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:var(--text);">{{ w.name }}</span>
+                <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);">{{ w.dmg }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:auto;font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;line-height:1.7;opacity:.8;">Colonne partag&eacute;e<br>&mdash; jamais scind&eacute;e</div>
+        </div>
+
+        <!-- SPLIT CONTENT REGION -->
+        <div style="flex:1;display:flex;min-width:0;">
+
+          <!-- PANE LEFT · Compétences (inactive focus) -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-top:2px solid transparent;">
+            <!-- pane tab strip -->
+            <div style="display:flex;align-items:center;gap:18px;padding:0 18px;height:46px;border-bottom:1px solid var(--line);background:var(--field2);">
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ember2);height:100%;display:flex;align-items:center;border-bottom:2px solid var(--ember);margin-bottom:-1px;">Comp&eacute;tences</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">Caract&eacute;ristiques</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">Inventaire</div>
+              <div style="flex:1;"></div>
+              <div title="D&eacute;tacher / scinder ce panneau" style="width:26px;height:26px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);cursor:pointer;"><div style="display:flex;gap:2px;"><div style="width:5px;height:11px;border:1px solid currentColor;border-radius:1px;"></div><div style="width:5px;height:11px;border:1px solid currentColor;border-radius:1px;"></div></div></div>
+            </div>
+            <!-- pane body -->
+            <div style="flex:1;overflow-y:auto;padding:18px 18px 20px;">
+              <div style="display:flex;align-items:center;gap:11px;margin-bottom:13px;">
+                <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Comp&eacute;tences</div>
+                <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;">cliquer pour lancer</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px;">
+                <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+                  <div style="display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--line2);border-radius:3px;padding:10px 13px;cursor:pointer;transition:border-color .18s,background .18s;" style-hover="border-left-color:var(--ember);background:var(--embersoft);">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:14px;font-weight:500;color:var(--text);">{{ s.name }}</span>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;">{{ s.link }}</span>
+                    <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:17px;font-weight:700;color:var(--text);min-width:42px;text-align:right;">{{ s.pct }}%</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <!-- DRAGGABLE DIVIDER -->
+          <div title="Glisser pour r&eacute;partir" style="width:9px;flex-shrink:0;cursor:col-resize;position:relative;display:flex;align-items:center;justify-content:center;background:var(--rail);border-left:1px solid var(--line2);border-right:1px solid var(--line2);" style-hover="background:var(--embersoft);">
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div>
+              <div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div>
+              <div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div>
+            </div>
+          </div>
+
+          <!-- PANE RIGHT · Notes (focused) -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-top:2px solid var(--ember);">
+            <!-- pane tab strip -->
+            <div style="display:flex;align-items:center;gap:18px;padding:0 18px;height:46px;border-bottom:1px solid var(--line);background:var(--embersoft);">
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ember2);height:100%;display:flex;align-items:center;border-bottom:2px solid var(--ember);margin-bottom:-1px;">Notes</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">Documents</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);">Cartes</div>
+              <div style="flex:1;"></div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.18em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:3px 9px;">En focus</div>
+              <div title="Fermer le panneau" style="width:26px;height:26px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px;cursor:pointer;">&times;</div>
+            </div>
+            <!-- pane body: note list + open note -->
+            <div style="flex:1;display:flex;min-height:0;">
+              <div style="width:178px;flex-shrink:0;border-right:1px solid var(--line);padding:14px 12px;overflow-y:auto;">
+                <sc-for list="{{ notes }}" as="n" hint-placeholder-count="4">
+                  <div style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);padding:9px 11px;border-left:2px solid var(--line2);border-radius:0 3px 3px 0;cursor:pointer;margin-bottom:3px;">{{ n.title }}</div>
+                </sc-for>
+              </div>
+              <div style="flex:1;padding:18px 20px;overflow-y:auto;min-width:0;">
+                <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);border-bottom:1px solid var(--line);padding-bottom:11px;margin-bottom:14px;">Le pacte de Veldros</div>
+                <div style="font-family:'Cormorant Garamond',serif;font-size:15px;color:var(--dim);line-height:1.7;">Veldros exige le sceau avant la prochaine lune. Maelis pense qu&rsquo;il s&rsquo;agit d&rsquo;un pi&egrave;ge &mdash; l&rsquo;encre du contrat change de couleur sous la flamme.<br><br>Ne pas mentionner la clef d&rsquo;argent devant l&rsquo;aubergiste.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- legend -->
+    <div style="display:flex;align-items:center;gap:0;margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;">
+      <div style="display:flex;align-items:center;gap:7px;"><div style="width:9px;height:2px;background:transparent;border-top:2px solid var(--line2);"></div>Panneau gauche &middot; Comp&eacute;tences</div>
+      <div style="margin:0 16px;color:var(--ember);">&#9670;&#9670;&#9670; s&eacute;parateur glissable</div>
+      <div style="display:flex;align-items:center;gap:7px;"><div style="width:9px;height:2px;background:var(--ember);"></div>Panneau droit &middot; Notes <span style="color:var(--ember);margin-left:6px;">en focus</span></div>
+    </div>
+  </div>
+
+  <!-- 23 · Modèle d'interaction -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:13px;">23 &mdash; Mod&egrave;le d&rsquo;interaction</div>
+    <div class="aria-frame" style="height:380px;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <div style="position:relative;z-index:2;height:100%;display:grid;grid-template-columns:repeat(3,1fr);">
+
+        <!-- OUVRIR -->
+        <div style="padding:26px 26px;border-right:1px solid var(--line2);display:flex;flex-direction:column;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:6px;">01 &mdash; Ouvrir</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);margin-bottom:14px;">Scinder</div>
+          <!-- mini diagram: tab strip with split icon -->
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:11px;border-bottom:1px solid var(--line);padding-bottom:9px;">
+              <span style="font-family:'Archivo',sans-serif;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ember2);border-bottom:2px solid var(--ember);padding-bottom:7px;margin-bottom:-10px;">Comp.</span>
+              <span style="font-family:'Archivo',sans-serif;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);">Notes</span>
+              <div style="flex:1;"></div>
+              <div style="width:22px;height:22px;border:1px solid var(--ember);border-radius:3px;display:flex;align-items:center;justify-content:center;background:var(--embersoft);"><div style="display:flex;gap:2px;"><div style="width:4px;height:9px;border:1px solid var(--ember2);border-radius:1px;"></div><div style="width:4px;height:9px;border:1px solid var(--ember2);border-radius:1px;"></div></div></div>
+            </div>
+            <div style="height:26px;"></div>
+          </div>
+          <div style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);line-height:1.5;margin-top:auto;">Cliquer l&rsquo;ic&ocirc;ne de scission, ou <span style="color:var(--text);">glisser un onglet</span> vers le bord droit pour faire na&icirc;tre un second panneau.</div>
+        </div>
+
+        <!-- AJUSTER -->
+        <div style="padding:26px 26px;border-right:1px solid var(--line2);display:flex;flex-direction:column;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:6px;">02 &mdash; Ajuster</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);margin-bottom:14px;">R&eacute;partir</div>
+          <!-- mini diagram: two panes + handle -->
+          <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow:hidden;height:88px;margin-bottom:14px;">
+            <div style="flex:1.3;background:repeating-linear-gradient(135deg,var(--field) 0 8px,transparent 8px 16px);"></div>
+            <div style="width:9px;background:var(--embersoft);display:flex;align-items:center;justify-content:center;cursor:col-resize;"><div style="display:flex;flex-direction:column;gap:3px;"><div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div><div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div><div style="width:3px;height:3px;border-radius:50%;background:var(--ember);"></div></div></div>
+            <div style="flex:1;background:repeating-linear-gradient(135deg,var(--field2) 0 8px,transparent 8px 16px);"></div>
+          </div>
+          <div style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);line-height:1.5;margin-top:auto;">Glisser la couture centrale. Double-clic pour revenir &agrave; <span style="color:var(--text);">50&nbsp;/&nbsp;50</span>. La r&eacute;partition est m&eacute;moris&eacute;e par la cl&eacute;.</div>
+        </div>
+
+        <!-- REPLIER -->
+        <div style="padding:26px 26px;display:flex;flex-direction:column;">
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--ember);text-transform:uppercase;margin-bottom:6px;">03 &mdash; Replier</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);margin-bottom:14px;">&Eacute;troit</div>
+          <!-- mini diagram: stacked → tabs -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <div style="width:62px;height:88px;border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:7px;display:flex;flex-direction:column;gap:5px;">
+              <div style="display:flex;gap:4px;"><div style="flex:1;height:9px;border-radius:2px;background:var(--ember);"></div><div style="flex:1;height:9px;border-radius:2px;background:var(--line2);"></div></div>
+              <div style="flex:1;border-radius:2px;background:repeating-linear-gradient(135deg,var(--field) 0 6px,transparent 6px 12px);"></div>
+            </div>
+            <div style="color:var(--faint);font-size:16px;">&larr;</div>
+            <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;line-height:1.7;">&lt; 900&nbsp;px<br>un seul panneau</div>
+          </div>
+          <div style="font-family:'Archivo',sans-serif;font-size:13px;color:var(--dim);line-height:1.5;margin-top:auto;">Sous 900&nbsp;px, les deux panneaux fusionnent&nbsp;: la barre d&rsquo;onglets unique reprend la main &mdash; aucune fonction perdue sur mobile.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 24 · Glisser-déposer (interactif) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">24 &mdash; Glisser-d&eacute;poser &middot; ancrage</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Interactif &mdash; glissez un panneau &darr;</div>
+    </div>
+    <div class="aria-frame" style="height:560px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+
+      <!-- panel rail (sources) -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:9px;height:60px;padding:0 18px;background:linear-gradient(180deg,var(--chrome1),var(--rail));border-bottom:1px solid var(--line2);flex-wrap:nowrap;overflow:hidden;">
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;margin-right:4px;flex-shrink:0;">Panneaux</span>
+        <sc-for list="{{ availablePanels }}" as="p" hint-placeholder-count="6">
+          <div onMouseDown="{{ p.onDown }}" style="{{ p.style }}">
+            <span style="color:var(--ember);font-size:11px;">&#9783;</span>
+            <span>{{ p.label }}</span>
+            <sc-if value="{{ p.open }}" hint-placeholder-val="{{ true }}"><span style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);">&middot; ouvert</span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- workspace -->
+      <div ref="{{ setWs }}" onMouseLeave="{{ clearDrop }}" style="{{ wsStyle }}">
+        <sc-for list="{{ slots }}" as="sl" hint-placeholder-count="2">
+          <sc-if value="{{ sl.isPane }}" hint-placeholder-val="{{ true }}">
+            <div onMouseMove="{{ sl.onMove }}" onClick="{{ sl.onFocus }}" style="{{ sl.wrapStyle }}">
+              <div onMouseDown="{{ sl.onHeadDown }}" title="Glisser pour r&eacute;-ancrer" style="{{ sl.headerStyle }}">
+                <span style="color:var(--dim);font-size:11px;letter-spacing:-2px;">&#8942;&#8942;</span>
+                <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--ember2);">{{ sl.label }}</span>
+                <div style="flex:1;"></div>
+                <sc-if value="{{ sl.focused }}" hint-placeholder-val="{{ true }}"><span style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.18em;text-transform:uppercase;color:var(--ember);border:1px solid var(--embersoft);border-radius:20px;padding:3px 8px;">Focus</span></sc-if>
+                <div onClick="{{ sl.onClose }}" onMouseDown="{{ stopDown }}" title="Fermer" style="width:24px;height:24px;border:1px solid var(--line2);border-radius:3px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px;cursor:pointer;">&times;</div>
+              </div>
+              <div style="flex:1;overflow-y:auto;padding:14px 14px;">
+                <sc-for list="{{ sl.rows }}" as="r" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--line2);border-radius:3px;padding:9px 12px;margin-bottom:5px;">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">{{ r.l }}</span>
+                    <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;color:var(--dim);">{{ r.v }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ sl.isDrop }}" hint-placeholder-val="{{ false }}">
+            <div style="{{ sl.dropStyle }}">
+              <div style="width:30px;height:30px;border:1.5px solid var(--ember);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--ember2);font-size:16px;">&plus;</div>
+              <div style="font-family:'Archivo',sans-serif;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ember2);">{{ sl.dropLabel }}</div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ember);opacity:.8;">d&eacute;poser ici</div>
+            </div>
+          </sc-if>
+        </sc-for>
+
+        <!-- drag ghost (name follows cursor) -->
+        <div style="{{ dragGhostStyle }}">
+          <span style="font-size:12px;">&#9783;</span><span>{{ wsDragLabel }}</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;line-height:1.8;">
+Glissez un panneau du bandeau, ou l&rsquo;en-t&ecirc;te d&rsquo;un panneau ouvert pour le r&eacute;-ancrer &middot; moiti&eacute; gauche / droite &rarr; la zone cible s&rsquo;assombrit, l&rsquo;autre se replie &middot; un panneau ne s&rsquo;ouvre jamais deux fois
+    </div>
+  </div>
+
+  <!--END-->
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1336,&quot;height&quot;:900},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;grain&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;rollResult&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;crit&quot;,&quot;success&quot;,&quot;fail&quot;],&quot;default&quot;:&quot;crit&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  // ---- shared style helpers ----
+  bar(pct, color) { return { width: pct + '%', height: '100%', background: color, borderRadius: '2px', transition: 'width .12s linear, background .3s ease' }; }
+  hpColor(pct) { return pct > 50 ? 'var(--ok)' : pct > 25 ? 'var(--warn)' : 'var(--bad)'; }
+
+  // ---- live combat feedback (GM Joueurs panel) ----
+  state = { players: this.basePlayers(), panes: ['skills', 'notes'], focusId: 'notes', dragId: null, drop: null, dx: 0, dy: 0 };
+  animSeq = {};
+  wsEl = null;
+
+  // ---- split workspace: drag a panel to dock it left/right of another ----
+  setWs = (el) => { this.wsEl = el; };
+  wsPoint(e) {
+    const el = this.wsEl; if (!el) return { x: e.clientX, y: e.clientY };
+    const r = el.getBoundingClientRect();
+    const s = (r.width / el.offsetWidth) || 1;
+    return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s };
+  }
+  startDrag(id, e) {
+    e.preventDefault();
+    const p = this.wsPoint(e);
+    this.setState({ dragId: id, drop: null, dx: p.x, dy: p.y });
+  }
+  handleMove = (e) => {
+    if (!this.state.dragId) return;
+    const p = this.wsPoint(e);
+    this.setState({ dx: p.x, dy: p.y });
+  };
+  paneHover(i, e) {
+    if (!this.state.dragId) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const side = (e.clientX - r.left) < r.width / 2 ? 'left' : 'right';
+    const d = this.state.drop;
+    if (!d || d.i !== i || d.side !== side) this.setState({ drop: { i, side } });
+  }
+  clearDrop = () => { if (this.state.dragId) this.setState({ drop: null }); };
+  stopDown = (e) => { e.stopPropagation(); };
+  handleUp = () => {
+    if (!this.state.dragId) return;
+    const d = this.state.drop, id = this.state.dragId;
+    let panes = this.state.panes.slice();
+    if (d) {
+      const targetId = this.state.panes[d.i];
+      if (targetId === id) {
+        // dropped on itself → no move
+      } else {
+        panes = panes.filter(p => p !== id);           // remove if re-docking (no-op for rail drags)
+        const refIdx = panes.indexOf(targetId);
+        panes.splice(d.side === 'left' ? refIdx : refIdx + 1, 0, id);
+      }
+    }
+    this.setState({ panes, dragId: null, drop: null, focusId: d ? id : this.state.focusId });
+  };
+  closePane(id) {
+    const panes = this.state.panes.filter(p => p !== id);
+    if (panes.length < 1) return;
+    let focusId = this.state.focusId;
+    if (focusId === id) focusId = panes[panes.length - 1];
+    this.setState({ panes, focusId });
+  }
+  focusPane(id) { this.setState({ focusId: id }); }
+  componentDidMount() {
+    window.addEventListener('mousemove', this.handleMove);
+    window.addEventListener('mouseup', this.handleUp);
+  }
+  componentWillUnmount() {
+    window.removeEventListener('mousemove', this.handleMove);
+    window.removeEventListener('mouseup', this.handleUp);
+  }
+  basePlayers() {
+    return [
+      { name: 'Kaelen Vorr', cls: 'Rôdeur', hp: 18, max: 24 },
+      { name: 'Maelis Doré', cls: 'Mage', hp: 11, max: 16 },
+      { name: 'Brogan Tael', cls: 'Guerrier', hp: 27, max: 30 },
+      { name: 'Syle Aubevent', cls: 'Barde', hp: 4, max: 18 },
+    ].map(p => ({ ...p, displayHp: p.hp }));
+  }
+  // Single rAF loop drives BOTH the HP count and the impact FX (fx: 1->0).
+  // Fully state-driven — no DOM refs — so it survives any re-render.
+  // The HP number is set synchronously (always correct); rAF drives ONLY the
+  // cosmetic impact FX (flash / number-pop / wiggle), with a setTimeout safety
+  // so a throttled/stalled rAF can never leave a stuck flash overlay.
+  animate(i, type, dur = 520) {
+    const seq = (this.animSeq[i] || 0) + 1; this.animSeq[i] = seq;
+    const start = performance.now();
+    const setFx = (fx) => this.setState(s => {
+      const players = [...s.players]; if (!players[i]) return {};
+      players[i] = { ...players[i], fx, fxType: type };
+      return { players };
+    });
+    const run = (now) => {
+      if (this.animSeq[i] !== seq) return;
+      const t = Math.min(1, (now - start) / dur);
+      setFx(+(1 - t).toFixed(3));
+      if (t < 1) requestAnimationFrame(run);
+    };
+    requestAnimationFrame(run);
+    setTimeout(() => { if (this.animSeq[i] === seq) setFx(0); }, dur + 200);
+  }
+  applyDamage(i, crit) {
+    const p = this.state.players[i]; if (!p || p.hp === 0) return;
+    const amt = crit ? 9 + Math.floor(Math.random() * 7) : 4 + Math.floor(Math.random() * 4);
+    const to = Math.max(0, p.hp - amt);
+    this.setState(s => { const players = [...s.players]; players[i] = { ...players[i], hp: to, displayHp: to }; return { players }; });
+    this.animate(i, crit ? 'crit' : 'dmg');
+  }
+  applyHeal(i) {
+    const p = this.state.players[i]; if (!p) return;
+    const amt = 5 + Math.floor(Math.random() * 5);
+    const to = Math.min(p.max, p.hp + amt);
+    this.setState(s => { const players = [...s.players]; players[i] = { ...players[i], hp: to, displayHp: to }; return { players }; });
+    this.animate(i, 'heal');
+  }
+  damageAll() {
+    const cur = this.state.players;
+    const plan = cur.map(p => {
+      if (p.hp === 0) return { to: p.hp, changed: false };
+      const amt = 4 + Math.floor(Math.random() * 4);
+      return { to: Math.max(0, p.hp - amt), changed: true };
+    });
+    this.setState({ players: cur.map((p, i) => ({ ...p, hp: plan[i].to, displayHp: plan[i].to })) });
+    plan.forEach((pl, i) => { if (pl.changed) this.animate(i, 'dmg'); });
+  }
+  healAll() {
+    const cur = this.state.players;
+    const plan = cur.map(p => {
+      const amt = 5 + Math.floor(Math.random() * 5);
+      const to = Math.min(p.max, p.hp + amt);
+      return { to, changed: to !== p.hp };
+    });
+    this.setState({ players: cur.map((p, i) => ({ ...p, hp: plan[i].to, displayHp: plan[i].to })) });
+    plan.forEach((pl, i) => { if (pl.changed) this.animate(i, 'heal'); });
+  }
+  resetPlayers() { this.animSeq = {}; this.setState({ players: this.basePlayers() }); }
+
+  palette(theme) {
+    const dark = {
+      ink:'#050608', bg:'#0b0e13', panel:'#10141b', raise:'#161b25',
+      line:'rgba(150,168,200,0.10)', line2:'rgba(150,168,200,0.20)',
+      text:'#e8ebf1', warm:'#f3ede1', dim:'#868f9f', faint:'#586273',
+      ember:'#eca456', ember2:'#f6c07e', embersoft:'rgba(236,164,86,0.12)',
+      violet:'#a98bdd', violet2:'#c4aef0', violetsoft:'rgba(169,139,221,0.12)',
+      ok:'#5bc98e', bad:'#e25a4f', warn:'#e9aa45',
+      chrome1:'#0e1219', rail:'#0a0d12', chromeV1:'#0f0c16', chromeV2:'#0a080d', railV:'#0a0810',
+      hp1:'#2f7d54', feed1:'#0c0f15', feed2:'#090c11',
+      deck1:'#141925', deck2:'#0c0f16', deckV1:'#1a1525', deckV2:'#0c0a14',
+      cardFace1:'#f3ede1', cardFace2:'#ddd2bc', cardRed:'#b03a3a', cardInk:'#1a1a22',
+      frameShadow:'rgba(0,0,0,0.9)', field:'rgba(0,0,0,0.30)', field2:'rgba(0,0,0,0.25)',
+      track:'rgba(255,255,255,0.06)', track2:'rgba(255,255,255,0.10)',
+      pageGlow:'rgba(236,164,86,0.035)',
+    };
+    const light = {
+      ink:'#ddd4c2', bg:'#f4efe4', panel:'#fcf9f1', raise:'#ffffff',
+      line:'rgba(70,56,30,0.13)', line2:'rgba(70,56,30,0.24)',
+      text:'#2c2820', warm:'#1b1710', dim:'#6c6353', faint:'#9c917a',
+      ember:'#a9620f', ember2:'#8a4f0c', embersoft:'rgba(169,98,15,0.14)',
+      violet:'#6a47a3', violet2:'#523784', violetsoft:'rgba(106,71,163,0.13)',
+      ok:'#2c8a57', bad:'#bd3528', warn:'#9c6c12',
+      chrome1:'#efe7d6', rail:'#ebe2cf', chromeV1:'#ece2d8', chromeV2:'#e5dbcb', railV:'#e8dfce',
+      hp1:'#88c6a0', feed1:'#cdc5b2', feed2:'#c2b9a3',
+      deck1:'#2a3142', deck2:'#1b212e', deckV1:'#2d2440', deckV2:'#1c1630',
+      cardFace1:'#fcf7eb', cardFace2:'#e9dfc9', cardRed:'#b03a3a', cardInk:'#2a2620',
+      frameShadow:'rgba(70,52,22,0.16)', field:'rgba(50,38,14,0.05)', field2:'rgba(50,38,14,0.035)',
+      track:'rgba(50,38,14,0.10)', track2:'rgba(50,38,14,0.15)',
+      pageGlow:'rgba(169,98,15,0.05)',
+    };
+    return theme === 'light' ? light : dark;
+  }
+
+  renderVals() {
+    const R = React.createElement;
+    const mono = { fontFamily: 'ui-monospace,Menlo,monospace' };
+    const serif = { fontFamily: "'Cormorant Garamond',serif" };
+
+    // ===== DATA =====
+    const skills = [
+      { name: "Tir à l'arc", link: 'DEX', pct: 78 }, { name: 'Discrétion', link: 'DEX', pct: 65 },
+      { name: 'Survie', link: 'INT', pct: 60 }, { name: 'Combat rapproché', link: 'FOR', pct: 52 },
+      { name: 'Esquiver', link: 'DEX', pct: 58 }, { name: 'Pister', link: 'INT', pct: 71 },
+      { name: 'Premiers soins', link: 'INT', pct: 40 }, { name: 'Athlétisme', link: 'FOR', pct: 55 },
+    ].map(s => ({ ...s, barStyle: this.bar(s.pct, 'var(--dim)') }));
+    const specials = [
+      { name: 'Tir de précision', pct: 45, desc: 'Ignore la moitié de l’armure sur un succès.' },
+      { name: 'Œil du rôdeur', pct: 70, desc: 'Détecte pièges et passages dissimulés.' },
+    ].map(s => ({ ...s, barStyle: this.bar(s.pct, 'var(--ember)') }));
+    const stats = [
+      { k: 'FOR', v: 12 }, { k: 'DEX', v: 16 }, { k: 'END', v: 13 },
+      { k: 'INT', v: 14 }, { k: 'CHA', v: 10 }, { k: 'PV', v: 24 },
+    ];
+    const mults = [1, 2, 3, 4, 5];
+    const inventory = [
+      { name: 'Rations (3 jours)', qty: 3 }, { name: 'Corde en chanvre (15m)', qty: 1 },
+      { name: 'Torche', qty: 5 }, { name: 'Fiole vide', qty: 4 },
+      { name: 'Carte de la région', qty: 1 }, { name: 'Pierre à aiguiser', qty: 1 },
+    ];
+    const money = [{ k: 'Or', v: 12 }, { k: 'Argent', v: 47 }, { k: 'Cuivre', v: 120 }];
+    const weapons = [{ name: 'Arc long', dmg: '1d8', eq: true }, { name: 'Dague', dmg: '1d4', eq: false }];
+    const rollHistory = [
+      { name: "Tir à l'arc", roll: 7, seuil: 78, type: 'crit', txt: 'Succès critique' },
+      { name: 'Discrétion', roll: 41, seuil: 65, type: 'success', txt: 'Succès' },
+      { name: 'd20', roll: 14, seuil: null, type: 'die', txt: 'Dé' },
+      { name: 'Combat rapproché', roll: 96, seuil: 52, type: 'fail', txt: 'Échec critique' },
+      { name: 'Survie', roll: 58, seuil: 60, type: 'success', txt: 'Succès' },
+    ].map(r => ({ ...r, color: r.type === 'crit' ? 'var(--ember)' : r.type === 'fail' ? 'var(--bad)' : r.type === 'die' ? 'var(--dim)' : 'var(--ok)' }));
+    const potions = [
+      { name: 'Potion de soin', desc: 'Restaure 1d6+2 PV', chance: 80, qty: 2 },
+      { name: 'Élixir de vigueur', desc: '+10 END pendant 1 scène', chance: 65, qty: 1 },
+      { name: 'Fumée d’ombre', desc: 'Discrétion +20, 3 tours', chance: 70, qty: 1 },
+    ];
+    const notes = [
+      { title: 'Le pacte de Veldros', active: true }, { title: 'PNJ — Taverne du Cerf' },
+      { title: 'Indices : sceau brisé' }, { title: 'Butin à répartir' },
+    ];
+
+    // GM data
+    const gmPlayers = (this.state.players || this.basePlayers()).map((p, i) => {
+      const pct = Math.round(p.displayHp / p.max * 100);
+      const realPct = Math.round(p.hp / p.max * 100);
+      const dead = p.hp === 0;
+      const critical = !dead && realPct <= 25;
+      const col = dead ? 'var(--faint)' : this.hpColor(pct);
+      // --- impact FX (state-driven, fx: 1 -> 0) ---
+      const fx = p.fx || 0;
+      const fxType = p.fxType || 'dmg';
+      const a = (fxType === 'heal' ? 0.50 : fxType === 'crit' ? 0.62 : 0.48) * fx;
+      const flashRGB = fxType === 'heal' ? '91,201,142' : fxType === 'crit' ? '246,192,126' : '226,90,79';
+      const wiggle = fxType === 'heal' ? 0 : Math.sin(fx * 26) * fx * 4.2;
+      return {
+        ...p, pct, dead, col,
+        nameColor: dead ? 'var(--faint)' : 'var(--warm)',
+        hpStyle: this.bar(pct, this.hpColor(pct)),
+        cardFilter: dead ? 'grayscale(0.85)' : 'none',
+        cardOpacity: dead ? 0.55 : 1,
+        deadOpacity: dead ? 1 : 0,
+        cardTransform: 'translateX(' + wiggle.toFixed(2) + 'px)',
+        glowStyle: {
+          position: 'absolute', inset: 0, borderRadius: '4px', pointerEvents: 'none', zIndex: 4,
+          opacity: critical ? 1 : 0,
+          animation: critical ? 'critGlow 1.8s ease-in-out infinite' : 'none',
+        },
+        flashStyle: {
+          position: 'absolute', inset: 0, borderRadius: '4px', pointerEvents: 'none', zIndex: 5,
+          background: 'rgba(' + flashRGB + ',' + a.toFixed(3) + ')',
+        },
+        numStyle: {
+          fontFamily: "'Archivo',sans-serif", fontVariantNumeric: 'tabular-nums',
+          fontSize: '23px', fontWeight: 700, lineHeight: 1, color: col,
+          display: 'inline-block', transformOrigin: 'left center',
+          transform: 'scale(' + (1 + fx * 0.28).toFixed(3) + ')',
+        },
+        onDmg: () => this.applyDamage(i, false),
+        onCrit: () => this.applyDamage(i, true),
+        onHeal: () => this.applyHeal(i),
+      };
+    });
+    const monsters = [
+      { name: 'Gobelin éclaireur', hp: 12, max: 14, armor: 1, grp: 'A' },
+      { name: 'Gobelin éclaireur', hp: 8, max: 14, armor: 1, grp: 'A' },
+      { name: 'Ogre des cavernes', hp: 41, max: 52, armor: 4, grp: 'B' },
+      { name: 'Loup spectral', hp: 0, max: 16, armor: 0, grp: 'C' },
+    ].map(m => { const pct = Math.round(m.hp / m.max * 100); const dead = m.hp === 0; return { ...m, pct, hpStyle: this.bar(pct, this.hpColor(pct)), col: dead ? 'var(--faint)' : this.hpColor(pct), nameColor: dead ? 'var(--faint)' : 'var(--warm)', cardOpacity: dead ? 0.5 : 1 }; });
+    const rollsFeed = [
+      { who: 'Kaelen Vorr', skill: "Tir à l'arc", roll: 7, seuil: 78, type: 'crit', txt: 'Critique', t: "à l'instant" },
+      { who: 'Maelis Doré', skill: 'Incantation', roll: 33, seuil: 70, type: 'success', txt: 'Succès', t: '12 s' },
+      { who: 'MJ — Ogre', skill: 'Massue', roll: 48, seuil: 55, type: 'success', txt: 'Touche', t: '40 s' },
+      { who: 'Brogan Tael', skill: 'Parade', roll: 91, seuil: 60, type: 'fail', txt: 'Échec', t: '1 min' },
+      { who: 'Syle Aubevent', skill: 'd6', roll: 4, seuil: null, type: 'die', txt: 'Dé', t: '2 min' },
+    ].map(r => ({ ...r, color: r.type === 'crit' ? 'var(--ember)' : r.type === 'fail' ? 'var(--bad)' : r.type === 'die' ? 'var(--dim)' : 'var(--ok)' }));
+    const tracker = ['♠', '♥', '♦', '♣'].map((s, i) => ({ s, used: [9, 6, 11, 8][i], col: i === 1 || i === 2 ? 'var(--bad)' : 'var(--text)' }));
+    const tracks = [
+      { title: 'Taverne — ambiance', dur: '3:42', playing: true },
+      { title: 'Combat — tension', dur: '2:15' }, { title: 'Forêt nocturne', dur: '5:08' },
+      { title: 'Donjon — souffle', dur: '4:30' }, { title: 'Boss — Veldros', dur: '3:55' },
+    ];
+    const playlists = [{ n: 'Exploration', active: true }, { n: 'Combat' }, { n: 'Cinématiques' }];
+    const files = [
+      { name: 'Carte du royaume.png', kind: 'Image', size: '2.4 Mo', grp: 'Cartes' },
+      { name: 'Lettre de Veldros.pdf', kind: 'PDF', size: '180 Ko', grp: 'Documents' },
+      { name: 'Portrait — l’Inquisiteur.jpg', kind: 'Image', size: '900 Ko', grp: 'PNJ' },
+      { name: 'Règles maison.pdf', kind: 'PDF', size: '64 Ko', grp: 'Documents' },
+    ];
+
+    // ===== SPLIT WORKSPACE (drag to dock) =====
+    const catalog = [
+      { id: 'skills', label: 'Compétences', rows: [["Tir à l'arc", '78%'], ['Discrétion', '65%'], ['Survie', '60%'], ['Pister', '71%']] },
+      { id: 'stats', label: 'Caractéristiques', rows: [['FOR', '12'], ['DEX', '16'], ['INT', '14'], ['CHA', '10']] },
+      { id: 'inv', label: 'Inventaire', rows: [['Rations', '3'], ['Torche', '5'], ['Fiole vide', '4'], ['Corde', '1']] },
+      { id: 'notes', label: 'Notes', rows: [['Le pacte de Veldros', '◆'], ['PNJ — Taverne', '◆'], ['Indices : sceau', '◆']] },
+      { id: 'docs', label: 'Documents', rows: [['Carte du royaume', 'PNG'], ['Lettre de Veldros', 'PDF'], ['Règles maison', 'PDF']] },
+      { id: 'cards', label: 'Cartes', rows: [['Tirage à 3', '♠♥♦'], ['Défausse', '♣']] },
+    ];
+    const byId = (id) => catalog.find(c => c.id === id);
+    const wsPanes = this.state.panes;
+    const wsDrop = this.state.drop;
+    const wsDragId = this.state.dragId;
+    const wsDragLabel = wsDragId ? byId(wsDragId).label : '';
+    const availablePanels = catalog.map(c => {
+      const open = wsPanes.includes(c.id);
+      return {
+        label: c.label, open,
+        onDown: open ? null : ((e) => this.startDrag(c.id, e)),
+        style: {
+          display: 'flex', alignItems: 'center', gap: '7px',
+          fontFamily: "'Archivo',sans-serif", fontSize: '12px', fontWeight: 600,
+          letterSpacing: '.06em', padding: '8px 13px', borderRadius: '3px',
+          border: '1px solid ' + (open ? 'var(--line)' : 'var(--line2)'),
+          background: open ? 'transparent' : 'var(--panel)',
+          color: open ? 'var(--faint)' : 'var(--text)',
+          cursor: open ? 'default' : 'grab',
+          opacity: open ? 0.55 : 1,
+          userSelect: 'none', whiteSpace: 'nowrap',
+          transition: 'border-color .15s, color .15s',
+        },
+      };
+    });
+    const dropSlot = () => ({
+      isPane: false, isDrop: true, dropLabel: wsDragLabel,
+      dropStyle: {
+        flex: '1 1 0', minWidth: 0, margin: '10px 8px', borderRadius: '4px',
+        border: '1.5px dashed var(--ember)',
+        background: 'repeating-linear-gradient(135deg, rgba(0,0,0,.45) 0 9px, rgba(0,0,0,.30) 9px 18px)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px',
+        transition: 'flex .18s ease',
+      },
+    });
+    const slots = [];
+    wsPanes.forEach((id, i) => {
+      const c = byId(id);
+      const focused = id === this.state.focusId;
+      if (wsDrop && wsDrop.i === i && wsDrop.side === 'left') slots.push(dropSlot());
+      const beingMoved = id === wsDragId;
+      slots.push({
+        isPane: true, isDrop: false,
+        id, label: c.label, focused,
+        rows: c.rows.map(r => ({ l: r[0], v: r[1] })),
+        wrapStyle: {
+          flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column',
+          borderRight: '1px solid var(--line2)',
+          borderTop: '2px solid ' + (focused ? 'var(--ember)' : 'transparent'),
+          opacity: beingMoved ? 0.4 : 1,
+          transition: 'flex .18s ease, opacity .15s ease',
+        },
+        headerStyle: {
+          display: 'flex', alignItems: 'center', gap: '9px', height: '44px',
+          padding: '0 14px', borderBottom: '1px solid var(--line)',
+          background: focused ? 'var(--embersoft)' : 'var(--field2)',
+          cursor: wsDragId ? 'grabbing' : 'grab', userSelect: 'none',
+        },
+        onHeadDown: (e) => this.startDrag(id, e),
+        onMove: (e) => this.paneHover(i, e),
+        onFocus: () => this.focusPane(id),
+        onClose: () => this.closePane(id),
+      });
+      if (wsDrop && wsDrop.i === i && wsDrop.side === 'right') slots.push(dropSlot());
+    });
+    const wsDragging = !!wsDragId;
+    const dragGhostStyle = {
+      position: 'absolute', left: this.state.dx + 'px', top: this.state.dy + 'px',
+      transform: 'translate(13px,11px)', pointerEvents: 'none', zIndex: 60,
+      display: wsDragging ? 'flex' : 'none', alignItems: 'center', gap: '8px',
+      background: 'var(--raise)', border: '1px solid var(--ember)', borderRadius: '4px',
+      padding: '8px 13px', boxShadow: '0 14px 34px -10px rgba(0,0,0,.85)',
+      fontFamily: "'Archivo',sans-serif", fontSize: '12px', fontWeight: 600,
+      letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ember2)', whiteSpace: 'nowrap',
+    };
+    const wsStyle = {
+      position: 'relative', flex: 1, display: 'flex', minHeight: 0,
+      background: 'var(--bg)', cursor: wsDragging ? 'grabbing' : 'default',
+    };
+
+    const grain = (this.props.grain ?? true) ? 0.05 : 0;
+
+    // ===== THEME =====
+    const theme = this.props.theme ?? 'dark';
+    const pal = this.palette(theme);
+    const rootStyle = {
+      minHeight: '100vh', width: 'max-content', minWidth: '100%',
+      padding: '52px 48px 110px', fontFamily: "'Archivo',sans-serif",
+      background: `radial-gradient(120% 50% at 50% -5%, ${pal.pageGlow}, transparent 55%), ${pal.ink}`,
+      color: pal.text,
+    };
+    for (const k in pal) rootStyle['--' + k] = pal[k];
+
+    // ===== ROLL CARD STATES (overlay + float) =====
+    const rr = this.props.rollResult ?? 'crit';
+    const rollStates = {
+      crit:    { rollNum: '07', rollVerdict: 'Succès critique', rollSkill: "Tir à l'arc",     rollSeuil: 78, rollColor: 'var(--ember)', rollShadow: '0 0 70px -14px rgba(236,164,86,.5), inset 0 0 0 1px rgba(236,164,86,.18)', rollTextGlow: '0 0 38px rgba(236,164,86,.55)', rollSub: 'Dégâts doublés' },
+      success: { rollNum: '41', rollVerdict: 'Succès',          rollSkill: 'Discrétion',       rollSeuil: 65, rollColor: 'var(--ok)',    rollShadow: '0 0 60px -16px rgba(91,201,142,.45), inset 0 0 0 1px rgba(91,201,142,.14)', rollTextGlow: '0 0 30px rgba(91,201,142,.42)', rollSub: 'Marge +24' },
+      fail:    { rollNum: '96', rollVerdict: 'Échec critique',  rollSkill: 'Combat rapproché', rollSeuil: 52, rollColor: 'var(--bad)',   rollShadow: '0 0 60px -16px rgba(226,90,79,.45), inset 0 0 0 1px rgba(226,90,79,.14)',  rollTextGlow: '0 0 30px rgba(226,90,79,.42)',  rollSub: 'Maladresse' },
+    };
+
+    // ===== FRAME BUILDERS — exposed as named React nodes =====
+    const labelStyle = (c) => ({ ...mono, fontSize: '11px', letterSpacing: '.22em', color: 'var(--faint)', textTransform: 'uppercase', marginBottom: '13px' });
+    const W = 1240;
+
+    // section divider
+    const section = (num, title, note) => R('div', { key: 't', style: { width: W + 'px', maxWidth: '100%', display: 'flex', alignItems: 'baseline', gap: '18px', margin: '46px 0 22px', paddingTop: '20px', borderTop: '1px solid var(--line2)' } },
+      R('div', { style: { ...serif, fontSize: '15px', fontWeight: 600, letterSpacing: '.3em', color: 'var(--ember)' } }, num),
+      R('div', { style: { ...serif, fontSize: '30px', fontWeight: 600, letterSpacing: '.02em', color: 'var(--warm)' } }, title),
+      R('div', { style: { flex: 1, height: '1px', background: 'var(--line)' } }),
+      note ? R('div', { style: { ...mono, fontSize: '10.5px', letterSpacing: '.14em', color: 'var(--faint)', textTransform: 'uppercase', maxWidth: '340px', textAlign: 'right', lineHeight: 1.7 } }, note) : null,
+    );
+    // frame wrapper with caption
+    const frame = (label, h, inner, note) => R('div', { style: { width: W + 'px', maxWidth: '100%', marginBottom: '30px' } },
+      R('div', { style: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '13px' } },
+        R('div', { style: { ...mono, fontSize: '11px', letterSpacing: '.22em', color: 'var(--faint)', textTransform: 'uppercase' } }, label),
+        note ? R('div', { style: { ...mono, fontSize: '10px', letterSpacing: '.12em', color: 'var(--ember)', textTransform: 'uppercase', border: '1px solid var(--embersoft)', borderRadius: '20px', padding: '4px 12px' } }, note) : null,
+      ),
+      R('div', { className: 'aria-frame', style: { height: h } }, grain ? R('div', { className: 'aria-grain', style: { opacity: grain } }) : null, inner),
+    );
+
+    return {
+      rootStyle,
+      // expose data for sc-for in template appends
+      skills, specials, stats, mults, inventory, money, weapons, rollHistory, potions, notes,
+      gmPlayers, monsters, rollsFeed, tracker, tracks, playlists, files, grain,
+      availablePanels, slots, setWs: this.setWs, clearDrop: this.clearDrop, stopDown: this.stopDown,
+      dragGhostStyle, wsDragLabel, wsStyle,
+      damageAll: () => this.damageAll(), healAll: () => this.healAll(), resetPlayers: () => this.resetPlayers(),
+      ...rollStates[rr],
+      // section dividers + builder-rendered frames are filled by template-side markup;
+      // here we only expose the two section header nodes used at top:
+      sectionOnboarding: section('I', 'Onboarding', 'Clé de sauvegarde → sélection. Deux étapes, une identité.'),
+      sectionJoueur: section('II', 'Joueur', 'Barre de commande unifiée (3 bandes → 1). Accent = ce qu’on lance.'),
+    };
+  }
+}
+</script>
+</body>
+</html>
