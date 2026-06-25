@@ -14,29 +14,33 @@
 </head>
 <body>
 
-    <!-- SAVE KEY GATEWAY -->
-    <div id="file-gateway" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:10000;">
-        <div class="gateway-panel">
-            <div class="sel-brand">ARIA</div>
-            <!-- New key panel -->
-            <div id="gateway-new">
-                <div class="gateway-title">Clé de sauvegarde</div>
-                <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
-                <div class="gateway-key-box" id="gateway-key-display"></div>
-                <div class="gateway-btn-row">
-                    <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
-                    <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+    <!-- SAVE KEY GATEWAY (two-panel: Nouvelle clé | Clé existante — design frame 01) -->
+    <div id="file-gateway" style="position:fixed;inset:0;background:radial-gradient(120% 70% at 50% 0%, rgba(236,164,86,.05), transparent 55%), var(--bg);display:none;align-items:center;justify-content:center;z-index:10000;padding:24px;overflow-y:auto;">
+        <div class="gateway-shell">
+            <div class="gateway-brand">ARIA</div>
+            <div class="gateway-brand-rule"></div>
+            <div class="gateway-cols">
+                <!-- New key panel -->
+                <div class="gateway-card" id="gateway-new">
+                    <div class="gateway-eyebrow ember">Nouvelle clé</div>
+                    <div class="gateway-card-title">Clé de sauvegarde</div>
+                    <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
+                    <div class="gateway-key-box" id="gateway-key-display"></div>
+                    <div class="gateway-btn-row">
+                        <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
+                        <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+                    </div>
                 </div>
-                <p class="gateway-hint">Déjà une clé ? <button class="gateway-link-btn" onclick="showGatewayExisting()">Saisir une clé existante</button></p>
+                <!-- Existing key panel -->
+                <div class="gateway-card" id="gateway-existing">
+                    <div class="gateway-eyebrow">Clé existante</div>
+                    <div class="gateway-card-title">Retrouver une partie</div>
+                    <p class="gateway-desc">Saisissez votre clé pour retrouver votre progression sur cet appareil.</p>
+                    <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
+                    <button class="gateway-btn-secondary gateway-btn-full" onclick="submitExistingKey()">Charger →</button>
+                </div>
             </div>
-            <!-- Existing key panel -->
-            <div id="gateway-existing" style="display:none;">
-                <div class="gateway-title">Clé de sauvegarde</div>
-                <p class="gateway-desc">Saisissez votre clé pour retrouver votre progression.</p>
-                <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
-                <button class="gateway-btn" style="margin-top:8px;width:100%;" onclick="submitExistingKey()">Charger →</button>
-                <p class="gateway-hint"><button class="gateway-link-btn" onclick="showGateway()">← Nouvelle clé</button> &nbsp;·&nbsp; <button class="gateway-link-btn" onclick="cancelGateway()">Annuler</button></p>
-            </div>
+            <button class="gateway-cancel" id="gateway-cancel" onclick="cancelGateway()" style="display:none;">Annuler</button>
         </div>
     </div>
 
@@ -232,7 +236,8 @@
                     <span class="section-title">Jet libre</span>
                     <div class="section-rule"></div>
                 </div>
-                <div class="free-roll-form" style="max-width:360px;">
+                <div class="free-roll-layout">
+                <div class="free-roll-form">
                     <div>
                         <div class="field-label">Nom du jet</div>
                         <input class="free-input" id="free-name" placeholder="ex: Perception" />
@@ -269,6 +274,7 @@
                     <div class="roll-history-list" id="roll-history-list">
                         <div class="roll-history-empty">Aucun jet pour l'instant.</div>
                     </div>
+                </div>
                 </div>
             </div>
 

@@ -307,19 +307,18 @@ async function loadFromSupabase() {
     } catch(e) { console.warn('[ARIA] GM load failed:', e); }
 }
 
-// Show the save-key creation panel with a freshly generated key.
+// Show the two-panel gateway (new key + existing key, side by side) with a freshly generated key.
 function showGateway() {
     _pendingNewKey = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
     document.getElementById('gateway-key-display').textContent = _pendingNewKey;
-    document.getElementById('gateway-new').style.display = '';
-    document.getElementById('gateway-existing').style.display = 'none';
+    const cancel = document.getElementById('gateway-cancel');
+    if (cancel) cancel.style.display = saveKey ? '' : 'none';
     document.getElementById('file-gateway').style.display = 'flex';
 }
 
-// Switch the gateway panel to the "enter an existing key" form.
+// Both panels are always visible; just focus the existing-key input.
 function showGatewayExisting() {
-    document.getElementById('gateway-new').style.display = 'none';
-    document.getElementById('gateway-existing').style.display = '';
+    document.getElementById('file-gateway').style.display = 'flex';
     const input = document.getElementById('gateway-key-input');
     if (input) { input.value = ''; input.focus(); }
 }
@@ -368,10 +367,11 @@ function updateSaveKeyStatus() {
     label.className = 'sel-save-label' + (saveKey ? ' connected' : '');
 }
 
-// Show the existing-key form so the user can switch save keys.
+// Show the gateway (both panels) and focus the existing-key input so the user can switch keys.
 function changeSaveKey() {
-    showGatewayExisting();
-    document.getElementById('file-gateway').style.display = 'flex';
+    showGateway();
+    const input = document.getElementById('gateway-key-input');
+    if (input) input.focus();
 }
 
 // Copy the current save key to the clipboard.
