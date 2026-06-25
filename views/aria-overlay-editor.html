@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ARIA – Éditeur d'overlay</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-overlay-editor.css">
+</head>
+<body>
+    <div id="editor-topbar">
+        <span id="editor-title">Overlay Editor</span>
+        <div id="editor-owner-label"></div>
+        <div id="editor-actions">
+            <button id="btn-grid-snap" class="btn-secondary" title="Activer/désactiver la grille">⊞ Grille</button>
+            <button id="btn-save" class="btn-primary">Sauvegarder</button>
+        </div>
+    </div>
+
+    <div id="editor-body">
+        <div id="editor-palette">
+            <div class="palette-section-label">Persistants</div>
+            <div id="palette-persistent"></div>
+            <div class="palette-section-label" style="margin-top:12px">Événements</div>
+            <div id="palette-event"></div>
+        </div>
+
+        <div id="editor-canvas-wrap">
+            <div id="editor-canvas"></div>
+        </div>
+
+        <div id="editor-props">
+            <div id="props-empty">Sélectionne un widget</div>
+            <div id="props-panel" style="display:none">
+                <div class="props-title" id="props-type-label"></div>
+
+                <label class="props-label">Position X (%)</label>
+                <input type="text" inputmode="numeric" id="prop-x" class="props-input" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+                <label class="props-label">Position Y (%)</label>
+                <input type="text" inputmode="numeric" id="prop-y" class="props-input" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+                <label class="props-label">Largeur (%)</label>
+                <input type="text" inputmode="numeric" id="prop-w" class="props-input" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+                <label class="props-label">Hauteur (%)</label>
+                <input type="text" inputmode="numeric" id="prop-h" class="props-input" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+                <label class="props-label">Opacité (0–1)</label>
+                <input type="text" inputmode="numeric" id="prop-opacity" class="props-input" oninput="this.value=this.value.replace(/[^0-9.]/g,'')">
+
+                <label class="props-label">Taille police (px)</label>
+                <input type="text" inputmode="numeric" id="prop-font-size" class="props-input" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+
+                <div id="prop-content-wrap" style="display:none">
+                    <label class="props-label">Contenu</label>
+                    <textarea id="prop-content" class="props-textarea"></textarea>
+                </div>
+
+                <div id="prop-maxitems-wrap" style="display:none">
+                    <label class="props-label">Max éléments</label>
+                    <input type="text" inputmode="numeric" id="prop-maxitems" class="props-input" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+                </div>
+
+                <div id="prop-stream-id-wrap" style="display:none">
+                    <label class="props-label">Stream ID</label>
+                    <input type="text" id="prop-stream-id" class="props-input" placeholder="ex: monStream123">
+                </div>
+
+                <button id="btn-delete-widget" class="btn-danger">🗑 Supprimer</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/aria-supabase.js"></script>
+    <script src="../js/aria-overlay-editor.js"></script>
+</body>
+</html>

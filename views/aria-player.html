@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIA – Joueur</title>
+    <script>const VERSION = '0.1.6';</script>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeD0iMTYiIHk9IjI4IiBmb250LXNpemU9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzlhODRjIj7imZs8L3RleHQ+PC9zdmc+">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-player.css">
+</head>
+<body>
+
+    <!-- SAVE KEY GATEWAY -->
+    <div id="file-gateway" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:10000;">
+        <div class="gateway-panel">
+            <div class="sel-brand">ARIA</div>
+            <!-- New key panel -->
+            <div id="gateway-new">
+                <div class="gateway-title">Clé de sauvegarde</div>
+                <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
+                <div class="gateway-key-box" id="gateway-key-display"></div>
+                <div class="gateway-btn-row">
+                    <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
+                    <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+                </div>
+                <p class="gateway-hint">Déjà une clé ? <button class="gateway-link-btn" onclick="showGatewayExisting()">Saisir une clé existante</button></p>
+            </div>
+            <!-- Existing key panel -->
+            <div id="gateway-existing" style="display:none;">
+                <div class="gateway-title">Clé de sauvegarde</div>
+                <p class="gateway-desc">Saisissez votre clé pour retrouver votre progression.</p>
+                <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
+                <button class="gateway-btn" style="margin-top:8px;width:100%;" onclick="submitExistingKey()">Charger →</button>
+                <p class="gateway-hint"><button class="gateway-link-btn" onclick="showGateway()">← Nouvelle clé</button> &nbsp;·&nbsp; <button class="gateway-link-btn" onclick="cancelGateway()">Annuler</button></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SELECTION SCREEN -->
+    <div id="selection-screen" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
+        <div class="sel-container">
+            <a class="sel-home-btn" href="../" title="Accueil">⌂</a>
+            <div class="sel-brand">ARIA</div>
+            <div class="sel-subtitle">Choisissez votre personnage</div>
+            <div class="sel-grid" id="char-grid"></div>
+            <div class="sel-new-form" id="new-char-form" style="display:none;">
+                <input class="sel-new-input" id="new-char-name" placeholder="Nom du personnage" onkeydown="if(event.key==='Enter')confirmCreateCharacter()" />
+                <input class="sel-new-input" id="new-char-class" placeholder="Classe / Description" onkeydown="if(event.key==='Enter')confirmCreateCharacter()" />
+                <input class="sel-new-input" id="new-char-campaign" placeholder="Code de campagne (optionnel)" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')confirmCreateCharacter()" />
+                <div class="sel-type-row">
+                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="ancient" checked> ⚔ Médiéval</label>
+                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="contemporary"> 🕵 Contemporain</label>
+                </div>
+                <div class="sel-type-hint">Le type doit correspondre à celui de la campagne.</div>
+                <div class="sel-new-btns">
+                    <button class="sel-confirm-btn" onclick="confirmCreateCharacter()">Créer</button>
+                    <button class="sel-cancel-btn" onclick="cancelCreateCharacter()">Annuler</button>
+                </div>
+            </div>
+            <button class="sel-add-btn" onclick="createCharacter()">+ Nouveau personnage</button>
+            <div class="sel-save-row">
+                <span class="sel-save-icon">💾</span>
+                <span class="sel-save-label" id="sel-save-label">—</span>
+                <button class="sel-save-btn" onclick="copySaveKey()">Copier</button>
+                <button class="sel-save-btn" onclick="changeSaveKey()">Changer…</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- VDO.ninja push iframe — full-viewport, behind app-wrapper in DOM order so app content covers it -->
+    <iframe id="vdo-push-frame" style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;pointer-events:none;" allow="camera; microphone; autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock; encrypted-media" allowfullscreen></iframe>
+
+    <!-- APP -->
+    <div id="app-wrapper" style="display:none;flex-direction:column;flex:1;">
+
+    <!-- UNIFIED COMMAND BAR (topbar + bonus/malus + music merged) -->
+    <div class="topbar">
+        <div class="topbar-title" onclick="switchCharacter()" title="Changer de personnage" style="cursor:pointer;">ARIA</div>
+        <div class="tb-sep"></div>
+        <span class="topbar-char" id="char-display">—</span>
+        <div class="tb-sep"></div>
+
+        <!-- modifier cluster -->
+        <div class="tb-mod">
+            <span class="tb-meta">Mod</span>
+            <button class="bm-btn minus" onclick="addBM(-20)">−20</button>
+            <button class="bm-btn minus" onclick="addBM(-10)">−10</button>
+            <div class="bm-display" id="bm-display">±0</div>
+            <button class="bm-btn plus" onclick="addBM(10)">+10</button>
+            <button class="bm-btn plus" onclick="addBM(20)">+20</button>
+            <details class="tb-pop">
+                <summary class="tb-more" title="Modificateurs avancés">⋯</summary>
+                <div class="tb-pop-panel">
+                    <div class="tb-pop-row">
+                        <button class="bm-btn minus" onclick="addBM(-30)">−30</button>
+                        <button class="bm-btn plus" onclick="addBM(30)">+30</button>
+                        <button class="bm-btn reset-btn" onclick="resetBM()">↺ Reset</button>
+                    </div>
+                    <div class="tb-pop-row bm-custom-row">
+                        <span class="bm-bar-label">Perso.</span>
+                        <input type="text" inputmode="numeric" id="bm-custom-val" placeholder="±X" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'')" />
+                        <button class="bm-btn plus" onclick="addCustomBM(1)">+</button>
+                        <button class="bm-btn minus" onclick="addCustomBM(-1)">−</button>
+                    </div>
+                    <div class="tb-pop-row bm-next-group">
+                        <span class="bm-bar-label">Prochains jets</span>
+                        <input type="text" inputmode="numeric" id="bm-next-val" class="bm-next-input" placeholder="±X" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'')" onkeydown="if(event.key==='Enter')setBMNext()" />
+                        <span class="bm-next-x">×</span>
+                        <input type="text" inputmode="numeric" id="bm-next-count" class="bm-next-input bm-next-count-input" placeholder="N" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')setBMNext()" />
+                        <button class="bm-btn" onclick="setBMNext()" title="Appliquer aux N prochains jets">✓</button>
+                    </div>
+                    <div class="tb-pop-row">
+                        <button class="bm-btn hidden-roll-btn" id="hidden-roll-btn" onclick="toggleHiddenRoll()" title="Quand activé, vos jets ne sont visibles que par le MJ">Jet caché</button>
+                    </div>
+                </div>
+            </details>
+            <div class="bm-next-status" id="bm-next-status" style="visibility:hidden;"></div>
+        </div>
+
+        <div class="tb-karma">
+            <span class="tb-meta">Karma</span>
+            <div class="karma-display" id="karma-display">0</div>
+        </div>
+
+        <div class="tb-spacer"></div>
+
+        <!-- music mini chip -->
+        <div class="music-bar" id="music-bar" style="visibility:hidden;">
+            <span class="music-bar-vol-icon" id="music-bar-vol-icon" onclick="toggleMusicMute()" title="Couper le son" style="cursor:pointer;user-select:none;">♪</span>
+            <span class="music-bar-title" id="music-bar-title">—</span>
+            <input class="music-bar-slider" id="music-bar-volume" type="range" min="0" max="100" value="80"
+                oninput="onMusicVolumeChange(this.value)" />
+        </div>
+
+        <span class="rolling-ind" id="rolling-ind">Lancer…</span>
+        <button id="btn-open-overlay-editor" class="icon-btn" title="Éditeur d'overlay" style="display:none">▦</button>
+        <button class="icon-btn" onclick="toggleConfig()" title="Configuration">⚙</button>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <!-- HP -->
+            <div class="panel">
+                <div class="panel-header">Points de vie</div>
+                <div class="panel-body" style="padding:10px 14px;">
+                    <div class="hp-number-wrap" id="hp-number-wrap">
+                        <div class="hp-number" id="hp-number">—</div>
+                        <div class="hp-fraction" id="hp-fraction"></div>
+                    </div>
+                    <div class="hp-bar-wrap">
+                        <div class="hp-bar-ghost" id="hp-bar-ghost"></div>
+                        <div class="hp-bar-fill" id="hp-bar-fill"></div>
+                    </div>
+                    <div style="text-align:center;font-family:'Cormorant Garamond',serif;font-size:10px;color:var(--parchment-dim);opacity:.5;margin-top:2px;">Géré par le MJ</div>
+                </div>
+            </div>
+
+            <!-- COMBAT -->
+            <div class="panel">
+                <div class="panel-header">Combat</div>
+                <div class="panel-body" id="combat-sidebar-body"></div>
+            </div>
+
+            <!-- INVENTORY -->
+            <div class="panel inv-sidebar-panel">
+                <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span>Inventaire</span><span id="inv-money-display" style="display:flex;gap:5px;font-size:10px;letter-spacing:0;font-family:'Cormorant Garamond',serif;"></span></div>
+                <div class="panel-body" id="inv-sidebar-body"></div>
+            </div>
+        </div>
+
+        <!-- CONTENT -->
+        <div class="content">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="tab-skills" onclick="switchTab('tab-skills',this)">⚔ Compétences<span class="tab-pin" title="Ouvrir en 2nd panneau (cliquer à nouveau pour fermer)" onclick="event.stopPropagation();pinTab('tab-skills')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-stats" data-tab="tab-stats" onclick="switchTab('tab-stats',this)">◆ Caractéristiques<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-stats')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-free" onclick="switchTab('tab-free',this)">⚄ Jet libre<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-free')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-inventory" onclick="switchTab('tab-inventory',this)">⛁ Inventaire<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-inventory')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-notes" onclick="switchTab('tab-notes',this)">✎ Notes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-notes')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-cards" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">♠ Cartes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cards')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-alchemy" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">⚗ Alchimie<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-alchemy')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-files" data-tab="tab-files" style="display:none;" onclick="switchTab('tab-files',this)">✉ Documents<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-files')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-cameras" data-tab="tab-cameras" style="display:none;" onclick="switchTab('tab-cameras',this)">📹 Caméras<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cameras')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-char" onclick="switchTab('tab-char',this)">◉ Personnage<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-char')">⧉</span></button>
+            </div>
+
+            <!-- COMPETENCES -->
+            <div class="tab-content active" id="tab-skills">
+                <div class="section-header">
+                    <span class="section-icon">⚔</span>
+                    <span class="section-title">Compétences</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="skill-list" id="skill-list"></div>
+                <div class="ornamental-divider">
+                    <div class="line"></div>
+                    <div class="gem"></div>
+                    <div class="line rev"></div>
+                </div>
+                <div class="section-header">
+                    <span class="section-icon">✦</span>
+                    <span class="section-title">Spéciaux</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="skill-list" id="special-list"></div>
+            </div>
+
+            <!-- STATS -->
+            <div class="tab-content" id="tab-stats">
+                <div class="section-header">
+                    <span class="section-icon">✦</span>
+                    <span class="section-title">Caractéristiques</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="mult-bar">
+                    <span class="mult-bar-label">Multiplicateur</span>
+                    <div id="mult-bar-btns" style="display:flex;gap:6px;"></div>
+                </div>
+                <div class="stat-grid" id="stat-grid"></div>
+            </div>
+
+            <!-- JET LIBRE -->
+            <div class="tab-content" id="tab-free">
+                <div class="section-header">
+                    <span class="section-icon">⚄</span>
+                    <span class="section-title">Jet libre</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="free-roll-form" style="max-width:360px;">
+                    <div>
+                        <div class="field-label">Nom du jet</div>
+                        <input class="free-input" id="free-name" placeholder="ex: Perception" />
+                    </div>
+                    <div>
+                        <div class="field-label">Seuil (%)</div>
+                        <input class="free-input" id="free-threshold" type="text" inputmode="numeric" placeholder="ex: 60" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                    </div>
+                    <button class="roll-btn" onclick="doFreeRoll()">⚄ Lancer</button>
+                    <div class="dice-section">
+                        <div class="field-label">Dés simples</div>
+                        <div class="dice-btns">
+                            <button class="die-btn" onclick="rollDie(4)">d4</button>
+                            <button class="die-btn" onclick="rollDie(6)">d6</button>
+                            <button class="die-btn" onclick="rollDie(8)">d8</button>
+                            <button class="die-btn" onclick="rollDie(10)">d10</button>
+                            <button class="die-btn" onclick="rollDie(20)">d20</button>
+                            <button class="die-btn" onclick="rollDie(100)">d100</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="roll-history-section">
+                    <div class="roll-history-hdr">
+                        <span class="field-label" style="margin:0;">Historique</span>
+                        <button class="clear-btn" onclick="clearRollHistory()">Effacer</button>
+                    </div>
+                    <div class="rh-filter-bar" id="rh-filter-bar">
+                        <button class="rf-pill active" id="rfp-all"     onclick="toggleRollFilter('all')">Tous</button>
+                        <button class="rf-pill"        id="rfp-success" onclick="toggleRollFilter('success')">Succès</button>
+                        <button class="rf-pill"        id="rfp-fail"    onclick="toggleRollFilter('fail')">Échec</button>
+                        <button class="rf-pill"        id="rfp-crit"    onclick="toggleRollFilter('crit')">Critique</button>
+                        <button class="rf-pill"        id="rfp-die"     onclick="toggleRollFilter('die')">Dés</button>
+                    </div>
+                    <div class="roll-history-list" id="roll-history-list">
+                        <div class="roll-history-empty">Aucun jet pour l'instant.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- INVENTAIRE -->
+            <div class="tab-content" id="tab-inventory">
+                <div id="inv-money-editor"></div>
+<div class="cs-col-hdr cs-inv-hdr">
+                    <span class="editor-label">Objet</span>
+                    <span class="editor-label center">Qté</span>
+                    <span></span>
+                </div>
+                <div class="cs-list-body" id="inv-editor-list"></div>
+                <div class="cs-block-footer"><button class="add-skill-btn" onclick="addInventoryRow()">+ Ajouter un objet</button></div>
+            </div>
+
+            <!-- NOTES -->
+            <div class="tab-content" id="tab-notes">
+                <div class="notes-wrap">
+                    <div class="notes-sidebar">
+                        <div class="notes-sidebar-header">
+                            <span class="notes-sidebar-title">Notes</span>
+                            <button class="notes-add-btn" onclick="addNote()" title="Nouvelle note">+</button>
+                        </div>
+                        <div class="notes-list" id="notes-list"></div>
+                    </div>
+                    <div class="notes-editor">
+                        <input class="notes-name-input" id="notes-name-input" placeholder="Nom de la note…" oninput="renameCurrentNote()" />
+                        <textarea class="notes-area" id="notes-area" placeholder="Contenu…" oninput="saveCurrentNote()"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARTES -->
+            <div class="tab-content" id="tab-cards">
+                <div class="card-tab-layout">
+                    <div class="card-deck-col">
+                        <div class="deck-wrap" id="deck-wrap" onclick="drawCard()">
+                            <div class="deck-back"><div class="deck-pattern">♛</div></div>
+                        </div>
+                        <div class="deck-count" id="deck-count">54 cartes</div>
+                        <button class="card-action-btn" id="reshuffle-btn" onclick="manualReshuffle(false)">↺ Mélanger</button>
+                        <button class="card-action-btn" id="reshuffle-remaining-btn" onclick="manualReshuffle(true)">↺ Restant</button>
+                        <button class="card-action-btn" id="clear-exclusions-btn" onclick="clearExclusions()">✕ Exclusions</button>
+                        <div class="card-status" id="card-status"></div>
+                    </div>
+                    <div class="card-stage">
+                        <div class="flip-wrap hidden" id="flip-wrap">
+                            <div class="flip-inner">
+                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                <div id="drawn-card"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="flex:1;min-width:220px;">
+                        <div class="field-label" style="margin-bottom:8px;">Suivi du talon</div>
+                        <div class="tracker-suits" id="tracker-suits"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ALCHIMIE -->
+            <div class="tab-content" id="tab-alchemy">
+                <div class="alchemy-header">
+                    <div class="section-header" style="margin-bottom:0;flex:1;">
+                        <span class="section-icon">⚗</span>
+                        <span class="section-title">Potions</span>
+                        <div class="section-rule"></div>
+                    </div>
+                    <button class="add-skill-btn" onclick="toggleCustomPotionForm()">+ Potion personnalisée</button>
+                </div>
+                <div class="custom-potion-form" id="custom-potion-form" style="display:none;">
+                    <input class="free-input" id="cpf-name" placeholder="Nom de la potion" style="margin-bottom:6px;" />
+                    <input class="free-input" id="cpf-desc" placeholder="Description / effet" style="margin-bottom:6px;" />
+                    <button class="roll-btn" style="font-size:13px;padding:7px 18px;" onclick="addCustomPotion()">Ajouter au stock</button>
+                </div>
+                <div id="potion-list"></div>
+                <div class="alchemy-empty" id="alchemy-empty">Aucune potion. Le MJ vous accordera accès aux potions découvertes.</div>
+            </div>
+
+            <!-- DOCUMENTS -->
+            <div class="tab-content" id="tab-files">
+                <div class="player-files-list" id="player-files-list"></div>
+                <div class="alchemy-empty" id="player-files-empty">Aucun document disponible.</div>
+            </div>
+
+            <!-- CAMERAS -->
+            <div class="tab-content" id="tab-cameras">
+                <div class="cameras-grid" id="cameras-grid"></div>
+            </div>
+
+            <!-- PERSONNAGE -->
+            <div class="tab-content" id="tab-char">
+                <div class="char-sheet-wrap">
+
+                    <!-- Identité -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Identité</div>
+                        <div class="cs-block-body">
+                            <div class="editor-form">
+                                <div class="editor-field"><label class="editor-label">Nom du personnage</label><input class="editor-input" id="ed-name" /></div>
+                                <div class="editor-field"><label class="editor-label">Classe / Description</label><input class="editor-input" id="ed-class" /></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Attributs -->
+                    <div class="cs-block" id="cs-attrs-block">
+                        <div class="cs-block-title">Attributs</div>
+                        <div class="cs-attrs-row">
+                            <div class="cs-attr"><label class="cs-attr-label">FOR</label><input class="editor-input cs-attr-input" id="ed-for" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            <div class="cs-attr"><label class="cs-attr-label">DEX</label><input class="editor-input cs-attr-input" id="ed-dex" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            <div class="cs-attr"><label class="cs-attr-label">END</label><input class="editor-input cs-attr-input" id="ed-end" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            <div class="cs-attr"><label class="cs-attr-label">INT</label><input class="editor-input cs-attr-input" id="ed-int" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            <div class="cs-attr"><label class="cs-attr-label">CHA</label><input class="editor-input cs-attr-input" id="ed-cha" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            <div class="cs-attr cs-attr-pv"><label class="cs-attr-label">PV max</label><input class="editor-input cs-attr-input" id="ed-pv" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                        </div>
+                    </div>
+
+                    <!-- Traits physiques -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Traits physiques</div>
+                        <div class="cs-block-body">
+                            <div class="editor-form">
+                                <div class="editor-field"><label class="editor-label">Âge</label><input class="editor-input" id="ed-age" placeholder="ex: 28" /></div>
+                                <div class="editor-field"><label class="editor-label">Taille</label><input class="editor-input" id="ed-taille" placeholder="ex: 1m78" /></div>
+                                <div class="editor-field"><label class="editor-label">Poids</label><input class="editor-input" id="ed-poids" placeholder="ex: 72 kg" /></div>
+                                <div class="editor-field"><label class="editor-label">Yeux</label><input class="editor-input" id="ed-yeux" /></div>
+                                <div class="editor-field"><label class="editor-label">Cheveux</label><input class="editor-input" id="ed-cheveux" /></div>
+                                <div class="editor-field"><label class="editor-label">Signes particuliers</label><input class="editor-input" id="ed-signes" /></div>
+                                <div class="editor-field full"><label class="editor-label">Histoire</label><textarea class="editor-input editor-textarea" id="ed-histoire" rows="5" placeholder="Origines, passé, motivations..."></textarea></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Protection -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Protection</div>
+                        <div class="cs-block-body">
+                            <div class="editor-form">
+                                <div class="editor-field full"><label class="editor-label">Armure</label><input class="editor-input" id="ed-prot-nom" /></div>
+                                <div class="editor-field full"><label class="editor-label">Valeur armure</label><input class="editor-input" id="ed-prot-val" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Armes -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Armes <span class="cs-hint">— ex&nbsp;: 1d6+2, 2d8</span></div>
+                        <div class="cs-col-hdr cs-weapons-hdr">
+                            <span class="editor-label">Nom</span>
+                            <span class="editor-label center">Dégâts</span>
+                            <span class="editor-label center" title="Équipée (affichée dans la barre de combat)">★</span>
+                            <span></span>
+                        </div>
+                        <div class="cs-list-body" id="weapons-editor-list"></div>
+                        <div class="cs-block-footer"><button class="add-skill-btn" onclick="addWeapon()">+ Ajouter une arme</button></div>
+                    </div>
+
+                    <!-- Compétences -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Compétences — seuil (%) · mod (±)</div>
+                        <div class="cs-skills-grid" id="skills-editor-list"></div>
+                    </div>
+
+                    <!-- Compétences spéciales -->
+                    <div class="cs-block">
+                        <div class="cs-block-title">Compétences spéciales</div>
+                        <div class="cs-col-hdr cs-specials-hdr">
+                            <span class="editor-label">Nom</span>
+                            <span class="editor-label center">%</span>
+                            <span class="editor-label center">Mod</span>
+                            <span class="editor-label">Description</span>
+                            <span></span>
+                        </div>
+                        <div class="cs-list-body" id="specials-editor-list"></div>
+                        <div class="cs-block-footer"><button class="add-skill-btn" onclick="addSpecialRow()">+ Ajouter</button></div>
+                    </div>
+
+                    <span class="cs-save-status" id="cs-save-status">✓ Sauvegardé</span>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FILE VIEWER MODAL -->
+    <div class="modal-scrim" id="file-viewer-scrim" onclick="closeFileViewer()"></div>
+    <div class="file-viewer-modal" id="file-viewer-modal">
+        <div class="fv-header">
+            <div class="fv-title" id="fv-title"></div>
+            <button class="fv-close-btn" onclick="closeFileViewer()">✕</button>
+        </div>
+        <div class="fv-body" id="fv-body"></div>
+    </div>
+
+    <!-- SOIGNER TARGET PICKER -->
+    <div class="modal-scrim" id="soigner-scrim" onclick="cancelSoigner()"></div>
+    <div class="soigner-target-modal" id="soigner-target-modal">
+        <div class="stm-title">♥ Soigner — Choisir une cible</div>
+        <div id="stm-targets"></div>
+        <button class="stm-cancel" onclick="cancelSoigner()">Annuler</button>
+    </div>
+
+    <!-- FLOAT ROLL CARD -->
+    <div class="roll-scrim" id="roll-scrim" onclick="dismissFloatCard()"></div>
+    <div class="float-roll-card" id="float-roll-card" onclick="dismissFloatCard()">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="fc-char" id="fc-char"></div>
+        <div class="fc-skill" id="fc-skill"></div>
+        <div class="fc-roll-num" id="fc-roll"></div>
+        <div class="card-divider"></div>
+        <div class="fc-verdict" id="fc-verdict"></div>
+        <div class="fc-crit-sub" id="fc-crit-sub"></div>
+        <div class="fc-bonus" id="fc-bonus"></div>
+        <div class="fc-dismiss">Cliquer pour fermer</div>
+    </div>
+    <canvas id="fc-particles"></canvas>
+
+    <!-- OTHER PLAYERS' ROLL TOAST -->
+    <div class="other-roll-toast" id="other-roll-toast">
+        <span id="ort-char"></span> — <span id="ort-skill"></span> <span class="ort-roll" id="ort-roll"></span> <span class="ort-verdict" id="ort-verdict"></span>
+    </div>
+
+    <!-- GM TOASTS -->
+    <div class="gm-dmg-toast" id="gm-dmg-toast"></div>
+    <div class="gm-heal-toast" id="gm-heal-toast"></div>
+
+    <!-- DAMAGE FX -->
+    <canvas id="dmg-canvas"></canvas>
+    <div class="dmg-vignette" id="dmg-vignette"></div>
+    <div class="mort-screen" id="mort-screen"><div class="mort-text">MORT</div></div>
+
+    <!-- CARD FX -->
+    <div class="fly-card" id="fly-card"><div class="deck-pattern" style="width:88%;height:88%;margin:auto;">♛</div></div>
+    <div class="shuffle-overlay" id="shuffle-overlay"></div>
+    <div class="reshuffle-flash" id="reshuffle-flash"><div class="reshuffle-msg" id="reshuffle-msg">↺ Mélangé</div></div>
+
+    <!-- CONFIG MODAL -->
+    <div class="modal-scrim" id="config-scrim" onclick="toggleConfig()"></div>
+    <div class="config-modal" id="config-modal">
+        <h2>⚙ Configuration</h2>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:13px;font-style:italic;color:var(--parchment-dim);margin-bottom:8px;">Identité : <strong id="cfg-identity-display" style="color:var(--parchment);font-style:normal;"></strong> <span style="opacity:.5;">(nom du personnage)</span></div>
+        <label class="config-label">Code campagne</label>
+        <input class="config-input" id="cfg-campaign-key" placeholder="ex: X7K2M" oninput="this.value=this.value.toUpperCase()" />
+        <label class="config-label">Thème dddice</label>
+        <select class="config-input" id="cfg-dddice-theme" disabled><option>— connectez-vous d'abord —</option></select>
+        <div style="margin-top:12px;" class="status-row"><div class="status-dot" id="cfg-dddice-dot"></div><span id="cfg-dddice-status">dddice non connecté</span></div>
+        <div style="margin-top:6px;" class="status-row"><div class="status-dot" id="cfg-ably-dot2"></div><span id="cfg-ably-status2">Ably non connecté</span></div>
+        <div class="config-theme-row">
+            <span class="config-label" style="margin-bottom:0;">Mode clair</span>
+            <label class="theme-toggle">
+                <input type="checkbox" id="cfg-light-mode" onchange="applyTheme(this.checked)">
+                <span class="theme-toggle-slider"></span>
+            </label>
+        </div>
+        <button class="config-save-btn" onclick="saveConfig()">Reconnecter</button>
+        <button class="config-save-btn" style="margin-top:8px;background:rgba(201,168,76,.08);" onclick="copyOverlayUrl()">📋 Copier URL Overlay (OBS)</button>
+    </div>
+
+
+    <!-- dddice 3D dice canvas — full-screen, non-interactive -->
+    <!-- Wrapper controls visibility; SDK only has a ref to the canvas, not the wrapper -->
+    <div id="dddice-wrap" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:50;visibility:hidden;">
+        <canvas id="dddice-canvas" style="width:100%;height:100%;display:block;"></canvas>
+    </div>
+
+
+    </div><!-- /#app-wrapper -->
+
+    <script src="../js/aria-supabase.js"></script>
+    <script src="../js/aria-player.js"></script>
+
+    <!-- Hidden YouTube IFrame players for music crossfade -->
+    <div id="yt-player-a" style="position:fixed;top:-2px;left:-2px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"></div>
+    <div id="yt-player-b" style="position:fixed;top:-2px;left:-4px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"></div>
+
+</body>
+</html>

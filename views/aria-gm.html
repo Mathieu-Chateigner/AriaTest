@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIA – Maître de Jeu</title>
+    <script>const VERSION = '0.1.6';</script>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeD0iMTYiIHk9IjI4IiBmb250LXNpemU9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzlhODRjIj7imZs8L3RleHQ+PC9zdmc+">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-gm.css">
+</head>
+<body>
+
+    <!-- SAVE KEY GATEWAY -->
+    <div id="file-gateway" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:10000;">
+        <div class="gateway-panel">
+            <div class="sel-brand" style="color:var(--gm-accent);">ARIA</div>
+            <!-- New key panel -->
+            <div id="gateway-new">
+                <div class="gateway-title">Clé de sauvegarde</div>
+                <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
+                <div class="gateway-key-box" id="gateway-key-display"></div>
+                <div class="gateway-btn-row">
+                    <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
+                    <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+                </div>
+                <p class="gateway-hint">Déjà une clé ? <button class="gateway-link-btn" onclick="showGatewayExisting()">Saisir une clé existante</button></p>
+            </div>
+            <!-- Existing key panel -->
+            <div id="gateway-existing" style="display:none;">
+                <div class="gateway-title">Clé de sauvegarde</div>
+                <p class="gateway-desc">Saisissez votre clé pour retrouver votre progression.</p>
+                <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
+                <button class="gateway-btn" style="margin-top:8px;width:100%;" onclick="submitExistingKey()">Charger →</button>
+                <p class="gateway-hint"><button class="gateway-link-btn" onclick="showGateway()">← Nouvelle clé</button> &nbsp;·&nbsp; <button class="gateway-link-btn" onclick="cancelGateway()">Annuler</button></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SELECTION SCREEN -->
+    <div id="selection-screen" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
+        <div class="sel-container">
+            <a class="sel-home-btn" href="../" title="Accueil">⌂</a>
+            <div class="sel-brand">ARIA</div>
+            <div class="sel-subtitle" style="color:var(--gm-accent);">Choisissez une campagne</div>
+            <div class="sel-grid" id="campaign-grid"></div>
+            <div class="sel-new-form" id="new-campaign-form" style="display:none;">
+                <input class="sel-new-input" id="new-campaign-name" placeholder="Nom de la campagne" onkeydown="if(event.key==='Enter')confirmCreateCampaign()" />
+                <div class="sel-type-row">
+                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="ancient" checked> ⚔ Médiéval</label>
+                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="contemporary"> 🕵 Contemporain</label>
+                </div>
+                <div class="sel-new-btns">
+                    <button class="sel-confirm-btn" onclick="confirmCreateCampaign()">Créer</button>
+                    <button class="sel-cancel-btn" onclick="cancelCreateCampaign()">Annuler</button>
+                </div>
+            </div>
+            <button class="sel-add-btn" onclick="createCampaign()">+ Nouvelle campagne</button>
+            <div class="sel-save-row">
+                <span class="sel-save-icon">💾</span>
+                <span class="sel-save-label" id="sel-save-label">—</span>
+                <button class="sel-save-btn" onclick="copySaveKey()">Copier</button>
+                <button class="sel-save-btn" onclick="changeSaveKey()">Changer…</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- APP -->
+    <div id="app-wrapper" style="display:none;flex-direction:column;flex:1;">
+
+    <!-- TOP BAR -->
+    <div class="topbar">
+        <div class="topbar-title" onclick="switchCampaign()" title="Changer de campagne" style="cursor:pointer;">ARIA</div>
+        <span class="topbar-mj">MJ</span>
+        <input class="campaign-name-input" id="campaign-display" value="" placeholder="Campagne" onblur="saveCampaignName(this)" onkeydown="if(event.key==='Enter')this.blur()" />
+        <button id="btn-open-overlay-editor" class="icon-btn" title="Éditeur d'overlay" style="display:none">▦</button>
+        <button class="icon-btn" onclick="toggleConfig()" title="Configuration">⚙</button>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+        <div class="content">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('tab-players',this)">Joueurs</button>
+                <button class="tab-btn" onclick="switchTab('tab-monsters',this)">Monstres</button>
+                <button class="tab-btn" onclick="switchTab('tab-gm-roll',this)">Jets</button>
+                <button class="tab-btn" onclick="switchTab('tab-cards',this)">Cartes</button>
+                <button class="tab-btn" onclick="switchTab('tab-alchemy',this)">Alchimie</button>
+                <button class="tab-btn" onclick="switchTab('tab-files',this)">Fichiers</button>
+                <button class="tab-btn" onclick="switchTab('tab-music',this)">Musique</button>
+                <button class="tab-btn" onclick="switchTab('tab-gm-notes',this)">Notes</button>
+            </div>
+
+            <!-- JOUEURS -->
+            <div class="tab-content active" id="tab-players">
+                <div class="gm-bulk-bar">
+                    <span class="field-label" style="margin:0;white-space:nowrap;">Tous les joueurs</span>
+                    <input class="gm-input" id="bulk-dmg-input" type="text" inputmode="numeric" placeholder="Dégâts" style="width:80px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')bulkDamageAll()" />
+                    <button class="gm-action-btn gm-action-dmg" onclick="bulkDamageAll()">⚔ Tous</button>
+                    <input class="gm-input" id="bulk-heal-input" type="text" inputmode="numeric" placeholder="Soins" style="width:80px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')bulkHealAll()" />
+                    <button class="gm-action-btn gm-action-heal" onclick="bulkHealAll()">♥ Tous</button>
+                </div>
+                <div id="gm-self-view-section" style="display:none;margin-top:10px;">
+                    <div class="section-header">
+                        <span class="section-icon">📹</span>
+                        <span class="section-title">Votre caméra (MJ)</span>
+                        <div class="section-rule"></div>
+                    </div>
+                    <div id="gm-self-view-wrap" class="pc-camera-wrap" style="width:280px;"></div>
+                </div>
+                <div class="section-header" style="margin-top:10px;">
+                    <span class="section-icon">👥</span>
+                    <span class="section-title">Joueurs connectés</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="players-grid" id="players-grid">
+                </div>
+                <div class="no-players" id="no-players">En attente de joueurs… <br><span style="font-size:13px;opacity:.6;">Les joueurs apparaissent automatiquement dès qu'ils ouvrent aria-player.html</span></div>
+            </div>
+
+            <!-- MONSTRES -->
+            <div class="tab-content" id="tab-monsters">
+                <!-- Add Monster Form -->
+                <div class="add-monster-form">
+                    <h3>+ Nouveau monstre</h3>
+                    <div class="amf-grid">
+                        <div>
+                            <label class="amf-label">Nom</label>
+                            <input class="amf-input" id="amf-name" placeholder="ex: Gobelin éclaireur" />
+                        </div>
+                        <div>
+                            <label class="amf-label">PV max</label>
+                            <input class="amf-input" id="amf-pv" type="text" inputmode="numeric" placeholder="20" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                        </div>
+                        <div>
+                            <label class="amf-label">Armure</label>
+                            <input class="amf-input" id="amf-armor" type="text" inputmode="numeric" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                        </div>
+                    </div>
+                    <div class="amf-grid2">
+                        <div><label class="amf-label">FOR</label><input class="amf-input" id="amf-for" type="text" inputmode="numeric" placeholder="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                        <div><label class="amf-label">DEX</label><input class="amf-input" id="amf-dex" type="text" inputmode="numeric" placeholder="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                        <div><label class="amf-label">END</label><input class="amf-input" id="amf-end" type="text" inputmode="numeric" placeholder="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                        <div><label class="amf-label">INT</label><input class="amf-input" id="amf-int" type="text" inputmode="numeric" placeholder="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                        <div><label class="amf-label">CHA</label><input class="amf-input" id="amf-cha" type="text" inputmode="numeric" placeholder="10" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
+                    </div>
+                    <div class="attack-editor">
+                        <label class="amf-label" style="margin-bottom:6px;">Attaques / Compétences</label>
+                        <div style="display:grid;grid-template-columns:1fr 70px 70px auto;gap:6px;margin-bottom:4px;">
+                            <span class="amf-label">Nom</span><span class="amf-label" style="text-align:center;">%</span><span class="amf-label" style="text-align:center;">Dégâts</span><span></span>
+                        </div>
+                        <div id="amf-attacks-list"></div>
+                        <button class="add-atk-btn" onclick="addAmfAttack()">+ Attaque</button>
+                    </div>
+                    <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <button class="amf-add-btn" onclick="addMonster()">Ajouter le(s) monstre(s)</button>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <label class="amf-label" style="margin:0;">×</label>
+                            <input class="amf-input" id="amf-count" type="text" inputmode="numeric" placeholder="1" style="width:48px;text-align:center;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Monsters list -->
+                <div class="section-header" style="margin-top:4px;">
+                    <span class="section-icon">☠</span>
+                    <span class="section-title">Monstres actifs</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="group-bar" id="monster-group-bar"></div>
+                <div class="monsters-grid" id="monsters-grid">
+                    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-style:italic;color:var(--parchment-dim);opacity:.5;text-align:center;padding:20px;" id="no-monsters">Aucun monstre actif</div>
+                </div>
+            </div>
+
+            <!-- JETS — roll console (left) + live feed (right), fused -->
+            <div class="tab-content" id="tab-gm-roll">
+                <div class="gm-jets-layout">
+                    <!-- LEFT: roll console -->
+                    <div class="gm-jets-console">
+                        <div class="gm-roll-form">
+                            <h3>Jet libre</h3>
+                            <label class="field-label">Nom du jet</label>
+                            <input class="gm-input" id="gm-free-name" placeholder="ex: Perception" />
+                            <label class="field-label">Seuil (%)</label>
+                            <input class="gm-input" id="gm-free-threshold" type="text" inputmode="numeric" placeholder="50" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                            <button class="gm-roll-btn" onclick="doGMFreeRoll()">Lancer</button>
+                        </div>
+                        <div class="gm-roll-form" style="margin-top:12px;">
+                            <h3>Combat — Monstre</h3>
+                            <label class="field-label">Monstre</label>
+                            <div class="gm-select" id="gm-monster-select" data-value="">
+                                <button class="gm-select-trigger" onclick="toggleSelect(this)" type="button">
+                                    <span class="gm-select-label">— Aucun monstre —</span>
+                                    <span class="gm-select-arrow">▾</span>
+                                </button>
+                                <div class="gm-select-panel"></div>
+                            </div>
+                            <label class="field-label">Attaque</label>
+                            <div class="gm-select" id="gm-attack-select" data-value="">
+                                <button class="gm-select-trigger" onclick="toggleSelect(this)" type="button">
+                                    <span class="gm-select-label">— Attaque personnalisée —</span>
+                                    <span class="gm-select-arrow">▾</span>
+                                </button>
+                                <div class="gm-select-panel"></div>
+                            </div>
+                            <label class="field-label">Seuil (%)</label>
+                            <input class="gm-input" id="gm-monster-threshold" type="text" inputmode="numeric" placeholder="50" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                            <button class="gm-roll-btn" onclick="doGMMonsterRoll()">Lancer l'attaque</button>
+                            <div class="gm-combat-sep"></div>
+                            <div class="gm-combat-row">
+                                <input class="gm-input" id="gm-monster-dmg-input" type="text" inputmode="numeric" placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')doGMMonsterDamage()" />
+                                <button class="gm-action-btn gm-action-dmg" onclick="doGMMonsterDamage()">Attaquer</button>
+                            </div>
+                            <div class="gm-combat-row">
+                                <input class="gm-input" id="gm-monster-heal-input" type="text" inputmode="numeric" placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')doGMMonsterHeal()" />
+                                <button class="gm-action-btn gm-action-heal" onclick="doGMMonsterHeal()">Soigner</button>
+                            </div>
+                        </div>
+                        <div class="section-title" style="margin-top:16px;">Dés simples</div>
+                        <div class="gm-dice-tray">
+                            <button class="die-btn" onclick="gmRollDie(4)">d4</button>
+                            <button class="die-btn" onclick="gmRollDie(6)">d6</button>
+                            <button class="die-btn" onclick="gmRollDie(8)">d8</button>
+                            <button class="die-btn" onclick="gmRollDie(10)">d10</button>
+                            <button class="die-btn" onclick="gmRollDie(20)">d20</button>
+                            <button class="die-btn" onclick="gmRollDie(100)">d100</button>
+                        </div>
+                        <div class="gm-die-result" id="gm-die-result"></div>
+                        <div class="section-title" style="margin-top:16px;">Résultat</div>
+                        <div class="gm-roll-result" id="gm-roll-result">
+                            <div style="font-family:'Cormorant Garamond',serif;font-size:14px;font-style:italic;color:var(--parchment-dim);opacity:.5;">Pas encore de jet</div>
+                        </div>
+                    </div>
+                    <!-- RIGHT: live roll feed -->
+                    <div class="gm-jets-feed">
+                        <div class="rolls-header">
+                            <div class="section-header" style="margin-bottom:0;flex:1;">
+                                <span class="section-title">Fil des jets</span>
+                                <div class="section-rule"></div>
+                            </div>
+                            <button class="clear-btn" onclick="clearRolls()">Effacer</button>
+                        </div>
+                        <div class="rh-filter-bar" id="gm-roll-filter-bar">
+                            <button class="rf-pill active" id="gm-rfp-all"     onclick="toggleGMRollFilter('all')">Tous</button>
+                            <button class="rf-pill"        id="gm-rfp-success" onclick="toggleGMRollFilter('success')">Succès</button>
+                            <button class="rf-pill"        id="gm-rfp-fail"    onclick="toggleGMRollFilter('fail')">Échec</button>
+                            <button class="rf-pill"        id="gm-rfp-crit"    onclick="toggleGMRollFilter('crit')">Critique</button>
+                            <button class="rf-pill"        id="gm-rfp-die"     onclick="toggleGMRollFilter('die')">Dés</button>
+                            <div class="rf-player-group" id="gm-player-pills"></div>
+                        </div>
+                        <div class="rolls-feed" id="rolls-feed">
+                            <div class="rolls-empty">En attente de jets…</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARTES -->
+            <div class="tab-content" id="tab-cards">
+                <!-- GM private deck -->
+                <div class="gm-own-deck-section">
+                    <div class="section-title" style="margin-bottom:12px;">Deck MJ <span style="font-size:11px;color:var(--parchment-dim);font-family:'Cormorant Garamond',serif;font-style:italic;">(privé)</span></div>
+                    <div class="card-tab-layout">
+                        <div class="card-deck-col">
+                            <div class="deck-wrap" id="gm-deck-wrap" onclick="gmDrawCard()">
+                                <div class="deck-back"><div class="deck-pattern">♛</div></div>
+                            </div>
+                            <div class="deck-count" id="gm-deck-count">54 cartes</div>
+                            <button class="card-action-btn" id="gm-reshuffle-btn" onclick="gmManualReshuffle(false)">↺ Mélanger</button>
+                            <button class="card-action-btn" id="gm-reshuffle-remaining-btn" onclick="gmManualReshuffle(true)">↺ Restant</button>
+                            <button class="card-action-btn" id="gm-clear-exclusions-btn" onclick="gmClearExclusions()">✕ Exclusions</button>
+                            <div class="card-status" id="gm-card-status"></div>
+                        </div>
+                        <div class="card-stage">
+                            <div class="flip-wrap hidden" id="gm-flip-wrap">
+                                <div class="flip-inner">
+                                    <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                    <div id="gm-drawn-card"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="flex:1;min-width:220px;">
+                            <div class="field-label" style="margin-bottom:8px;">Suivi du talon</div>
+                            <div class="tracker-suits" id="gm-tracker-suits"></div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Player draw display -->
+                <div class="gm-card-display">
+                    <div class="gm-card-info" id="gm-card-info">En attente d'un tirage joueur…</div>
+                    <div class="card-stage">
+                        <div class="flip-wrap hidden" id="flip-wrap">
+                            <div class="flip-inner">
+                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                <div id="drawn-card"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-history-section">
+                    <div class="rolls-header">
+                        <div class="section-title" style="margin-bottom:0;">Historique des tirages</div>
+                        <button class="clear-btn" onclick="clearCardHistory()">Effacer</button>
+                    </div>
+                    <div class="card-history-feed" id="card-history-feed">
+                        <div class="rolls-empty">Aucun tirage pour l'instant…</div>
+                    </div>
+                </div>
+            </div>
+            <!-- ALCHIMIE -->
+            <div class="tab-content" id="tab-alchemy">
+                <div class="add-monster-form">
+                    <h3>+ Nouvelle potion</h3>
+                    <div class="gm-pot-form-grid">
+                        <div>
+                            <label class="amf-label">Nom</label>
+                            <input class="amf-input" id="apf-name" placeholder="ex: Potion de soin" />
+                        </div>
+                        <div>
+                            <label class="amf-label">Succès (%)</label>
+                            <input class="amf-input" id="apf-chance" type="text" inputmode="numeric" placeholder="60" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                        </div>
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label class="amf-label">Description / Effet</label>
+                        <input class="amf-input" id="apf-desc" placeholder="ex: Restaure 1d6+2 PV" />
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label class="amf-label">Ingrédients</label>
+                        <input class="amf-input" id="apf-ingredients" placeholder="ex: Herbe d'éclat, eau de source" />
+                    </div>
+                    <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <button class="amf-add-btn" onclick="addGMPotion()">Ajouter au grimoire</button>
+                        <div class="alchemy-import-wrap">
+                            <button class="alchemy-import-btn" onclick="toggleAlchemyImportPicker(this)">↓ Importer depuis…</button>
+                            <div class="alchemy-import-picker" id="alchemy-import-picker" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="gm-pot-list" id="gm-pot-list">
+                    <div class="alchemy-empty" id="gm-pot-empty">Aucune potion dans le grimoire.</div>
+                </div>
+            </div>
+            <!-- FICHIERS -->
+            <div class="tab-content" id="tab-files">
+                <div class="gm-files-header">
+                    <div class="section-title" style="margin-bottom:0;">Fichiers de campagne</div>
+                    <label class="gm-file-upload-label" id="file-upload-btn">
+                        + Ajouter un fichier
+                        <input type="file" id="file-upload-input" style="display:none;" onchange="handleFileUpload(this)">
+                    </label>
+                </div>
+                <div class="gm-files-progress" id="file-upload-progress" style="display:none;"></div>
+                <div class="group-bar" id="file-group-bar"></div>
+                <div class="gm-files-list" id="gm-files-list">
+                    <div class="alchemy-empty" id="gm-files-empty">Aucun fichier. Ajoutez des documents pour les partager avec vos joueurs.</div>
+                </div>
+            </div>
+            <!-- MUSIQUE -->
+            <div class="tab-content" id="tab-music">
+
+                <!-- Now Playing -->
+                <div class="music-now-playing">
+                    <div class="music-np-title" id="music-np-title">Aucune piste</div>
+                    <div class="music-np-playlist" id="music-np-playlist"></div>
+                    <div class="music-progress-wrap" id="music-progress-wrap" style="visibility:hidden;">
+                        <div class="music-progress-bg">
+                            <div class="music-progress-fill" id="music-progress-fill"></div>
+                        </div>
+                    </div>
+                    <div class="music-controls">
+                        <button class="music-ctrl-btn" onclick="musicPrev()" title="Précédent">⏮</button>
+                        <button class="music-ctrl-btn music-ctrl-play" id="music-play-btn" onclick="musicTogglePlay()">▶</button>
+                        <button class="music-ctrl-btn" onclick="musicStop()" title="Arrêter">⏹</button>
+                        <button class="music-ctrl-btn" onclick="musicNext()" title="Suivant">⏭</button>
+                        <button class="music-ctrl-btn" id="music-loop-btn" onclick="musicToggleLoop()" title="Boucle">↻</button>
+                        <span class="music-fade-label" style="margin-left:10px;">Fondu</span>
+                        <input class="music-fade-input" id="music-fade-input" type="text" inputmode="numeric" value="3"
+                            oninput="this.value=this.value.replace(/[^0-9]/g,'');musicSetFade(this.value)" />
+                        <span class="music-fade-label">s</span>
+                    </div>
+                    <div class="music-vol-row">
+                        <span class="music-vol-icon">🔊</span>
+                        <input type="range" class="music-vol-slider" id="music-gm-volume" min="0" max="100" value="80"
+                            oninput="onGMMusicVolumeChange(this.value)" />
+                        <span class="music-vol-val" id="music-gm-vol-val">80</span>
+                    </div>
+                </div>
+
+                <!-- Playlists -->
+                <div class="section-header">
+                    <span class="section-icon">♪</span>
+                    <span class="section-title">Playlists</span>
+                    <div class="section-rule"></div>
+                </div>
+                <div class="music-playlist-bar" id="music-playlist-bar"></div>
+                <div class="music-playlist" id="music-playlist"></div>
+
+                <!-- Add tracks -->
+                <div class="music-section-title" style="margin-top:14px;">Ajouter</div>
+                <div class="music-add-row">
+                    <input class="gm-input" id="music-yt-input" placeholder="URL YouTube ou playlist…" style="flex:1;"
+                        onkeydown="if(event.key==='Enter')musicAddYoutube()" />
+                    <button class="gm-action-btn" onclick="musicAddYoutube()">+ Ajouter</button>
+                </div>
+                <div class="music-add-row" style="margin-top:6px;">
+                    <label class="gm-action-btn" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+                        📁 Importer un fichier
+                        <input type="file" id="music-file-input" accept=".mp3,.ogg,.wav,.flac" style="display:none;"
+                            onchange="musicUploadFile(this)" />
+                    </label>
+                    <span class="music-file-hint">MP3, OGG, WAV, FLAC</span>
+                </div>
+                <div id="music-add-status" class="music-add-status"></div>
+            </div>
+            <!-- NOTES MJ -->
+            <div class="tab-content" id="tab-gm-notes">
+                <div class="notes-wrap">
+                    <div class="notes-sidebar">
+                        <div class="notes-sidebar-header">
+                            <span class="notes-sidebar-title">Notes</span>
+                            <button class="notes-add-btn" onclick="addGMNote()" title="Nouvelle note">+</button>
+                        </div>
+                        <div class="notes-list" id="gm-notes-list"></div>
+                    </div>
+                    <div class="notes-editor">
+                        <input class="notes-name-input" id="gm-notes-name-input" placeholder="Nom de la note…" oninput="renameCurrentGMNote()" />
+                        <textarea class="notes-area" id="gm-notes-area" placeholder="Contenu…" oninput="saveCurrentGMNote()"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- dddice 3D dice canvas — full-screen, non-interactive -->
+    <canvas id="dddice-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:50;"></canvas>
+
+    <!-- PLAYER DETAILS MODAL -->
+    <div class="modal-scrim" id="details-scrim" onclick="closePlayerDetails()"></div>
+    <div class="player-details-modal" id="player-details-modal">
+        <div class="pdm-header">
+            <div>
+                <div class="pdm-name" id="pdm-name"></div>
+                <div class="pdm-class" id="pdm-class"></div>
+            </div>
+            <button class="pdm-close-btn" onclick="closePlayerDetails()">✕</button>
+        </div>
+        <div class="pdm-body" id="pdm-body"></div>
+    </div>
+
+    <!-- CONFIG MODAL -->
+    <div class="modal-scrim" id="config-scrim" onclick="toggleConfig()"></div>
+    <div class="config-modal" id="config-modal">
+        <h2>⚙ Configuration MJ</h2>
+        <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;">
+            <span class="config-label" style="margin-bottom:0;">Code de campagne</span>
+            <span class="topbar-joincode" id="joincode-display" onclick="copyJoinCode()" title="Code d'accès — cliquer pour copier" style="cursor:pointer;"></span>
+        </div>
+        <label class="config-label">Thème dddice</label>
+        <select class="config-input" id="cfg-dddice-theme" disabled><option>— connectez-vous d'abord —</option></select>
+        <div style="margin-top:12px;" class="status-row"><div class="status-dot" id="cfg-dddice-dot"></div><span id="cfg-dddice-status">dddice non connecté</span></div>
+        <div style="margin-top:6px;" class="status-row"><div class="status-dot" id="cfg-ably-dot"></div><span id="cfg-ably-status">Ably non connecté</span></div>
+        <label class="config-label">VDO.ninja Room</label>
+        <input class="config-input" id="cfg-vdo-room" placeholder="ex: mon-groupe" />
+        <label class="config-label">Mot de passe VDO (optionnel)</label>
+        <input class="config-input" id="cfg-vdo-room-password" placeholder="laisser vide si aucun" />
+        <div class="config-theme-row">
+            <span class="config-label" style="margin-bottom:0;">Mode clair</span>
+            <label class="theme-toggle">
+                <input type="checkbox" id="cfg-light-mode" onchange="applyTheme(this.checked)">
+                <span class="theme-toggle-slider"></span>
+            </label>
+        </div>
+        <button class="config-save-btn" onclick="saveConfig()">Reconnecter</button>
+        <button class="config-save-btn" style="margin-top:8px;background:rgba(201,168,76,.08);" onclick="copyOverlayUrl()">📋 Copier URL Overlay (OBS)</button>
+    </div>
+
+
+    </div><!-- /#app-wrapper -->
+
+    <!-- GM FILE VIEWER MODAL -->
+    <div class="modal-scrim" id="gm-file-viewer-scrim" onclick="closeGmFileViewer()"></div>
+    <div class="file-viewer-modal" id="gm-file-viewer-modal">
+        <div class="fv-header">
+            <div class="fv-title" id="gm-fv-title"></div>
+            <button class="fv-close-btn" onclick="closeGmFileViewer()">✕</button>
+        </div>
+        <div class="fv-body" id="gm-fv-body"></div>
+    </div>
+
+    <div class="shuffle-overlay" id="gm-shuffle-overlay"></div>
+
+    <!-- Hidden YouTube IFrame players for music crossfade -->
+    <div id="yt-player-a" style="position:fixed;top:-2px;left:-2px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"></div>
+    <div id="yt-player-b" style="position:fixed;top:-2px;left:-4px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"></div>
+
+    <script src="../js/aria-supabase.js"></script>
+    <script src="../js/aria-gm.js"></script>
+</body>
+</html>

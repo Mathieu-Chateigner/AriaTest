@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ARIA – Overlay</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-overlay.css">
+</head>
+<body>
+
+    <div id="overlay-widgets"></div>
+
+    <!-- damage fx -->
+    <div id="dmg-vignette"></div>
+    <canvas id="dmg-canvas"></canvas>
+    <div id="dmg-number"></div>
+    <div id="heal-number"></div>
+    <div id="dmg-hpbar-wrap">
+        <div class="dmg-char-name" id="dmg-char-name"></div>
+        <div class="dmg-hpbar-track">
+            <div class="dmg-hpbar-ghost" id="dmg-hpbar-ghost"></div>
+            <div class="dmg-hpbar-fill" id="dmg-hpbar-fill"></div>
+            <div class="dmg-hpbar-text" id="dmg-hpbar-text"></div>
+        </div>
+    </div>
+    <div id="dmg-mort">
+        <div class="mort-skull">💀</div>
+        <div class="mort-text">MORT</div>
+        <div class="mort-sub" id="mort-char-name"></div>
+    </div>
+
+    <canvas id="particles"></canvas>
+
+    <!-- dddice 3D dice canvas — rendered above particles, below roll card -->
+    <canvas id="dddice-canvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:15;"></canvas>
+
+    <div id="waiting">
+        <div class="wait-crown">♛</div>
+        <div class="wait-text">En attente d'un jet…</div>
+    </div>
+
+    <!-- DICE ROLL CARD -->
+    <div id="roll-card">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="card-char" id="card-char"></div>
+        <div class="card-skill" id="card-skill"></div>
+        <div class="card-roll" id="card-roll"></div>
+        <div class="card-divider"></div>
+        <div class="card-verdict" id="card-verdict"></div>
+        <div class="card-crit-sub" id="card-crit-sub"></div>
+        <div class="card-bonus" id="card-bonus"></div>
+    </div>
+
+    <!-- DRAWN PLAYING CARD -->
+    <div id="drawn-card-overlay">
+        <div class="play-card" id="play-card"></div>
+        <div class="drawn-card-label" id="drawn-card-label"></div>
+    </div>
+
+    <script src="../js/aria-supabase.js"></script>
+    <script src="../js/aria-overlay.js"></script>
+</body>
+</html>

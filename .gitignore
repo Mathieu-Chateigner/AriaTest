@@ -1,0 +1,13 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/Aria
+/.claude
+/Docs/
+/commits
+.worktrees/
+/.superpowers
+/Docs/development_plan.md
+/.vs/AriaTest/CopilotIndices/17.14.1661.41761
+/.vs/AriaTest/FileContentIndex
