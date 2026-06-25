@@ -486,44 +486,62 @@ body::after {
     text-align: center;
 }
 
-/* ── COMBAT SIDEBAR ── */
+/* ── COMBAT SIDEBAR (Réactions / Protection / Armes — design frame 03) ── */
+.sidebar-combat { display: flex; flex-direction: column; gap: 15px; }
+.sb-section { display: flex; flex-direction: column; }
+.sb-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 8px;
+}
+.sb-empty { font-family: 'Cormorant Garamond', serif; font-size: 13px; font-style: italic; color: var(--dim); opacity: .5; }
 .weap-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 7px 4px;
-    border-bottom: 1px solid var(--border);
+    border-left: 2px solid var(--line2);
+    padding: 8px 0 8px 11px;
+    margin-bottom: 5px;
+    transition: border-color 0.18s;
 }
-.weap-row:last-of-type { border-bottom: none; }
-.weap-row.weap-rollable {
-    cursor: pointer;
-    border-left: 2px solid var(--gold-dim);
-    padding-left: 8px;
-    border-radius: var(--radius);
-    transition: all 0.18s;
-}
-.weap-row.weap-rollable:hover {
-    border-left-color: var(--gold);
-    background: var(--gold-wash-sm);
-}
+.weap-row:last-child { margin-bottom: 0; }
+.weap-row.weap-rollable { cursor: pointer; }
+.weap-row.weap-rollable:hover { border-left-color: var(--ember); }
+.weap-name { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weap-dmg { display: flex; align-items: center; gap: 6px; font-family: 'Archivo', sans-serif; font-size: 13px; color: var(--dim); flex-shrink: 0; }
 .weap-roll-hint {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 9px;
-    letter-spacing: 0.5px;
-    color: var(--gold-dim);
-    opacity: 0.7;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ember);
+    opacity: 0.8;
 }
+.prot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 10px 13px;
+}
+.prot-name { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 15px; color: var(--text); }
 .prot-val-badge {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 11px;
-    color: var(--gold-light);
-    border: 1px solid var(--gold-dim);
-    padding: 1px 6px;
-    border-radius: 1px;
+    font-family: 'Archivo', sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ember2);
+    border: 1px solid var(--line2);
+    padding: 2px 9px;
+    border-radius: 2px;
 }
 .react-btns {
     display: flex;
-    gap: 6px;
+    gap: 8px;
 }
 .react-btn {
     flex: 1;
@@ -862,9 +880,17 @@ body::after {
 /* ── STAT GRID ── */
 .stat-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 11px;
     margin-bottom: 20px;
+}
+.stat-caption {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 14px;
 }
 .stat-card {
     background: var(--panel);
@@ -895,6 +921,15 @@ body::after {
     font-weight: 700;
     color: var(--text);
     line-height: .9;
+}
+.stat-preview {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ember);
+    margin-top: 12px;
+    opacity: .85;
 }
 
 /* ── FREE ROLL ── */

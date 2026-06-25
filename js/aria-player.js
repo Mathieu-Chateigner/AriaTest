@@ -1322,7 +1322,12 @@ function updateBMDisplay() {
     // Update only the percentage text in existing skill elements — no DOM rebuild
     document.getElementById('skill-list').querySelectorAll('.skill-item').forEach(div => {
         const skill = (character.skills || []).find(s => s.name === div.dataset.skillName);
-        if (skill) div.querySelector('.skill-pct').textContent = Math.max(1, Math.min(100, skill.pct + (+skill.bonus || 0) + bm + (character?.karma ?? 0))) + '%';
+        if (skill) {
+            const v = Math.max(1, Math.min(100, skill.pct + (+skill.bonus || 0) + bm + (character?.karma ?? 0)));
+            div.querySelector('.skill-pct').textContent = v + '%';
+            const fill = div.querySelector('.skill-bar-fill');
+            if (fill) fill.style.width = v + '%';
+        }
     });
     document.getElementById('special-list').querySelectorAll('.skill-item').forEach(div => {
         const sp = (character.specials || []).find(s => s.name === div.dataset.skillName);
@@ -1367,7 +1372,7 @@ function renderSkills() {
         div.className = 'skill-item' + (isSoigner ? ' soigner-skill' : '');
         div.dataset.skillName = skill.name;
         const modBadge = bonus ? `<span class="skill-mod" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `${skill.link ? `<span class="skill-link">${skill.link}</span>` : ''}<span class="skill-name">${skill.name}</span>${modBadge}<span class="skill-pct">${eff}%</span>`;
+        div.innerHTML = `<span class="skill-name">${skill.name}</span>${modBadge}${skill.link ? `<span class="skill-link">${skill.link}</span>` : ''}<div class="skill-bar-wrap"><div class="skill-bar-fill" style="width:${eff}%"></div></div><span class="skill-pct">${eff}%</span>`;
         if (isSoigner) {
             div.addEventListener('click', () => openSoignerTargetPicker(skill.pct + bonus));
         } else {
@@ -1407,14 +1412,12 @@ function renderStats() {
     ['FOR', 'DEX', 'END', 'INT', 'CHA'].forEach(key => {
         const val = character.stats[key] || 0;
         const threshold = Math.min(100, val * multiplier + liveBM());
-        const showThreshold = multiplier > 1;
         const div = document.createElement('div');
         div.className = 'stat-card';
         div.onclick = () => rollStat(key, val);
         div.innerHTML = `<div class="stat-key">${key}</div>
-          <div class="stat-val"${showThreshold ? ` style="color:var(--gold);"` : ''}>
-            ${showThreshold ? threshold : val}
-          </div>`;
+          <div class="stat-val">${val}</div>
+          <div class="stat-preview">jet ×${multiplier} = ${threshold}%</div>`;
         grid.appendChild(div);
     });
 }
@@ -1458,50 +1461,53 @@ function renderInventorySidebar() {
     }
 }
 
-// Render the combat sidebar with equipped weapons, protection, and reaction buttons.
+// Render the combat sidebar as the design's three sections: Réactions · Protection · Armes.
 function renderCombatSidebar() {
     const body = document.getElementById('combat-sidebar-body');
     if (!body) return;
-    const allWeapons = (character.weapons || []).filter(w => w.nom.trim());
-    const favourites = allWeapons.filter(w => w.favourite);
-    const weapons = favourites;
-    const prot = character.protection || {};
     let html = '';
-    if (weapons.length) {
-        weapons.forEach(w => {
-            const hasFormula = w.degats && w.degats.trim();
-            const rollAttr = hasFormula ? ` onclick="rollWeaponDamage('${w.nom.replace(/'/g,"\\'")}','${w.degats.replace(/'/g,"\\'")}')"` : '';
-            const rollableClass = hasFormula ? ' weap-rollable' : '';
-            const hint = hasFormula ? `<span class="weap-roll-hint">⚄ lancer</span>` : '';
-            html += `<div class="weap-row${rollableClass}"${rollAttr}><span style="font-family:'Cormorant Garamond',serif;font-size:14px;font-style:italic;">${w.nom}</span><span style="display:flex;align-items:center;gap:6px;font-family:'Cormorant Garamond',serif;font-size:12px;color:var(--gold-dim);">${hint}${w.degats || '—'}</span></div>`;
-        });
-    } else {
-        html += `<div style="font-family:'Cormorant Garamond',serif;font-size:13px;color:var(--parchment-dim);font-style:italic;opacity:.5;">Aucune arme</div>`;
-    }
-    html += `<div style="margin:8px 0 6px;border-top:1px solid var(--border);"></div>`;
-    html += `<div style="margin-bottom:6px;"><div style="font-family:'Cormorant Garamond',serif;font-size:9px;letter-spacing:.15em;color:var(--gold-dim);text-transform:uppercase;margin-bottom:3px;">Protection</div><div style="display:flex;justify-content:space-between;align-items:center;font-family:'Cormorant Garamond',serif;font-size:12px;"><span>${prot.nom || '—'}</span>${prot.valeur ? `<span class="prot-val-badge">${prot.valeur}</span>` : ''}</div></div>`;
 
-    // Reaction buttons — look up Parade and Esquiver in the character's skills/specials
+    // 1 · Réactions (Parade / Esquive) — two cards
     const allSkills = [...(character.skills || []), ...(character.specials || [])];
     const isContemporary = character.ariaType === 'contemporary';
     const parrySkill = allSkills.find(s => isContemporary ? /tabasser/i.test(s.name) : /combat.rapproch/i.test(s.name));
     const dodgeSkill = allSkills.find(s => isContemporary ? /réflexes/i.test(s.name) : /esquiv/i.test(s.name));
     if (parrySkill || dodgeSkill) {
-        html += `<div style="margin:8px 0 6px;border-top:1px solid var(--border);"></div>`;
-        html += `<div style="font-family:'Cormorant Garamond',serif;font-size:9px;letter-spacing:.15em;color:var(--gold-dim);text-transform:uppercase;margin-bottom:6px;">Réactions</div>`;
-        html += `<div class="react-btns">`;
+        html += `<div class="sb-section"><div class="sb-label">Réactions</div><div class="react-btns">`;
         if (parrySkill) {
             const pb = +parrySkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, parrySkill.pct + pb + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${parrySkill.name.replace(/'/g, "\\'")}',${parrySkill.pct + pb})">Parer<br><span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${parrySkill.name.replace(/'/g, "\\'")}',${parrySkill.pct + pb})">Parade<span class="react-pct">${eff}%</span></button>`;
         }
         if (dodgeSkill) {
             const db = +dodgeSkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, dodgeSkill.pct + db + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${dodgeSkill.name.replace(/'/g, "\\'")}',${dodgeSkill.pct + db})">${dodgeSkill.name}<br><span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${dodgeSkill.name.replace(/'/g, "\\'")}',${dodgeSkill.pct + db})">${dodgeSkill.name}<span class="react-pct">${eff}%</span></button>`;
         }
-        html += `</div>`;
+        html += `</div></div>`;
     }
+
+    // 2 · Protection — name + value badge
+    const prot = character.protection || {};
+    if ((prot.nom && prot.nom.trim()) || prot.valeur) {
+        html += `<div class="sb-section"><div class="sb-label">Protection</div><div class="prot-row"><span class="prot-name">${prot.nom || '—'}</span>${prot.valeur ? `<span class="prot-val-badge">${prot.valeur}</span>` : ''}</div></div>`;
+    }
+
+    // 3 · Armes — favourited weapons, left-border rows
+    const weapons = (character.weapons || []).filter(w => w.nom.trim() && w.favourite);
+    html += `<div class="sb-section"><div class="sb-label">Armes</div>`;
+    if (weapons.length) {
+        weapons.forEach(w => {
+            const hasFormula = w.degats && w.degats.trim();
+            const rollAttr = hasFormula ? ` onclick="rollWeaponDamage('${w.nom.replace(/'/g,"\\'")}','${w.degats.replace(/'/g,"\\'")}')"` : '';
+            const rollableClass = hasFormula ? ' weap-rollable' : '';
+            const hint = hasFormula ? `<span class="weap-roll-hint">lancer</span>` : '';
+            html += `<div class="weap-row${rollableClass}"${rollAttr}><span class="weap-name">${w.nom}</span><span class="weap-dmg">${hint}${w.degats || '—'}</span></div>`;
+        });
+    } else {
+        html += `<div class="sb-empty">Aucune arme</div>`;
+    }
+    html += `</div>`;
 
     body.innerHTML = html;
 }
