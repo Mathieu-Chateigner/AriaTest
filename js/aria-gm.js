@@ -500,9 +500,9 @@ function renderCampaignScreen() {
         const card = document.createElement('div');
         card.className = 'sel-card';
         const typeBadge = c.ariaType === 'contemporary'
-            ? '<span class="sel-card-type contemporary">🕵 Contemporain</span>'
-            : '<span class="sel-card-type">⚔ Médiéval</span>';
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCampaign('${c.id}')" title="Supprimer">✕</button><div class="sel-card-row"><div class="sel-card-name">${c.name}</div><div class="sel-card-joincode" onclick="event.stopPropagation();copyJoinCodeFromCard(this,'${c.joinCode||''}')">🔑 ${c.joinCode || '—'}</div></div>${typeBadge}`;
+            ? '<span class="sel-card-type contemporary">Contemporain</span>'
+            : '<span class="sel-card-type">Médiéval</span>';
+        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCampaign('${c.id}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div class="sel-card-name">${c.name}</div><div class="sel-card-joincode" onclick="event.stopPropagation();copyJoinCodeFromCard(this,'${c.joinCode||''}')">Code · ${c.joinCode || '—'}</div><div class="sel-card-cta">Diriger &rarr;</div>`;
         card.addEventListener('click', () => selectCampaign(c.id));
         grid.appendChild(card);
     });
@@ -1094,7 +1094,7 @@ function renderPlayerCards() {
                   <div class="pc-name">${_escHtml(p.name || playerId)}</div>
                   <div class="pc-class">${_escHtml(p.charClass || '')}</div>
                 </div>
-                <button class="pc-btn details" onclick="openPlayerDetails('${playerId}')" title="Voir la fiche">📋</button>
+                <button class="pc-btn details" onclick="openPlayerDetails('${playerId}')" title="Voir la fiche">≡</button>
               </div>
               <div class="pc-body">
                 <div class="pc-hp-row">
@@ -1104,7 +1104,7 @@ function renderPlayerCards() {
                   </div>
                   <div class="pc-hp-bar-wrap"><div class="pc-hp-bar" style="width:${Math.round(pct * 100)}%;background:${hpColor};"></div></div>
                 </div>
-                ${p.protection ? `<div class="pc-prot" title="Protection">🛡 <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}</div>` : ''}
+                ${p.protection ? `<div class="pc-prot" title="Protection"><span class="pc-prot-label">Prot.</span> <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}</div>` : ''}
                 <div class="pc-stats">
                   ${Object.entries(stats).filter(([k]) => k !== 'PV').map(([k, v]) => `<span class="pc-stat">${_escHtml(k)} <span>${_escHtml(v)}</span></span>`).join('')}
                 </div>
@@ -1112,11 +1112,11 @@ function renderPlayerCards() {
                   <input class="pc-dmg-input" id="dmg-${playerId}" type="text" inputmode="numeric"
                     placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
                     onkeydown="if(event.key==='Enter')applyPlayerDamage('${playerId}')" />
-                  <button class="pc-btn dmg" onclick="applyPlayerDamage('${playerId}')">⚔</button>
+                  <button class="pc-btn dmg" onclick="applyPlayerDamage('${playerId}')">−</button>
                   <input class="pc-heal-input" id="heal-${playerId}" type="text" inputmode="numeric"
                     placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
                     onkeydown="if(event.key==='Enter')applyPlayerHeal('${playerId}')" />
-                  <button class="pc-btn heal" onclick="applyPlayerHeal('${playerId}')">♥</button>
+                  <button class="pc-btn heal" onclick="applyPlayerHeal('${playerId}')">+</button>
                 </div>
                 <div class="pc-karma-row">
                   <span class="pc-karma-label">Karma</span>
@@ -1160,7 +1160,7 @@ function renderPlayerCards() {
             if (statsEl) statsEl.innerHTML = Object.entries(stats).filter(([sk]) => sk !== 'PV').map(([sk, v]) => `<span class="pc-stat">${_escHtml(sk)} <span>${_escHtml(v)}</span></span>`).join('');
             let protEl = card.querySelector('.pc-prot');
             if (p.protection) {
-                const protHtml = `🛡 <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}`;
+                const protHtml = `<span class="pc-prot-label">Prot.</span> <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}`;
                 if (!protEl) {
                     protEl = document.createElement('div');
                     protEl.className = 'pc-prot';
@@ -1230,7 +1230,7 @@ function openPlayerDetails(playerId) {
     html += `<div class="pdm-section-title">Accès aux onglets</div>`;
     html += `<div class="pdm-tab-toggles">`;
     html += `<button class="pdm-tab-toggle${tabs.cards ? ' active' : ''}" onclick="sendTabConfig('${playerId}','cards',${!tabs.cards})">🂠 Cartes</button>`;
-    html += `<button class="pdm-tab-toggle${tabs.alchemy ? ' active' : ''}" onclick="sendTabConfig('${playerId}','alchemy',${!tabs.alchemy})">⚗ Alchimie</button>`;
+    html += `<button class="pdm-tab-toggle${tabs.alchemy ? ' active' : ''}" onclick="sendTabConfig('${playerId}','alchemy',${!tabs.alchemy})">Alchimie</button>`;
     html += `</div></div>`;
 
     // Files
@@ -1253,7 +1253,7 @@ function openPlayerDetails(playerId) {
         for (const pot of gmPotions) {
             const granted = grantedRecipeIds.has(pot.id);
             const safeTitle = (pot.desc || '').replace(/"/g, '&quot;');
-            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${playerId}','${pot.id}')" title="${safeTitle}">⚗ ${pot.name}</button>`;
+            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${playerId}','${pot.id}')" title="${safeTitle}">${pot.name}</button>`;
         }
         html += `</div></div>`;
     }
@@ -1305,7 +1305,7 @@ function openPlayerDetails(playerId) {
         html += `<div class="pdm-coin-block"><span class="pdm-coin-label">Francs</span><span class="pdm-coin-val">${_escHtml(money.francs ?? 0)}</span></div>`;
     } else {
         const MONEY_COINS = [
-            { key: 'couronne', label: 'Couronne', color: '#c9a84c' },
+            { key: 'couronne', label: 'Couronne', color: '#eca456' },
             { key: 'orbe',     label: 'Orbe',     color: '#b8c4cc' },
             { key: 'sceptre',  label: 'Sceptre',  color: '#c87533' },
             { key: 'sou',      label: 'Sou',      color: '#8a8a94' },
@@ -1334,7 +1334,7 @@ function openPlayerDetails(playerId) {
     if (realPotions.length) {
         html += `<div class="pdm-section"><div class="pdm-section-title">Potions</div><div class="pdm-list">`;
         for (const p of realPotions) {
-            html += `<div class="pdm-list-row"><span class="pdm-list-name">${_escHtml(p.name)}${p.desc ? ` <span class="pdm-list-desc">— ${_escHtml(p.desc)}</span>` : ''}${p.ingredients ? ` <span class="pdm-list-desc pdm-list-ing">⚗ ${_escHtml(p.ingredients)}</span>` : ''}</span><span class="pdm-list-val">×${_escHtml(p.qty ?? 1)}</span></div>`;
+            html += `<div class="pdm-list-row"><span class="pdm-list-name">${_escHtml(p.name)}${p.desc ? ` <span class="pdm-list-desc">— ${_escHtml(p.desc)}</span>` : ''}${p.ingredients ? ` <span class="pdm-list-desc pdm-list-ing">${_escHtml(p.ingredients)}</span>` : ''}</span><span class="pdm-list-val">×${_escHtml(p.qty ?? 1)}</span></div>`;
         }
         html += `</div></div>`;
     }
@@ -1747,11 +1747,11 @@ function renderMonsters() {
             <div class="mc-hp-row">
               <div><div class="mc-hp-num" style="color:${hpColor}">${m.pv}</div><div style="font-family:'Cormorant Garamond',serif;font-size:9px;color:rgba(255,150,150,.5);">/ ${m.maxPV} PV</div></div>
               <div class="mc-hp-bar-wrap"><div class="mc-hp-bar" style="width:${Math.round(pct * 100)}%;background:${hpColor};"></div></div>
-              <div style="font-family:'Cormorant Garamond',serif;font-size:10px;color:rgba(255,150,150,.5);">🛡 ${m.armor}</div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,150,150,.5);">Arm. ${m.armor}</div>
             </div>
             <div class="mc-inline-actions">
               <input class="mc-inline-input" id="mc-dmg-${safeId}" type="text" inputmode="numeric" placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')monsterInlineDamage('${m.id}')" />
-              <button class="mc-inline-btn dmg" onclick="monsterInlineDamage('${m.id}')">⚔</button>
+              <button class="mc-inline-btn dmg" onclick="monsterInlineDamage('${m.id}')">−</button>
               <input class="mc-inline-input" id="mc-heal-${safeId}" type="text" inputmode="numeric" placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')monsterInlineHeal('${m.id}')" />
               <button class="mc-inline-btn heal" onclick="monsterInlineHeal('${m.id}')">♥</button>
             </div>
@@ -1899,7 +1899,7 @@ function renderRollFeed() {
             const type = isDie ? 'die' : classify(d.roll, d.threshold, d.success);
             const row = document.createElement('div'); row.className = `roll-entry ${type}${d.hidden ? ' hidden-roll' : ''}`;
             row.innerHTML = `
-              <div class="re-char">${d.hidden ? '<span class="re-hidden-badge" title="Jet caché — visible uniquement par le MJ">🔒</span> ' : ''}${_escHtml(d.char || d.playerId || '?')}</div>
+              <div class="re-char">${d.hidden ? '<span class="re-hidden-badge" title="Jet caché — visible uniquement par le MJ">MJ</span>' : ''}${_escHtml(d.char || d.playerId || '?')}</div>
               <div class="re-context">
                 <div class="re-skill">${_escHtml(d.skillName)}</div>
                 ${isDie ? '' : `<div class="re-threshold">Seuil : ${d.threshold}%${d.bonusMalus ? ` · BM : ${d.bonusMalus > 0 ? '+' : ''}${d.bonusMalus}` : ''}</div>`}
@@ -2002,7 +2002,7 @@ function showGMRollResult(name, threshold, roll, success, dmgResult) {
     const verdicts = { success: 'SUCCÈS', fail: 'ÉCHEC', 'crit-success': 'SUCCÈS CRITIQUE', 'crit-fail': 'ÉCHEC CRITIQUE' };
     const colors = { success: 'var(--success)', fail: 'var(--fail)', 'crit-success': '#a8ff78', 'crit-fail': '#ff4444' };
     const dmgHtml = dmgResult
-        ? `<div class="gm-rr-dmg">⚔ Dégâts : <strong>${dmgResult.total}</strong>${dmgResult.breakdown && dmgResult.breakdown !== String(dmgResult.total) ? ` <span class="gm-rr-breakdown">${dmgResult.breakdown}</span>` : ''}</div>`
+        ? `<div class="gm-rr-dmg">Dégâts : <strong>${dmgResult.total}</strong>${dmgResult.breakdown && dmgResult.breakdown !== String(dmgResult.total) ? ` <span class="gm-rr-breakdown">${dmgResult.breakdown}</span>` : ''}</div>`
         : '';
     let targetHtml = '';
     if (dmgResult) {
@@ -2557,7 +2557,7 @@ function renderGMPotions() {
         card.className = 'gm-pot-card';
         card.innerHTML = `
             <div class="gm-pot-card-header">
-                <span class="gm-pot-card-icon">⚗</span>
+                <span class="gm-pot-card-icon">◆</span>
                 <input class="gm-pot-name-input" value="${p.name.replace(/"/g,'&quot;')}" placeholder="Nom" oninput="updateGMPotion('${p.id}','name',this.value)" />
                 <div class="gm-pot-chance-wrap"><input class="gm-pot-chance-badge" type="text" inputmode="numeric" value="${p.successChance || ''}" placeholder="—" oninput="this.value=this.value.replace(/[^0-9]/g,'');updateGMPotion('${p.id}','successChance',+this.value||0)" /><span class="gm-pot-chance-suffix">%</span></div>
             </div>
@@ -2651,13 +2651,13 @@ function _pdmSkillPct(s) {
     if (!b) return _escHtml(pct) + '%';
     return `${_escHtml(pct + b)}% <span class="pdm-skill-mod" title="Modificateur permanent">${b > 0 ? '+' : ''}${b}</span>`;
 }
-// Return an emoji icon string for a file MIME type.
+// Return a short uppercase type tag for a file MIME type (mono label, no emoji).
 function _fileIcon(type) {
-    if (!type) return '📄';
-    if (type.startsWith('image/')) return '🖼';
-    if (type === 'application/pdf') return '📕';
-    if (type.startsWith('text/')) return '📝';
-    return '📄';
+    if (!type) return 'DOC';
+    if (type.startsWith('image/')) return 'IMG';
+    if (type === 'application/pdf') return 'PDF';
+    if (type.startsWith('text/')) return 'TXT';
+    return 'DOC';
 }
 
 // Persist GM files to localStorage and debounce Supabase sync.
@@ -3644,7 +3644,7 @@ function renderGmFiles() {
             </div>
             <div class="gm-file-actions">
                 <button class="gm-file-open-btn" onclick="openGmFileViewer('${f.id}')" title="Ouvrir">Ouvrir</button>
-                <button class="gm-file-btn${isAll ? ' active' : ''}" onclick="grantFileToAll('${f.id}')" title="${isAll ? 'Révoquer accès global' : 'Accorder à tous'}">🌍</button>
+                <button class="gm-file-btn${isAll ? ' active' : ''}" onclick="grantFileToAll('${f.id}')" title="${isAll ? 'Révoquer accès global' : 'Accorder à tous'}">Tous</button>
                 <button class="gm-file-del-btn" onclick="removeGmFile('${f.id}')" title="Supprimer">✕</button>
             </div>`;
         list.appendChild(card);

@@ -924,7 +924,7 @@ body.shake {
     font-size: 1.4em;
     font-weight: 600;
     color: var(--gold);
-    text-shadow: 0 0 12px rgba(201,168,76,0.5);
+    text-shadow: 0 0 12px rgba(236,164,86,0.5);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -936,25 +936,25 @@ body.shake {
 .ow-hp-fill { position: absolute; inset: 0; right: auto; background: linear-gradient(90deg,#1a5c2a,#2e8b57); transition: width 0.8s ease; border-radius: 3px; }
 .ow-hp-fill.yellow { background: linear-gradient(90deg,#7a5500,#c8960a); }
 .ow-hp-fill.red { background: linear-gradient(90deg,#7b1a1a,#c0392b); }
-.ow-hp-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Cormorant Garamond', serif; font-size: 0.7em; color: var(--parchment); text-shadow: 0 1px 3px #000; }
+.ow-hp-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 0.7em; font-weight: 700; color: var(--parchment); text-shadow: 0 1px 3px #000; }
 
 .ow-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
 .ow-stat { display: flex; flex-direction: column; align-items: center; background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 3px; padding: 3px 4px; }
-.ow-stat-label { font-family: 'Cormorant Garamond', serif; font-size: 0.55em; color: var(--parchment-dim); }
-.ow-stat-value { font-family: 'Cormorant Garamond', serif; font-size: 0.95em; color: var(--gold); font-weight: 600; }
+.ow-stat-label { font-family: ui-monospace, Menlo, monospace; font-size: 0.5em; letter-spacing: 0.14em; text-transform: uppercase; color: var(--parchment-dim); }
+.ow-stat-value { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 0.95em; color: var(--gold); font-weight: 700; }
 
 .ow-protection { font-family: 'Cormorant Garamond', serif; font-size: 0.85em; color: var(--parchment); background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 3px; padding: 4px 8px; }
 
 .ow-list { display: flex; flex-direction: column; gap: 2px; }
-.ow-list-item { display: flex; justify-content: space-between; font-size: 0.8em; padding: 2px 4px; border-bottom: 1px solid rgba(201,168,76,0.08); }
+.ow-list-item { display: flex; justify-content: space-between; font-size: 0.8em; padding: 2px 4px; border-bottom: 1px solid rgba(236,164,86,0.08); }
 .ow-list-name { color: var(--parchment); }
 .ow-list-value { color: var(--gold); font-family: 'Cormorant Garamond', serif; font-size: 0.85em; }
 
 .ow-custom-text { font-size: 1em; line-height: 1.5; color: var(--parchment); }
 
-.ow-campaign-name { font-family: 'Cormorant Garamond', serif; font-size: 1.2em; color: var(--gold); text-shadow: 0 0 12px rgba(201,168,76,0.4); text-align: center; }
+.ow-campaign-name { font-family: 'Cormorant Garamond', serif; font-size: 1.2em; color: var(--gold); text-shadow: 0 0 12px rgba(236,164,86,0.4); text-align: center; }
 
-.ow-roll-row { display: flex; gap: 6px; align-items: center; font-size: 0.78em; padding: 2px 0; border-bottom: 1px solid rgba(201,168,76,0.08); }
+.ow-roll-row { display: flex; gap: 6px; align-items: center; font-size: 0.78em; padding: 2px 0; border-bottom: 1px solid rgba(236,164,86,0.08); }
 .ow-roll-char { color: var(--parchment-dim); min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ow-roll-skill { flex: 1; color: var(--parchment); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ow-roll-result { font-family: 'Cormorant Garamond', serif; font-weight: 600; }

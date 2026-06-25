@@ -17,7 +17,7 @@
     <!-- SAVE KEY GATEWAY -->
     <div id="file-gateway" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:10000;">
         <div class="gateway-panel">
-            <div class="sel-brand" style="color:var(--gm-accent);">ARIA</div>
+            <div class="sel-brand">ARIA</div>
             <!-- New key panel -->
             <div id="gateway-new">
                 <div class="gateway-title">Clé de sauvegarde</div>
@@ -41,17 +41,17 @@
     </div>
 
     <!-- SELECTION SCREEN -->
-    <div id="selection-screen" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
+    <div id="selection-screen" style="position:fixed;inset:0;background:radial-gradient(120% 70% at 50% 0%, rgba(169,139,221,.05), transparent 55%), var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
         <div class="sel-container">
             <a class="sel-home-btn" href="../" title="Accueil">⌂</a>
             <div class="sel-brand">ARIA</div>
-            <div class="sel-subtitle" style="color:var(--gm-accent);">Choisissez une campagne</div>
+            <div class="sel-subtitle">Choisissez une campagne</div>
             <div class="sel-grid" id="campaign-grid"></div>
             <div class="sel-new-form" id="new-campaign-form" style="display:none;">
                 <input class="sel-new-input" id="new-campaign-name" placeholder="Nom de la campagne" onkeydown="if(event.key==='Enter')confirmCreateCampaign()" />
                 <div class="sel-type-row">
-                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="ancient" checked> ⚔ Médiéval</label>
-                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="contemporary"> 🕵 Contemporain</label>
+                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="ancient" checked> Médiéval</label>
+                    <label class="sel-type-label"><input type="radio" name="new-campaign-type" value="contemporary"> Contemporain</label>
                 </div>
                 <div class="sel-new-btns">
                     <button class="sel-confirm-btn" onclick="confirmCreateCampaign()">Créer</button>
@@ -60,7 +60,7 @@
             </div>
             <button class="sel-add-btn" onclick="createCampaign()">+ Nouvelle campagne</button>
             <div class="sel-save-row">
-                <span class="sel-save-icon">💾</span>
+                <span class="sel-save-icon">Clé</span>
                 <span class="sel-save-label" id="sel-save-label">—</span>
                 <button class="sel-save-btn" onclick="copySaveKey()">Copier</button>
                 <button class="sel-save-btn" onclick="changeSaveKey()">Changer…</button>
@@ -99,9 +99,9 @@
                 <div class="gm-bulk-bar">
                     <span class="field-label" style="margin:0;white-space:nowrap;">Tous les joueurs</span>
                     <input class="gm-input" id="bulk-dmg-input" type="text" inputmode="numeric" placeholder="Dégâts" style="width:80px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')bulkDamageAll()" />
-                    <button class="gm-action-btn gm-action-dmg" onclick="bulkDamageAll()">⚔ Tous</button>
+                    <button class="gm-action-btn gm-action-dmg" onclick="bulkDamageAll()">Infliger</button>
                     <input class="gm-input" id="bulk-heal-input" type="text" inputmode="numeric" placeholder="Soins" style="width:80px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')bulkHealAll()" />
-                    <button class="gm-action-btn gm-action-heal" onclick="bulkHealAll()">♥ Tous</button>
+                    <button class="gm-action-btn gm-action-heal" onclick="bulkHealAll()">Soigner</button>
                 </div>
                 <div id="gm-self-view-section" style="display:none;margin-top:10px;">
                     <div class="section-header">
@@ -278,7 +278,7 @@
                         <div class="card-stage">
                             <div class="flip-wrap hidden" id="gm-flip-wrap">
                                 <div class="flip-inner">
-                                    <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                    <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(169,139,221,.25);">♛</div></div>
                                     <div id="gm-drawn-card"></div>
                                 </div>
                             </div>
@@ -295,7 +295,7 @@
                     <div class="card-stage">
                         <div class="flip-wrap hidden" id="flip-wrap">
                             <div class="flip-inner">
-                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(169,139,221,.25);">♛</div></div>
                                 <div id="drawn-card"></div>
                             </div>
                         </div>
@@ -384,7 +384,7 @@
                         <span class="music-fade-label">s</span>
                     </div>
                     <div class="music-vol-row">
-                        <span class="music-vol-icon">🔊</span>
+                        <span class="music-vol-icon">♪</span>
                         <input type="range" class="music-vol-slider" id="music-gm-volume" min="0" max="100" value="80"
                             oninput="onGMMusicVolumeChange(this.value)" />
                         <span class="music-vol-val" id="music-gm-vol-val">80</span>
@@ -409,7 +409,7 @@
                 </div>
                 <div class="music-add-row" style="margin-top:6px;">
                     <label class="gm-action-btn" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-                        📁 Importer un fichier
+                        Importer un fichier
                         <input type="file" id="music-file-input" accept=".mp3,.ogg,.wav,.flac" style="display:none;"
                             onchange="musicUploadFile(this)" />
                     </label>
@@ -476,7 +476,7 @@
             </label>
         </div>
         <button class="config-save-btn" onclick="saveConfig()">Reconnecter</button>
-        <button class="config-save-btn" style="margin-top:8px;background:rgba(201,168,76,.08);" onclick="copyOverlayUrl()">📋 Copier URL Overlay (OBS)</button>
+        <button class="config-save-btn" style="margin-top:8px;background:rgba(169,139,221,.10);" onclick="copyOverlayUrl()">Copier URL Overlay (OBS)</button>
     </div>
 
 

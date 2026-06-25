@@ -41,7 +41,7 @@
     </div>
 
     <!-- SELECTION SCREEN -->
-    <div id="selection-screen" style="position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
+    <div id="selection-screen" style="position:fixed;inset:0;background:radial-gradient(120% 70% at 50% 0%, rgba(236,164,86,.05), transparent 55%), var(--bg);display:none;align-items:center;justify-content:center;z-index:9999;overflow-y:auto;padding:24px;">
         <div class="sel-container">
             <a class="sel-home-btn" href="../" title="Accueil">⌂</a>
             <div class="sel-brand">ARIA</div>
@@ -52,8 +52,8 @@
                 <input class="sel-new-input" id="new-char-class" placeholder="Classe / Description" onkeydown="if(event.key==='Enter')confirmCreateCharacter()" />
                 <input class="sel-new-input" id="new-char-campaign" placeholder="Code de campagne (optionnel)" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')confirmCreateCharacter()" />
                 <div class="sel-type-row">
-                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="ancient" checked> ⚔ Médiéval</label>
-                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="contemporary"> 🕵 Contemporain</label>
+                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="ancient" checked> Médiéval</label>
+                    <label class="sel-type-label"><input type="radio" name="new-char-type" value="contemporary"> Contemporain</label>
                 </div>
                 <div class="sel-type-hint">Le type doit correspondre à celui de la campagne.</div>
                 <div class="sel-new-btns">
@@ -63,7 +63,7 @@
             </div>
             <button class="sel-add-btn" onclick="createCharacter()">+ Nouveau personnage</button>
             <div class="sel-save-row">
-                <span class="sel-save-icon">💾</span>
+                <span class="sel-save-icon">Clé</span>
                 <span class="sel-save-label" id="sel-save-label">—</span>
                 <button class="sel-save-btn" onclick="copySaveKey()">Copier</button>
                 <button class="sel-save-btn" onclick="changeSaveKey()">Changer…</button>
@@ -178,16 +178,16 @@
         <!-- CONTENT -->
         <div class="content">
             <div class="tabs">
-                <button class="tab-btn active" data-tab="tab-skills" onclick="switchTab('tab-skills',this)">⚔ Compétences<span class="tab-pin" title="Ouvrir en 2nd panneau (cliquer à nouveau pour fermer)" onclick="event.stopPropagation();pinTab('tab-skills')">⧉</span></button>
-                <button class="tab-btn" id="tab-btn-stats" data-tab="tab-stats" onclick="switchTab('tab-stats',this)">◆ Caractéristiques<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-stats')">⧉</span></button>
-                <button class="tab-btn" data-tab="tab-free" onclick="switchTab('tab-free',this)">⚄ Jet libre<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-free')">⧉</span></button>
-                <button class="tab-btn" data-tab="tab-inventory" onclick="switchTab('tab-inventory',this)">⛁ Inventaire<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-inventory')">⧉</span></button>
-                <button class="tab-btn" data-tab="tab-notes" onclick="switchTab('tab-notes',this)">✎ Notes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-notes')">⧉</span></button>
-                <button class="tab-btn" id="tab-btn-cards" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">♠ Cartes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cards')">⧉</span></button>
-                <button class="tab-btn" id="tab-btn-alchemy" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">⚗ Alchimie<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-alchemy')">⧉</span></button>
-                <button class="tab-btn" id="tab-btn-files" data-tab="tab-files" style="display:none;" onclick="switchTab('tab-files',this)">✉ Documents<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-files')">⧉</span></button>
-                <button class="tab-btn" id="tab-btn-cameras" data-tab="tab-cameras" style="display:none;" onclick="switchTab('tab-cameras',this)">📹 Caméras<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cameras')">⧉</span></button>
-                <button class="tab-btn" data-tab="tab-char" onclick="switchTab('tab-char',this)">◉ Personnage<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-char')">⧉</span></button>
+                <button class="tab-btn active" data-tab="tab-skills" onclick="switchTab('tab-skills',this)">Compétences<span class="tab-pin" title="Ouvrir en 2nd panneau (cliquer à nouveau pour fermer)" onclick="event.stopPropagation();pinTab('tab-skills')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-stats" data-tab="tab-stats" onclick="switchTab('tab-stats',this)">Caractéristiques<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-stats')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-free" onclick="switchTab('tab-free',this)">Jet libre<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-free')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-inventory" onclick="switchTab('tab-inventory',this)">Inventaire<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-inventory')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-notes" onclick="switchTab('tab-notes',this)">Notes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-notes')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-cards" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">Cartes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cards')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-alchemy" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">Alchimie<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-alchemy')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-files" data-tab="tab-files" style="display:none;" onclick="switchTab('tab-files',this)">Documents<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-files')">⧉</span></button>
+                <button class="tab-btn" id="tab-btn-cameras" data-tab="tab-cameras" style="display:none;" onclick="switchTab('tab-cameras',this)">Caméras<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cameras')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-char" onclick="switchTab('tab-char',this)">Personnage<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-char')">⧉</span></button>
             </div>
 
             <!-- COMPETENCES -->
@@ -241,7 +241,7 @@
                         <div class="field-label">Seuil (%)</div>
                         <input class="free-input" id="free-threshold" type="text" inputmode="numeric" placeholder="ex: 60" oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
                     </div>
-                    <button class="roll-btn" onclick="doFreeRoll()">⚄ Lancer</button>
+                    <button class="roll-btn" onclick="doFreeRoll()">Lancer</button>
                     <div class="dice-section">
                         <div class="field-label">Dés simples</div>
                         <div class="dice-btns">
@@ -317,7 +317,7 @@
                     <div class="card-stage">
                         <div class="flip-wrap hidden" id="flip-wrap">
                             <div class="flip-inner">
-                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(201,168,76,.25);">♛</div></div>
+                                <div class="card-back-face"><div class="deck-pattern" style="border-color:rgba(236,164,86,.25);">♛</div></div>
                                 <div id="drawn-card"></div>
                             </div>
                         </div>
@@ -528,7 +528,7 @@
             </label>
         </div>
         <button class="config-save-btn" onclick="saveConfig()">Reconnecter</button>
-        <button class="config-save-btn" style="margin-top:8px;background:rgba(201,168,76,.08);" onclick="copyOverlayUrl()">📋 Copier URL Overlay (OBS)</button>
+        <button class="config-save-btn" style="margin-top:8px;background:rgba(236,164,86,.08);" onclick="copyOverlayUrl()">Copier URL Overlay (OBS)</button>
     </div>
 
 

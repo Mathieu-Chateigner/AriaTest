@@ -533,11 +533,11 @@ function renderSelectionScreen() {
     chars.forEach(c => {
         const card = document.createElement('div');
         card.className = 'sel-card';
-        const campBadge = c.campaignKey ? `<div class="sel-card-campaign">🔑 ${c.campaignKey}</div>` : `<div class="sel-card-campaign no-campaign">Sans campagne</div>`;
+        const campBadge = c.campaignKey ? `<div class="sel-card-campaign">Code · ${c.campaignKey}</div>` : `<div class="sel-card-campaign no-campaign">Sans campagne</div>`;
         const typeBadge = (c.ariaType || 'ancient') === 'contemporary'
-            ? `<span class="sel-card-type contemporary">🕵 Contemporain</span>`
-            : `<span class="sel-card-type">⚔ Médiéval</span>`;
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCharacter('${c.id}')" title="Supprimer">✕</button><div class="sel-card-name">${c.name || '—'}</div><div class="sel-card-class">${c.class || ''}</div>${campBadge}${typeBadge}`;
+            ? `<span class="sel-card-type contemporary">Contemporain</span>`
+            : `<span class="sel-card-type">Médiéval</span>`;
+        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCharacter('${c.id}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div><div class="sel-card-name">${c.name || '—'}</div><div class="sel-card-class">${c.class || ''}</div></div>${campBadge}<div class="sel-card-cta">Incarner &rarr;</div>`;
         card.addEventListener('click', () => selectCharacter(c.id));
         grid.appendChild(card);
     });
@@ -1146,7 +1146,7 @@ function handleGMDamage(data) {
     localStorage.setItem(hpKey(), currentHP); debouncedSyncState();
     updateHPDisplay();
     triggerDamageVFX(damage, false);
-    showToast('gm-dmg-toast', `⚔ Dégâts reçus : -${damage} PV`);
+    showToast('gm-dmg-toast', `Dégâts reçus : -${damage} PV`);
     if (hpAfter <= 0) showMort();
 }
 // Apply incoming heal from the GM: update HP, animate bar, show heal number.
@@ -1285,7 +1285,7 @@ function updateHiddenRollBtn() {
     const btn = document.getElementById('hidden-roll-btn');
     if (!btn) return;
     btn.classList.toggle('active', hiddenRollMode);
-    btn.textContent = hiddenRollMode ? '🔒 Jet caché ON' : '🔒 Jet caché';
+    btn.textContent = hiddenRollMode ? 'Jet caché ON' : 'Jet caché';
 }
 // Render the karma value display with appropriate positive/negative styling.
 function renderKarma() {
@@ -1383,9 +1383,9 @@ function renderSkills() {
         const div = document.createElement('div');
         div.className = 'skill-item';
         div.dataset.skillName = sp.name;
-        div.style.borderColor = 'rgba(123,63,160,.3)';
-        const modBadge = bonus ? `<span class="skill-mod" style="color:var(--card-purple)" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `<span class="skill-link" style="color:var(--card-purple)">Spéciale</span><span class="skill-name">${sp.name}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${sp.desc}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--card-purple)">${eff}%</span>`;
+        div.style.borderColor = 'rgba(236,164,86,.3)';
+        const modBadge = bonus ? `<span class="skill-mod" style="color:var(--ember2)" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
+        div.innerHTML = `<span class="skill-link" style="color:var(--ember2)">Spéciale</span><span class="skill-name">${sp.name}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${sp.desc}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--ember2)">${eff}%</span>`;
         div.addEventListener('click', () => doRoll(sp.name, sp.pct + bonus));
         slist.appendChild(div);
     });
@@ -1425,7 +1425,7 @@ function setMult(m) {
 }
 
 const MONEY_COINS = [
-    { key: 'couronne', label: 'Couronne', color: '#c9a84c' },
+    { key: 'couronne', label: 'Couronne', color: '#eca456' },
     { key: 'orbe',     label: 'Orbe',     color: '#b8c4cc' },
     { key: 'sceptre',  label: 'Sceptre',  color: '#c87533' },
     { key: 'sou',      label: 'Sou',      color: '#8a8a94' },
@@ -1447,7 +1447,7 @@ function renderInventorySidebar() {
         const m = character.money || {};
         if (character.ariaType === 'contemporary') {
             const f = m.francs ?? 0;
-            moneyEl.innerHTML = f > 0 ? `<span style="color:var(--parchment-dim);" title="Francs">💶 ${f} F</span>` : '';
+            moneyEl.innerHTML = f > 0 ? `<span style="color:var(--parchment-dim);" title="Francs">${f} F</span>` : '';
         } else {
             const parts = MONEY_COINS.map(c => {
                 const v = m[c.key] ?? 0;
@@ -1493,12 +1493,12 @@ function renderCombatSidebar() {
         if (parrySkill) {
             const pb = +parrySkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, parrySkill.pct + pb + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${parrySkill.name.replace(/'/g, "\\'")}',${parrySkill.pct + pb})">🛡 Parer<br><span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${parrySkill.name.replace(/'/g, "\\'")}',${parrySkill.pct + pb})">Parer<br><span class="react-pct">${eff}%</span></button>`;
         }
         if (dodgeSkill) {
             const db = +dodgeSkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, dodgeSkill.pct + db + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${dodgeSkill.name.replace(/'/g, "\\'")}',${dodgeSkill.pct + db})">⚡ ${dodgeSkill.name}<br><span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${dodgeSkill.name.replace(/'/g, "\\'")}',${dodgeSkill.pct + db})">${dodgeSkill.name}<br><span class="react-pct">${eff}%</span></button>`;
         }
         html += `</div>`;
     }
@@ -1890,12 +1890,12 @@ function applySoigner(success) {
                     localStorage.setItem(hpKey(), currentHP); debouncedSyncState();
                     updateHPDisplay();
                     triggerDamageVFX(dmg, true);
-                    showToast('gm-dmg-toast', `⚔ Blessure : -${dmg} PV`);
+                    showToast('gm-dmg-toast', `Blessure : -${dmg} PV`);
                     if (after <= 0) showMort();
                     sendPresence();
                 } else {
                     if (ablyDamage) ablyDamage.publish('damage', { targetId: target.playerId, damage: dmg, source: 'player' });
-                    showToast('gm-dmg-toast', `⚔ Blessure : -${dmg} PV → ${target.name}`);
+                    showToast('gm-dmg-toast', `Blessure : -${dmg} PV → ${target.name}`);
                 }
             });
         }
@@ -2720,7 +2720,7 @@ function renderMoneyEditor() {
     const m = character.money || {};
     if (character.ariaType === 'contemporary') {
         el.innerHTML = `<div class="money-editor-row"><div class="money-field">
-            <span class="money-label">💶 Francs</span>
+            <span class="money-label">Francs</span>
             <input class="editor-input money-input" type="text" inputmode="numeric" value="${m.francs ?? 0}" oninput="updateMoney('francs',this.value)" />
         </div></div>`;
     } else {
@@ -3198,13 +3198,13 @@ async function manualReshuffle(remainingOnly) {
 function _pfEscHtml(s) {
     return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-// Return an emoji icon string for a file MIME type.
+// Return a short uppercase type tag for a file MIME type (mono label, no emoji).
 function _pfFileIcon(type) {
-    if (!type) return '📄';
-    if (type.startsWith('image/')) return '🖼';
-    if (type === 'application/pdf') return '📕';
-    if (type.startsWith('text/')) return '📝';
-    return '📄';
+    if (!type) return 'DOC';
+    if (type.startsWith('image/')) return 'IMG';
+    if (type === 'application/pdf') return 'PDF';
+    if (type.startsWith('text/')) return 'TXT';
+    return 'DOC';
 }
 
 // Render the GM-granted files list in the Fichiers tab.
