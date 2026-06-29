@@ -85,7 +85,10 @@
     <div class="topbar">
         <div class="topbar-title" onclick="switchCharacter()" title="Changer de personnage" style="cursor:pointer;">ARIA</div>
         <div class="tb-sep"></div>
-        <span class="topbar-char" id="char-display">—</span>
+        <div class="topbar-char" id="char-display">
+            <span class="tb-char-name" id="tb-char-name">—</span>
+            <span class="tb-char-class" id="tb-char-class"></span>
+        </div>
         <div class="tb-sep"></div>
 
         <!-- modifier cluster -->
@@ -141,6 +144,9 @@
         </div>
 
         <span class="rolling-ind" id="rolling-ind">Lancer…</span>
+        <div class="tb-sep" id="tb-code-sep" style="display:none;"></div>
+        <div class="tb-code" id="tb-campaign-code" title="Code de campagne" onclick="copyCampaignCode()" style="display:none;">—</div>
+        <div class="status-dot tb-conn-dot" id="ably-dot" title="Connexion temps réel"></div>
         <button id="btn-open-overlay-editor" class="icon-btn" title="Éditeur d'overlay" style="display:none">▦</button>
         <button class="icon-btn" onclick="toggleConfig()" title="Configuration">⚙</button>
     </div>
@@ -168,12 +174,6 @@
 
             <!-- COMBAT — Réactions / Protection / Armes sections (design frame 03) -->
             <div class="sidebar-combat" id="combat-sidebar-body"></div>
-
-            <!-- INVENTORY -->
-            <div class="panel inv-sidebar-panel">
-                <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span>Inventaire</span><span id="inv-money-display" style="display:flex;gap:5px;font-size:10px;letter-spacing:0;font-family:'Cormorant Garamond',serif;"></span></div>
-                <div class="panel-body" id="inv-sidebar-body"></div>
-            </div>
         </div>
 
         <!-- CONTENT -->
@@ -200,11 +200,6 @@
                     <span class="section-caption">cliquer pour lancer</span>
                 </div>
                 <div class="skill-list" id="skill-list"></div>
-                <div class="ornamental-divider">
-                    <div class="line"></div>
-                    <div class="gem"></div>
-                    <div class="line rev"></div>
-                </div>
                 <div class="section-header">
                     <span class="section-icon">✦</span>
                     <span class="section-title">Spéciaux</span>
@@ -219,10 +214,8 @@
                     <span class="section-icon">✦</span>
                     <span class="section-title">Caractéristiques</span>
                     <div class="section-rule"></div>
-                </div>
-                <div class="mult-bar">
                     <span class="mult-bar-label">Multiplicateur</span>
-                    <div id="mult-bar-btns" style="display:flex;gap:6px;"></div>
+                    <div class="mult-bar-btns" id="mult-bar-btns"></div>
                 </div>
                 <div class="stat-caption">cliquer une caractéristique pour lancer (valeur × multiplicateur)</div>
                 <div class="stat-grid" id="stat-grid"></div>
@@ -260,7 +253,7 @@
                 </div>
                 <div class="roll-history-section">
                     <div class="roll-history-hdr">
-                        <span class="field-label" style="margin:0;">Historique</span>
+                        <span class="rh-title">Historique</span>
                         <button class="clear-btn" onclick="clearRollHistory()">Effacer</button>
                     </div>
                     <div class="rh-filter-bar" id="rh-filter-bar">
@@ -269,6 +262,8 @@
                         <button class="rf-pill"        id="rfp-fail"    onclick="toggleRollFilter('fail')">Échec</button>
                         <button class="rf-pill"        id="rfp-crit"    onclick="toggleRollFilter('crit')">Critique</button>
                         <button class="rf-pill"        id="rfp-die"     onclick="toggleRollFilter('die')">Dés</button>
+                        <input type="date" class="rh-date" id="rh-date-filter" title="Filtrer par date" onchange="setRollDateFilter(this.value)" />
+                        <button class="rf-pill rh-date-clear" id="rh-date-clear" onclick="clearRollDateFilter()" style="display:none;">Date ✕</button>
                     </div>
                     <div class="roll-history-list" id="roll-history-list">
                         <div class="roll-history-empty">Aucun jet pour l'instant.</div>
@@ -279,14 +274,18 @@
 
             <!-- INVENTAIRE -->
             <div class="tab-content" id="tab-inventory">
+                <div class="section-header">
+                    <span class="section-title">Inventaire</span>
+                    <div class="section-rule"></div>
+                </div>
                 <div id="inv-money-editor"></div>
-<div class="cs-col-hdr cs-inv-hdr">
+                <div class="inv-list-hdr">
                     <span class="editor-label">Objet</span>
-                    <span class="editor-label center">Qté</span>
+                    <span class="editor-label center">Quantité</span>
                     <span></span>
                 </div>
-                <div class="cs-list-body" id="inv-editor-list"></div>
-                <div class="cs-block-footer"><button class="add-skill-btn" onclick="addInventoryRow()">+ Ajouter un objet</button></div>
+                <div id="inv-editor-list"></div>
+                <button class="add-skill-btn inv-add-btn" onclick="addInventoryRow()">+ Ajouter un objet</button>
             </div>
 
             <!-- NOTES -->
@@ -368,13 +367,15 @@
             <div class="tab-content" id="tab-char">
                 <div class="char-sheet-wrap">
 
+                    <!-- Identité + Attributs side by side -->
+                    <div class="cs-pair">
                     <!-- Identité -->
                     <div class="cs-block">
                         <div class="cs-block-title">Identité</div>
                         <div class="cs-block-body">
-                            <div class="editor-form">
-                                <div class="editor-field"><label class="editor-label">Nom du personnage</label><input class="editor-input" id="ed-name" /></div>
-                                <div class="editor-field"><label class="editor-label">Classe / Description</label><input class="editor-input" id="ed-class" /></div>
+                            <div class="editor-form editor-form-1col">
+                                <div class="editor-field full"><label class="editor-label">Nom du personnage</label><input class="editor-input" id="ed-name" /></div>
+                                <div class="editor-field full"><label class="editor-label">Classe / Description</label><input class="editor-input" id="ed-class" /></div>
                             </div>
                         </div>
                     </div>
@@ -391,9 +392,10 @@
                             <div class="cs-attr cs-attr-pv"><label class="cs-attr-label">PV max</label><input class="editor-input cs-attr-input" id="ed-pv" type="text" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" /></div>
                         </div>
                     </div>
+                    </div><!-- /.cs-pair -->
 
                     <!-- Traits physiques -->
-                    <div class="cs-block">
+                    <div class="cs-block cs-phys">
                         <div class="cs-block-title">Traits physiques</div>
                         <div class="cs-block-body">
                             <div class="editor-form">

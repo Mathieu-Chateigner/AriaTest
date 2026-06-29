@@ -109,6 +109,7 @@ let bmNextCount = 0;
 let hiddenRollMode = false;
 let _appliedBM = 0;
 let rollFilter = new Set();
+let rollDateFilter = '';   // 'YYYY-MM-DD' local date; empty = no date filter
 let multiplier = 1;
 let isRolling = false;
 let dddiceAPI = null;
@@ -1346,7 +1347,7 @@ function updateBMDisplay() {
 // ═══════════════════════════════════════════
 // Full re-render of all player panel sections.
 function renderAll() {
-    document.getElementById('char-display').textContent = `${character.name} — ${character.class}`;
+    updateTopbarIdentity();
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     renderSkills();
     renderStats();
@@ -1415,9 +1416,10 @@ function renderStats() {
         const div = document.createElement('div');
         div.className = 'stat-card';
         div.onclick = () => rollStat(key, val);
+        // Big number = the live roll threshold (value × multiplier); updates with the multiplier.
         div.innerHTML = `<div class="stat-key">${key}</div>
-          <div class="stat-val">${val}</div>
-          <div class="stat-preview">jet ×${multiplier} = ${threshold}%</div>`;
+          <div class="stat-val">${threshold}<span class="stat-val-pct">%</span></div>
+          <div class="stat-preview">valeur ${val} · ×${multiplier}</div>`;
         grid.appendChild(div);
     });
 }
@@ -1425,6 +1427,32 @@ function renderStats() {
 function setMult(m) {
     multiplier = m;
     renderStats();
+}
+
+// Update the unified command bar identity cluster: stacked name + class, plus campaign code.
+function updateTopbarIdentity() {
+    const nameEl = document.getElementById('tb-char-name');
+    const classEl = document.getElementById('tb-char-class');
+    if (nameEl) nameEl.textContent = character.name || '—';
+    if (classEl) classEl.textContent = character.class || '';
+    const codeEl = document.getElementById('tb-campaign-code');
+    const codeSep = document.getElementById('tb-code-sep');
+    if (codeEl) {
+        const code = (character.campaignKey || '').trim().toUpperCase();
+        const show = !!code;
+        codeEl.textContent = show ? code : '—';
+        codeEl.style.display = show ? '' : 'none';
+        if (codeSep) codeSep.style.display = show ? '' : 'none';
+    }
+}
+
+// Copy the campaign join code to the clipboard from the topbar chip.
+function copyCampaignCode() {
+    const code = (character.campaignKey || '').trim().toUpperCase();
+    if (!code) return;
+    navigator.clipboard?.writeText(code);
+    const codeEl = document.getElementById('tb-campaign-code');
+    if (codeEl) { const prev = codeEl.textContent; codeEl.textContent = 'Copié'; setTimeout(() => { codeEl.textContent = prev; }, 1000); }
 }
 
 const MONEY_COINS = [
@@ -1436,6 +1464,7 @@ const MONEY_COINS = [
 // Render the inventory sidebar with items, vials (if alchemy enabled), and money.
 function renderInventorySidebar() {
     const body = document.getElementById('inv-sidebar-body');
+    if (!body) return;  // inventory removed from the left sidebar (lives in the Inventaire tab)
     const items = character.inventory || [];
     const vials = character.vials ?? 0;
     const showVials = playerTabs.alchemy && vials > 0;
@@ -1735,13 +1764,22 @@ function renderRollHistory() {
 
     let filtered = playerRollHistory;
     if (rollFilter.size > 0) {
-        filtered = playerRollHistory.filter(r => {
+        filtered = filtered.filter(r => {
             const isDie = r.threshold === null;
             if (isDie) return rollFilter.has('die');
             const type = classify(r.roll, r.threshold, r.success);
-            if (rollFilter.has('crit') && (type === 'crit-success' || type === 'crit-fail')) return true;
-            return rollFilter.has(type);
+            const isCrit    = type === 'crit-success' || type === 'crit-fail';
+            const isSuccess = type === 'success'       || type === 'crit-success';
+            const isFail    = type === 'fail'          || type === 'crit-fail';
+            // Succès/Échec include their critical variants; Critique catches both crits.
+            if (rollFilter.has('crit')    && isCrit)    return true;
+            if (rollFilter.has('success') && isSuccess) return true;
+            if (rollFilter.has('fail')    && isFail)    return true;
+            return false;
         });
+    }
+    if (rollDateFilter) {
+        filtered = filtered.filter(r => r.ts && localDateKey(r.ts) === rollDateFilter);
     }
 
     if (!filtered.length) {
@@ -1784,6 +1822,27 @@ function renderRollHistory() {
     });
 }
 
+// Local 'YYYY-MM-DD' key for a timestamp, matching the value emitted by <input type="date">.
+function localDateKey(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Apply / clear the history date filter.
+function setRollDateFilter(v) {
+    rollDateFilter = v || '';
+    const clearBtn = document.getElementById('rh-date-clear');
+    if (clearBtn) clearBtn.style.display = rollDateFilter ? '' : 'none';
+    renderRollHistory();
+}
+function clearRollDateFilter() {
+    rollDateFilter = '';
+    const input = document.getElementById('rh-date-filter');
+    if (input) input.value = '';
+    const clearBtn = document.getElementById('rh-date-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    renderRollHistory();
+}
+
 // Clear roll history from memory, localStorage, and reset all filter pills.
 function clearRollHistory() {
     playerRollHistory = [];
@@ -1792,6 +1851,7 @@ function clearRollHistory() {
     document.querySelectorAll('#rh-filter-bar .rf-pill').forEach(btn => btn.classList.remove('active'));
     const allBtn = document.getElementById('rfp-all');
     if (allBtn) allBtn.classList.add('active');
+    clearRollDateFilter();
     renderRollHistory();
 }
 
@@ -2601,7 +2661,8 @@ function sendPresence() {
 }
 // Update the Ably status dot and text labels in the topbar and config modal.
 function setAblyStatus(ok) {
-    ['ably-dot', 'cfg-ably-dot2'].forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
+    // classList (not className=) so extra classes like .tb-conn-dot on the topbar dot survive.
+    ['ably-dot', 'cfg-ably-dot2'].forEach(id => { const el = document.getElementById(id); if (el) { el.classList.add('status-dot'); el.classList.remove('connected', 'error'); el.classList.add(ok ? 'connected' : 'error'); } });
     ['ably-status', 'cfg-ably-status2'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
 }
 
@@ -2724,22 +2785,23 @@ function renderMoneyEditor() {
     const el = document.getElementById('inv-money-editor');
     if (!el) return;
     const m = character.money || {};
+    // Each denomination is its own box: label on the left, − value + on the right (value editable).
+    const coinBox = (key, label, color) => `
+        <div class="money-box">
+            <span class="money-box-label">${color ? `<span class="money-box-dot" style="color:${color}">●</span>` : ''}${label}</span>
+            <div class="money-box-ctrl">
+                <button class="qty-btn" onclick="bumpMoney('${key}',-1)">−</button>
+                <input class="money-box-input" type="text" inputmode="numeric" value="${m[key] ?? 0}" oninput="updateMoney('${key}',this.value)" />
+                <button class="qty-btn" onclick="bumpMoney('${key}',1)">+</button>
+            </div>
+        </div>`;
     if (character.ariaType === 'contemporary') {
-        el.innerHTML = `<div class="money-editor-row"><div class="money-field">
-            <span class="money-label">Francs</span>
-            <input class="editor-input money-input" type="text" inputmode="numeric" value="${m.francs ?? 0}" oninput="updateMoney('francs',this.value)" />
-        </div></div>`;
+        el.innerHTML = `<div class="inv-money-grid">${coinBox('francs', 'Francs', '')}</div>`;
     } else {
-        el.innerHTML = `<div class="money-editor-row">${MONEY_COINS.map(c =>
-            `<div class="money-field">
-                <span class="money-dot" style="color:${c.color}">●</span>
-                <span class="money-label">${c.label}</span>
-                <input class="editor-input money-input" type="text" inputmode="numeric" value="${m[c.key] ?? 0}" oninput="updateMoney('${c.key}',this.value)" />
-            </div>`
-        ).join('')}</div>`;
+        el.innerHTML = `<div class="inv-money-grid">${MONEY_COINS.map(c => coinBox(c.key, c.label, c.color)).join('')}</div>`;
     }
 }
-// Update a single money denomination value and refresh the inventory sidebar.
+// Update a single money denomination value (from the editable field).
 function updateMoney(key, val) {
     if (!character.money) {
         character.money = character.ariaType === 'contemporary'
@@ -2748,6 +2810,18 @@ function updateMoney(key, val) {
     }
     character.money[key] = parseInt(val.replace(/[^0-9]/g, '')) || 0;
     saveCurrentCharacter();
+    renderInventorySidebar();
+}
+// Increment/decrement a money denomination via the +/- buttons.
+function bumpMoney(key, delta) {
+    if (!character.money) {
+        character.money = character.ariaType === 'contemporary'
+            ? { francs: 0 }
+            : { couronne: 0, orbe: 0, sceptre: 0, sou: 0 };
+    }
+    character.money[key] = Math.max(0, (character.money[key] || 0) + delta);
+    saveCurrentCharacter();
+    renderMoneyEditor();
     renderInventorySidebar();
 }
 // Render the inventory editor list with item rows and vials counter if alchemy is enabled.
@@ -2759,16 +2833,37 @@ function renderInventoryEditor() {
     (character.inventory || []).forEach((it, i) => {
         const row = document.createElement('div');
         row.className = 'inv-row';
-        row.innerHTML = `<input class="editor-input" value="${it.name || ''}" placeholder="Nom de l'objet" oninput="character.inventory[${i}].name=this.value;renderInventorySidebar()" /><input class="editor-input inv-qty" type="text" inputmode="numeric" value="${it.qty || 1}" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.inventory[${i}].qty=+this.value||1;renderInventorySidebar()" /><button class="del-btn" onclick="removeInventoryRow(${i})">✕</button>`;
+        // Name stays editable; quantity is adjusted only via the +/- buttons (not a free input).
+        row.innerHTML = `<input class="inv-name-input" value="${(it.name || '').replace(/"/g, '&quot;')}" placeholder="Nom de l'objet" oninput="character.inventory[${i}].name=this.value" />
+            <div class="inv-qty-ctrl">
+                <button class="qty-btn" onclick="bumpInventoryQty(${i},-1)">−</button>
+                <span class="inv-qty-val">${it.qty || 1}</span>
+                <button class="qty-btn" onclick="bumpInventoryQty(${i},1)">+</button>
+            </div>
+            <button class="del-btn" onclick="removeInventoryRow(${i})">✕</button>`;
         list.appendChild(row);
     });
     if (playerTabs.alchemy) {
         const v = character.vials ?? 0;
         const vRow = document.createElement('div');
-        vRow.className = 'inv-row';
-        vRow.innerHTML = `<span style="font-family:'Cormorant Garamond',serif;font-size:14px;font-style:italic;padding:6px 8px;color:var(--parchment-dim);">Fioles vides</span><input class="editor-input inv-qty" type="text" inputmode="numeric" value="${v}" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.vials=Math.max(0,+this.value||0);saveCurrentCharacter();renderInventorySidebar();renderPotions()" /><span></span>`;
+        vRow.className = 'inv-row inv-row-vials';
+        vRow.innerHTML = `<span class="inv-vials-name">Fioles vides</span>
+            <div class="inv-qty-ctrl">
+                <button class="qty-btn" onclick="changeVials(-1)" ${v <= 0 ? 'disabled' : ''}>−</button>
+                <span class="inv-qty-val">${v}</span>
+                <button class="qty-btn" onclick="changeVials(1)">+</button>
+            </div>
+            <span></span>`;
         list.insertBefore(vRow, list.firstChild);
     }
+}
+// Adjust an inventory item's quantity via the +/- buttons (min 0).
+function bumpInventoryQty(i, delta) {
+    if (!character.inventory[i]) return;
+    character.inventory[i].qty = Math.max(0, (character.inventory[i].qty || 0) + delta);
+    saveCurrentCharacter();
+    renderInventoryEditor();
+    renderInventorySidebar();
 }
 // Add a new empty inventory item and refresh the editor and sidebar.
 function addInventoryRow() { character.inventory.push({ name: '', qty: 1 }); renderInventoryEditor(); renderInventorySidebar(); }
@@ -2793,53 +2888,65 @@ function renderPotions() {
     vialsDiv.innerHTML = `
         <span class="alchemy-vials-label">Fioles vides</span>
         <div class="alchemy-vials-ctrl">
-            <button class="vial-btn" onclick="changeVials(-1)" ${vials <= 0 ? 'disabled' : ''}>−</button>
+            <button class="qty-btn" onclick="changeVials(-1)" ${vials <= 0 ? 'disabled' : ''}>−</button>
             <span class="vial-count">${vials}</span>
-            <button class="vial-btn" onclick="changeVials(1)">+</button>
+            <button class="qty-btn" onclick="changeVials(1)">+</button>
         </div>`;
     container.appendChild(vialsDiv);
 
-    // Recipes section
+    // Recipes section — card grid (design frame 09)
     if (recipes.length) {
         const hdr = document.createElement('div');
         hdr.className = 'alchemy-section-hdr';
         hdr.textContent = 'Recettes connues';
         container.appendChild(hdr);
+        const grid = document.createElement('div');
+        grid.className = 'potion-grid';
         recipes.forEach((r, i) => {
-            const row = document.createElement('div');
-            row.className = 'recipe-row';
+            const chance = Math.max(0, Math.min(100, (r.successChance || 0) + liveBM()));
             const meta = [r.ingredients || '', r.desc || ''].filter(Boolean).join(' — ');
-            row.innerHTML = `
-                <span class="recipe-name">${r.name}</span>
-                ${meta ? `<span class="recipe-meta">${meta}</span>` : '<span class="recipe-meta"></span>'}
-                <span class="recipe-chance">${Math.max(0, Math.min(100, (r.successChance || 0) + liveBM()))}%</span>
-                <button class="recipe-craft-btn" onclick="craftPotion(${i})" ${vials <= 0 || isRolling ? 'disabled' : ''}>Créer</button>`;
-            container.appendChild(row);
+            const card = document.createElement('div');
+            card.className = 'potion-card';
+            card.innerHTML = `
+                <div class="potion-card-top">
+                    <span class="potion-card-name">${r.name}</span>
+                </div>
+                <div class="potion-card-desc">${meta || '&nbsp;'}</div>
+                <div class="potion-card-foot">
+                    <span class="potion-card-chance">Succès ${chance}%</span>
+                    <button class="potion-card-action" onclick="craftPotion(${i})" ${vials <= 0 || isRolling ? 'disabled' : ''}>Créer →</button>
+                </div>`;
+            grid.appendChild(card);
         });
+        container.appendChild(grid);
     }
 
-    // Crafted potions section
+    // Crafted potions section — card grid
     const stock = potions.filter(p => p.name);
     if (stock.length) {
         const hdr = document.createElement('div');
         hdr.className = 'alchemy-section-hdr';
         hdr.textContent = 'Potions en stock';
         container.appendChild(hdr);
+        const grid = document.createElement('div');
+        grid.className = 'potion-grid';
         potions.forEach((p, i) => {
             if (!p.name) return;
-            const row = document.createElement('div');
-            row.className = 'potion-row';
-            row.innerHTML = `
-                <div class="potion-info">
-                    <div class="potion-name">${p.name}</div>
+            const card = document.createElement('div');
+            card.className = 'potion-card' + (!p.qty ? ' depleted' : '');
+            card.innerHTML = `
+                <div class="potion-card-top">
+                    <span class="potion-card-name">${p.name}</span>
+                    <span class="potion-card-qty${!p.qty ? ' depleted' : ''}">×${p.qty ?? 0}</span>
                 </div>
-                <div class="potion-actions">
-                    <span class="potion-qty${!p.qty ? ' depleted' : ''}">×${p.qty ?? 0}</span>
-                    <button class="potion-use-btn" onclick="usePotion(${i})" ${!p.qty ? 'disabled' : ''}>Utiliser</button>
-                    <button class="del-btn" onclick="removePotion(${i})">✕</button>
+                <div class="potion-card-desc">${p.desc || '&nbsp;'}</div>
+                <div class="potion-card-foot">
+                    <button class="potion-card-del" onclick="removePotion(${i})" title="Retirer">✕</button>
+                    <button class="potion-card-action use" onclick="usePotion(${i})" ${!p.qty ? 'disabled' : ''}>Utiliser →</button>
                 </div>`;
-            container.appendChild(row);
+            grid.appendChild(card);
         });
+        container.appendChild(grid);
     }
 
     const hasContent = recipes.length > 0 || stock.length > 0;
@@ -3014,7 +3121,7 @@ function autoSaveChar() {
     }
     saveCurrentCharacter();
     // Refresh non-editor UI only — avoids rebuilding editor DOM and losing focus
-    document.getElementById('char-display').textContent = `${character.name} — ${character.class}`;
+    updateTopbarIdentity();
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     renderSkills();
     renderStats();
