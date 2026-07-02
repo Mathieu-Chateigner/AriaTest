@@ -660,18 +660,167 @@ body::after {
 }
 .tab-content.active { display: block; }
 
-/* Split-view (#16): primary + pinned tab side by side. Tabs bar spans the full top row;
-   the two visible panes share the remaining height and scroll independently. */
+/* ── Split view — drag-to-dock (design frames 22-24) ──
+   Grid: tabs strip / pane headers / panes, with a draggable 9px divider column.
+   The column ratio is set inline by updateSplitChrome() (persisted). */
 .content.split-mode {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-    column-gap: 14px;
+    grid-template-columns: minmax(0, 1fr) 9px minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     overflow: hidden;
 }
-.content.split-mode > .tabs { grid-column: 1 / -1; }
+.content.split-mode > .tabs { grid-column: 1 / -1; grid-row: 1; }
 .content.split-mode > .tab-content.active { min-width: 0; overflow-y: auto; }
-.content.split-mode > .tab-content.pinned-pane { border-left: 1px solid var(--border); }
+.content.split-mode > .tab-content.active:not(.pinned-pane) { grid-column: 1; grid-row: 3; }
+.content.split-mode > .tab-content.pinned-pane { grid-column: 3; grid-row: 3; }
+
+/* Pane headers — grip · label · focus chip · close (frame 24) */
+.split-pane-hdr { display: none; }
+.content.split-mode > .split-pane-hdr {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    grid-row: 2;
+    height: 38px;
+    padding: 0 10px 0 12px;
+    background: var(--field2);
+    border-bottom: 1px solid var(--line);
+    cursor: grab;
+    user-select: none;
+}
+#pane-hdr-left { grid-column: 1; }
+#pane-hdr-right { grid-column: 3; }
+.sph-grip { color: var(--dim); font-size: 11px; letter-spacing: -2px; flex-shrink: 0; }
+.sph-label {
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ember2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sph-spacer { flex: 1; }
+.sph-focus {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--ember);
+    border: 1px solid var(--embersoft);
+    border-radius: 20px;
+    padding: 3px 8px;
+    visibility: hidden;
+    flex-shrink: 0;
+}
+.sph-focus.on { visibility: visible; }
+.sph-close {
+    width: 24px; height: 24px;
+    background: none;
+    border: 1px solid var(--line2);
+    border-radius: 3px;
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color .15s, color .15s;
+}
+.sph-close:hover { border-color: var(--ember); color: var(--ember2); }
+
+/* Draggable divider — ember dots seam (frames 22/23) */
+#split-divider { display: none; }
+.content.split-mode > #split-divider {
+    display: flex;
+    grid-column: 2;
+    grid-row: 2 / 4;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: col-resize;
+    background: var(--rail);
+    border-left: 1px solid var(--line2);
+    border-right: 1px solid var(--line2);
+    transition: background .15s;
+}
+.content.split-mode > #split-divider:hover { background: var(--embersoft); }
+#split-divider span { width: 3px; height: 3px; border-radius: 50%; background: var(--ember); }
+
+/* Drag ghost — panel chip following the cursor (frame 24) */
+#drag-ghost {
+    display: none;
+    position: fixed;
+    z-index: 9500;
+    pointer-events: none;
+    align-items: center;
+    gap: 7px;
+    background: var(--raise);
+    border: 1px solid var(--ember);
+    border-radius: 3px;
+    padding: 8px 13px;
+    font-family: 'Archivo', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ember2);
+    box-shadow: 0 14px 34px -12px rgba(0,0,0,.8);
+    white-space: nowrap;
+}
+#drag-ghost .dg-icon { color: var(--ember); font-size: 12px; }
+
+/* Drop overlay — the targeted half darkens (frame 24) */
+#dock-overlay {
+    display: none;
+    position: fixed;
+    z-index: 9000;
+    pointer-events: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    background: rgba(5,6,9,.72);
+    outline: 1.5px dashed var(--ember);
+    outline-offset: -6px;
+}
+#dock-overlay .dock-plus {
+    width: 30px; height: 30px;
+    border: 1.5px solid var(--ember);
+    border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ember2);
+    font-size: 16px;
+}
+#dock-overlay .dock-label {
+    font-family: 'Archivo', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ember2);
+}
+#dock-overlay .dock-hint {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ember);
+    opacity: .8;
+}
+
+body.dock-dragging { user-select: none; cursor: grabbing; }
+body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbing; }
+
+/* Under 900 px the panes merge back into the single tab bar (frame 23) */
+@media (max-width: 900px) {
+    .content.split-mode { display: flex; flex-direction: column; }
+    .content.split-mode > .split-pane-hdr,
+    .content.split-mode > #split-divider { display: none; }
+    .content.split-mode > .tab-content.pinned-pane { display: none; }
+}
 
 /* ── SECTION HEADERS ── */
 .section-header {

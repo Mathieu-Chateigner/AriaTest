@@ -191,6 +191,26 @@
                 <button class="tab-btn" data-tab="tab-char" onclick="switchTab('tab-char',this)">Personnage<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-char')">⧉</span></button>
             </div>
 
+            <!-- SPLIT-VIEW CHROME (design frames 22-24) — pane headers + draggable divider.
+                 Only visible in split mode; panes themselves are the .tab-content divs (never reparented). -->
+            <div class="split-pane-hdr" id="pane-hdr-left" onmousedown="startPaneDrag(event,'left')" title="Glisser pour ré-ancrer">
+                <span class="sph-grip">⋮⋮</span>
+                <span class="sph-label" id="pane-hdr-left-label"></span>
+                <span class="sph-spacer"></span>
+                <span class="sph-focus" id="pane-hdr-left-focus">Focus</span>
+                <button class="sph-close" onmousedown="event.stopPropagation()" onclick="closePane('left')" title="Fermer le panneau">×</button>
+            </div>
+            <div class="split-pane-hdr" id="pane-hdr-right" onmousedown="startPaneDrag(event,'right')" title="Glisser pour ré-ancrer">
+                <span class="sph-grip">⋮⋮</span>
+                <span class="sph-label" id="pane-hdr-right-label"></span>
+                <span class="sph-spacer"></span>
+                <span class="sph-focus" id="pane-hdr-right-focus">Focus</span>
+                <button class="sph-close" onmousedown="event.stopPropagation()" onclick="closePane('right')" title="Fermer le panneau">×</button>
+            </div>
+            <div id="split-divider" onmousedown="startDividerDrag(event)" ondblclick="resetSplitRatio()" title="Glisser pour répartir — double-clic : 50 / 50">
+                <span></span><span></span><span></span>
+            </div>
+
             <!-- COMPETENCES -->
             <div class="tab-content active" id="tab-skills">
                 <div class="section-header">
@@ -492,6 +512,15 @@
         <div class="fc-dismiss">Cliquer pour fermer</div>
     </div>
     <canvas id="fc-particles"></canvas>
+
+    <!-- DRAG-TO-DOCK FX (design frame 24) — ghost chip follows the cursor; the drop
+         overlay darkens the targeted half of the content region -->
+    <div id="dock-overlay">
+        <div class="dock-plus">+</div>
+        <div class="dock-label" id="dock-label"></div>
+        <div class="dock-hint">déposer ici</div>
+    </div>
+    <div id="drag-ghost"><span class="dg-icon">⌗</span><span id="drag-ghost-label"></span></div>
 
     <!-- OTHER PLAYERS' ROLL TOAST -->
     <div class="other-roll-toast" id="other-roll-toast">
