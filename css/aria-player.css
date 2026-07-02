@@ -974,23 +974,39 @@ body::after {
     opacity: .85;
 }
 
-/* ── FREE ROLL ── */
+/* ── FREE ROLL — form as full-height left rail + history (design frame 05) ── */
+#tab-free.active { padding: 0; }
 .free-roll-layout {
-    display: flex;
-    gap: 30px;
-    align-items: flex-start;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    align-items: stretch;
+    min-height: 100%;
 }
 .free-roll-form {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    flex: 0 0 340px;
-    max-width: 380px;
-    margin-bottom: 24px;
+    background: var(--rail);
+    border-right: 1px solid var(--line2);
+    padding: 22px 24px;
+    min-width: 0;
 }
-.free-roll-layout .free-roll-form { margin-bottom: 0; }
-.free-roll-layout .roll-history-section { flex: 1; min-width: 300px; margin-top: 0; }
+.free-roll-caption {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 2px;
+}
+.free-roll-layout .roll-history-section { min-width: 0; margin-top: 0; padding: 20px 24px; }
+@media (max-width: 900px) {
+    .free-roll-layout { grid-template-columns: 1fr; }
+    .free-roll-form { border-right: none; border-bottom: 1px solid var(--line2); }
+}
+/* In split-view mode a pane is too narrow for the two columns — stack them */
+.content.split-mode .free-roll-layout { grid-template-columns: 1fr; }
+.content.split-mode .free-roll-form { border-right: none; border-bottom: 1px solid var(--line2); }
 .field-label {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 9.5px;

@@ -80,6 +80,14 @@
         <div class="topbar-title" onclick="switchCampaign()" title="Changer de campagne" style="cursor:pointer;">ARIA</div>
         <span class="topbar-mj">MJ</span>
         <input class="campaign-name-input" id="campaign-display" value="" placeholder="Campagne" onblur="saveCampaignName(this)" onkeydown="if(event.key==='Enter')this.blur()" />
+        <!-- music mini chip (design frame 12) — shows the now-playing track -->
+        <div class="tb-music-chip" id="tb-music-chip" style="visibility:hidden;" title="Piste en cours">
+            <span class="tb-music-note">♪</span>
+            <span class="tb-music-title" id="tb-music-title">—</span>
+        </div>
+        <div class="tb-sep"></div>
+        <!-- join code chip (design frame 12) — click to copy -->
+        <div class="topbar-joincode" id="tb-joincode" onclick="copyJoinCode()" title="Code de campagne — cliquer pour copier" style="display:none;">—</div>
         <button id="btn-open-overlay-editor" class="icon-btn" title="Éditeur d'overlay" style="display:none">▦</button>
         <button class="icon-btn" onclick="toggleConfig()" title="Configuration">⚙</button>
     </div>
@@ -125,8 +133,10 @@
                 <div class="no-players" id="no-players">En attente de joueurs… <br><span style="font-size:13px;opacity:.6;">Les joueurs apparaissent automatiquement dès qu'ils ouvrent aria-player.html</span></div>
             </div>
 
-            <!-- MONSTRES -->
+            <!-- MONSTRES — add-form as left rail + monster list (design frame 13) -->
             <div class="tab-content" id="tab-monsters">
+                <div class="gm-two-col">
+                <div class="gm-col-rail">
                 <!-- Add Monster Form -->
                 <div class="add-monster-form">
                     <h3>+ Nouveau monstre</h3>
@@ -167,7 +177,9 @@
                         </div>
                     </div>
                 </div>
+                </div><!-- /.gm-col-rail -->
 
+                <div class="gm-col-main">
                 <!-- Monsters list -->
                 <div class="section-header" style="margin-top:4px;">
                     <span class="section-icon">☠</span>
@@ -178,6 +190,8 @@
                 <div class="monsters-grid" id="monsters-grid">
                     <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-style:italic;color:var(--parchment-dim);opacity:.5;text-align:center;padding:20px;" id="no-monsters">Aucun monstre actif</div>
                 </div>
+                </div><!-- /.gm-col-main -->
+                </div><!-- /.gm-two-col -->
             </div>
 
             <!-- JETS — roll console (left) + live feed (right), fused -->
@@ -185,6 +199,7 @@
                 <div class="gm-jets-layout">
                     <!-- LEFT: roll console -->
                     <div class="gm-jets-console">
+                        <div class="gm-console-caption">Console de jet</div>
                         <div class="gm-roll-form">
                             <h3>Jet libre</h3>
                             <label class="field-label">Nom du jet</label>
@@ -263,8 +278,10 @@
                 </div>
             </div>
 
-            <!-- CARTES -->
+            <!-- CARTES — Deck MJ as left rail + player draws (design frame 15) -->
             <div class="tab-content" id="tab-cards">
+                <div class="gm-two-col">
+                <div class="gm-col-rail">
                 <!-- GM private deck -->
                 <div class="gm-own-deck-section">
                     <div class="section-title" style="margin-bottom:12px;">Deck MJ <span style="font-size:11px;color:var(--parchment-dim);font-family:'Cormorant Garamond',serif;font-style:italic;">(privé)</span></div>
@@ -293,6 +310,10 @@
                         </div>
                     </div>
                 </div>
+                </div><!-- /.gm-col-rail -->
+
+                <div class="gm-col-main">
+                <div class="gm-card-live-caption">Tirages joueurs — en direct</div>
                 <!-- Player draw display -->
                 <div class="gm-card-display">
                     <div class="gm-card-info" id="gm-card-info">En attente d'un tirage joueur…</div>
@@ -314,9 +335,13 @@
                         <div class="rolls-empty">Aucun tirage pour l'instant…</div>
                     </div>
                 </div>
+                </div><!-- /.gm-col-main -->
+                </div><!-- /.gm-two-col -->
             </div>
-            <!-- ALCHIMIE -->
+            <!-- ALCHIMIE — potion form as left rail + grimoire (design frame 16) -->
             <div class="tab-content" id="tab-alchemy">
+                <div class="gm-two-col">
+                <div class="gm-col-rail">
                 <div class="add-monster-form">
                     <h3>+ Nouvelle potion</h3>
                     <div class="gm-pot-form-grid">
@@ -345,9 +370,15 @@
                         </div>
                     </div>
                 </div>
+                </div><!-- /.gm-col-rail -->
+
+                <div class="gm-col-main">
+                <div class="gm-card-live-caption">Grimoire — accorder aux joueurs</div>
                 <div class="gm-pot-list" id="gm-pot-list">
                     <div class="alchemy-empty" id="gm-pot-empty">Aucune potion dans le grimoire.</div>
                 </div>
+                </div><!-- /.gm-col-main -->
+                </div><!-- /.gm-two-col -->
             </div>
             <!-- FICHIERS -->
             <div class="tab-content" id="tab-files">

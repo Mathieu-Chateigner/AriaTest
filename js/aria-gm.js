@@ -680,6 +680,11 @@ function initApp() {
     if (el && camp) el.value = camp.name;
     const jel = document.getElementById('joincode-display');
     if (jel) jel.textContent = currentJoinCode || '';
+    const tbJoin = document.getElementById('tb-joincode');
+    if (tbJoin) {
+        tbJoin.textContent = currentJoinCode || '—';
+        tbJoin.style.display = currentJoinCode ? '' : 'none';
+    }
     updateOverlayEditorBtn();
 }
 
@@ -707,6 +712,8 @@ function copyJoinCode() {
     navigator.clipboard.writeText(currentJoinCode).catch(() => {});
     const el = document.getElementById('joincode-display');
     if (el) { const t = el.textContent; el.textContent = '✓ Copié !'; setTimeout(() => { el.textContent = t; }, 1500); }
+    const tbEl = document.getElementById('tb-joincode');
+    if (tbEl) { const t = tbEl.textContent; tbEl.textContent = '✓ Copié'; setTimeout(() => { tbEl.textContent = t; }, 1500); }
 }
 
 // ═══════════════════════════════════════════
@@ -2937,6 +2944,14 @@ function renderMusicTab() {
 
     const titleEl = document.getElementById('music-np-title');
     if (titleEl) titleEl.textContent = track ? track.name : 'Aucune piste';
+
+    // Topbar music mini chip (design frame 12) — mirrors the now-playing track.
+    const tbChip = document.getElementById('tb-music-chip');
+    if (tbChip) {
+        tbChip.style.visibility = track ? 'visible' : 'hidden';
+        const tbTitle = document.getElementById('tb-music-title');
+        if (tbTitle) tbTitle.textContent = track ? track.name : '—';
+    }
 
     // Subtitle showing which playlist the now-playing track belongs to.
     const npPl = document.getElementById('music-np-playlist');

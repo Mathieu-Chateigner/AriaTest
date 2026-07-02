@@ -177,6 +177,32 @@ body::after {
 }
 .topbar-joincode:hover { background: var(--violetsoft); }
 
+.tb-sep { width: 1px; height: 22px; background: var(--line); flex-shrink: 0; }
+/* Music mini chip — now-playing track in the command bar (design frame 12) */
+.tb-music-chip {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 5px 14px;
+    background: var(--field2);
+    max-width: 260px;
+    flex-shrink: 1;
+    min-width: 0;
+}
+.tb-music-note { color: var(--violet); font-size: 12px; flex-shrink: 0; }
+.tb-music-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 14px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
 .campaign-name-input {
     background: none;
     border: none;
@@ -266,6 +292,60 @@ body::after {
     overflow-y: auto;
     padding: 20px;
 }
+
+/* ════════════════════════════════════════════
+   TWO-COLUMN RAIL LAYOUT — form/deck as a full-height left rail
+   (design frames 13 · 15 · 16). The rail bleeds to the tab edges.
+   ════════════════════════════════════════════ */
+.tab-content.active:has(> .gm-two-col) { padding: 0; }
+.gm-two-col {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    align-items: stretch;
+    min-height: 100%;
+}
+.gm-col-rail {
+    background: var(--railV);
+    border-right: 1px solid var(--line2);
+    padding: 22px 24px;
+    min-width: 0;
+}
+.gm-col-main { padding: 20px; min-width: 0; }
+@media (max-width: 900px) {
+    .gm-two-col { grid-template-columns: 1fr; }
+    .gm-col-rail { border-right: none; border-bottom: 1px solid var(--line2); }
+}
+
+/* Inside the rail, forms shed their panel box — the rail is the surface */
+.gm-col-rail .add-monster-form {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 0;
+}
+.gm-col-rail .add-monster-form h3 { font-size: 18px; margin-bottom: 16px; }
+.gm-col-rail .amf-grid { grid-template-columns: 1fr 1fr; }
+.gm-col-rail .amf-grid > div:first-child { grid-column: 1 / -1; }
+
+/* Cartes rail (frame 15): compact private deck stacked vertically */
+.gm-col-rail .gm-own-deck-section { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+.gm-col-rail .card-tab-layout { flex-direction: column; align-items: center; }
+.gm-col-rail .card-stage { min-height: 0; }
+.gm-col-rail .card-tab-layout > div:last-child { width: 100%; }
+
+/* Mono caption above live sections (frames 15 · 16) */
+.gm-card-live-caption {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 14px;
+}
+.gm-col-main .gm-card-display { padding-top: 0; }
+.gm-col-main .gm-pot-list { margin-top: 0; grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 1250px) { .gm-col-main .gm-pot-list { grid-template-columns: 1fr; } }
 
 /* ════════════════════════════════════════════
    SECTION HEADERS + ORNAMENTAL DIVIDERS
@@ -1032,10 +1112,30 @@ body::after {
    JET MJ TAB
    ════════════════════════════════════════════ */
 /* Fused Jets screen: console (left) + live feed (right) */
-.gm-jets-layout { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
+/* Jets — console as full-height left rail + live feed (design frame 14) */
+.tab-content.active:has(> .gm-jets-layout) { padding: 0; }
+.gm-jets-layout { display: grid; grid-template-columns: 380px 1fr; align-items: stretch; min-height: 100%; }
+.gm-jets-console {
+    background: var(--railV);
+    border-right: 1px solid var(--line2);
+    padding: 22px 24px;
+    min-width: 0;
+}
+.gm-jets-feed { padding: 20px; min-width: 0; }
+.gm-console-caption {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 14px;
+}
 .gm-jets-console { display: flex; flex-direction: column; }
 .gm-jets-feed { display: flex; flex-direction: column; min-width: 0; }
-@media (max-width: 900px) { .gm-jets-layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+    .gm-jets-layout { grid-template-columns: 1fr; }
+    .gm-jets-console { border-right: none; border-bottom: 1px solid var(--line2); }
+}
 .gm-roll-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .gm-roll-form {
     background: var(--panel);
@@ -1559,7 +1659,11 @@ body::after {
 }
 .music-ctrl-btn:hover { border-color: var(--violet); color: var(--text); }
 .music-ctrl-btn.active { background: var(--violetsoft); border-color: var(--violet); color: var(--violet2); }
-.music-ctrl-play { background: var(--violet); color: var(--ink); border-color: var(--violet); font-weight: 700; padding: 5px 16px; }
+.music-ctrl-play {
+    background: var(--violet); color: var(--ink); border-color: var(--violet); font-weight: 700;
+    width: 42px; height: 42px; border-radius: 50%; padding: 0; font-size: 14px;
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 .music-ctrl-play:hover { filter: brightness(1.08); }
 .music-fade-label { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
 .music-fade-input {

@@ -930,6 +930,46 @@ body.shake {
     text-overflow: ellipsis;
 }
 
+/* Lower-third nameplate — dark glass plate + 4px ember edge (design frame 20) */
+.ow-nameplate {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    background: rgba(10,12,17,0.84);
+    border: 1px solid var(--line2);
+    border-radius: 5px;
+    overflow: hidden;
+}
+.ow-np-edge { width: 4px; background: var(--ember); flex-shrink: 0; }
+.ow-np-body {
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+}
+.ow-np-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.5em;
+    font-weight: 600;
+    color: var(--warm);
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ow-np-class {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.62em;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .ow-hp-wrap { display: flex; flex-direction: column; gap: 4px; }
 .ow-hp-label { font-family: 'Cormorant Garamond', serif; font-size: 0.75em; color: var(--parchment-dim); }
 .ow-hp-track { position: relative; height: 18px; background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }

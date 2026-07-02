@@ -579,9 +579,11 @@ function renderWidgetContent(widget) {
     const cfg = widget.config || {};
     switch (widget.type) {
         case 'character_name': {
+            // Lower-third nameplate — dark glass plate + accent edge (design frame 20)
             const p = [...presenceCache.values()][0];
-            if (!p) return '<div class="ow-char-name">—</div>';
-            return `<div class="ow-char-name">${esc(p.name)}${p.charClass ? ' — ' + esc(p.charClass) : ''}</div>`;
+            const name = p ? esc(p.name) : '—';
+            const cls = (p && p.charClass) ? `<div class="ow-np-class">${esc(p.charClass)}</div>` : '';
+            return `<div class="ow-nameplate"><div class="ow-np-edge"></div><div class="ow-np-body"><div class="ow-np-name">${name}</div>${cls}</div></div>`;
         }
         case 'hp_bar': {
             const p = cfg.charId ? presenceCache.get(cfg.charId) : [...presenceCache.values()][0];
