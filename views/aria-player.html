@@ -143,6 +143,15 @@
                 oninput="onMusicVolumeChange(this.value)" />
         </div>
 
+        <!-- presence density — Réduit / Bandeau / Tablée (design frame 25) -->
+        <div class="presence-ctl" id="presence-ctl" style="display:none;">
+            <div class="tb-presence-dots" id="tb-presence-dots" style="display:none;"></div>
+            <span class="pres-icon">◉</span>
+            <button class="pres-pill" id="pres-pill-reduit" onclick="setPresenceMode('reduit')" title="Pastilles dans la barre — présence sans pixels">Réduit</button>
+            <button class="pres-pill" id="pres-pill-bandeau" onclick="setPresenceMode('bandeau')" title="Rail de visages ancré au bord">Bandeau</button>
+            <button class="pres-pill" id="pres-pill-tablee" onclick="setPresenceMode('tablee')" title="Pleine attention — scène de visages">Tablée</button>
+        </div>
+
         <span class="rolling-ind" id="rolling-ind">Lancer…</span>
         <div class="tb-sep" id="tb-code-sep" style="display:none;"></div>
         <div class="tb-code" id="tb-campaign-code" title="Code de campagne" onclick="copyCampaignCode()" style="display:none;">—</div>
@@ -474,6 +483,15 @@
 
                 </div>
             </div>
+        </div>
+
+        <!-- PRESENCE RAIL — Bandeau density (design frame 25): faces docked to the right edge -->
+        <div id="presence-rail" style="display:none;">
+            <div class="pr-header">
+                <span class="pr-title">Présence</span>
+                <span class="pr-grip">⋮⋮</span>
+            </div>
+            <div id="presence-rail-grid"></div>
         </div>
     </div>
 

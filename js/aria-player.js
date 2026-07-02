@@ -123,6 +123,10 @@ let gmStreamId = '';
 let vdoRoom = '';
 let vdoRoomPassword = '';
 let selfViewStream = null;
+// Presence density (design frame 25): 'reduit' (dots) | 'bandeau' (rail) | 'tablee' (stage)
+let presenceMode = localStorage.getItem('aria-presence-mode') || 'bandeau';
+let spotlightCharId = null;   // GM spotlight — that player's face goes big for everyone
+let localStageSid = '';       // locally chosen big tile in Tablée (clicking a face)
 // Derive the VDO.ninja push stream ID from the first 8 chars of the character UUID.
 function derivedStreamId() {
     const sid = 'aria-' + currentCharId.slice(0, 8);
@@ -135,7 +139,9 @@ function updatePushIframe() {
     if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
     if (!vdoRoom || !currentCharId) {
         console.log('[VDO] updatePushIframe: vdoRoom empty → clearing push iframe src');
-        pushFrame.src = '';
+        // 'about:blank', never '' — an empty src resolves to the page's own URL and
+        // would load a second copy of the whole app inside the hidden iframe.
+        if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
         updateCamerasTabVisibility();
         return;
     }
@@ -657,6 +663,8 @@ function switchCharacter() {
     stopSelfView();
     peerCameras.clear();
     gmStreamId = '';
+    spotlightCharId = null;
+    localStageSid = '';
     showSelectionScreen();
 }
 
@@ -1137,6 +1145,7 @@ function updateCamerasTabVisibility() {
         console.log('[VDO] cameras tab is active → calling renderCamerasTab()');
         renderCamerasTab();
     }
+    renderPresenceUI();
 }
 
 // Request native camera access for the self-view preview (only when no VDO room is active).
@@ -1158,6 +1167,131 @@ function stopSelfView() {
     selfViewStream = null;
 }
 
+// ═══════════════════════════════════════════
+//  PRESENCE LAYER (design frame 25) — three densities, no separate window.
+//  Réduit: initials dots in the command bar. Bandeau: face rail docked right.
+//  Tablée: the Caméras tab becomes a stage (big face + column of others).
+// ═══════════════════════════════════════════
+function setPresenceMode(m) {
+    presenceMode = m;
+    localStorage.setItem('aria-presence-mode', m);
+    if (m === 'tablee') {
+        const btn = document.getElementById('tab-btn-cameras');
+        if (btn && btn.style.display !== 'none') switchTab('tab-cameras', btn);
+    }
+    renderPresenceUI();
+    if (document.getElementById('tab-cameras')?.classList.contains('active')) renderCamerasTab();
+}
+
+// The stream ID currently spotlighted by the GM ('' if none / unknown).
+function spotlightSid() {
+    if (!spotlightCharId) return '';
+    if (spotlightCharId === currentCharId) return currentCharId ? derivedStreamId() : '';
+    return peerCameras.get(spotlightCharId)?.streamId || '';
+}
+
+// Sync the density pills, command-bar dots, and rail with the current mode.
+function renderPresenceUI() {
+    const peers = [...peerCameras.values()];
+    const hasAny = !!gmStreamId || !!vdoRoom || peers.some(p => p.streamId);
+    const ctl = document.getElementById('presence-ctl');
+    if (ctl) ctl.style.display = hasAny ? '' : 'none';
+    ['reduit', 'bandeau', 'tablee'].forEach(m =>
+        document.getElementById('pres-pill-' + m)?.classList.toggle('active', presenceMode === m));
+    // Réduit — initials dots in the command bar ("présence sans pixels")
+    const dots = document.getElementById('tb-presence-dots');
+    if (dots) {
+        if (hasAny && presenceMode === 'reduit') {
+            const people = [];
+            if (gmStreamId) people.push('MJ');
+            peerCameras.forEach((p, charId) => { if (charId !== currentCharId && p.streamId) people.push(p.name || '?'); });
+            dots.innerHTML = people.map(n => {
+                const safe = n.replace(/[<>&"]/g, '');
+                return `<span class="pres-dot" title="${safe}">${safe.slice(0, 2).toUpperCase()}</span>`;
+            }).join('');
+            dots.style.display = people.length ? '' : 'none';
+        } else {
+            dots.style.display = 'none';
+        }
+    }
+    // Bandeau — face rail docked to the right edge
+    const rail = document.getElementById('presence-rail');
+    if (rail) {
+        const show = hasAny && presenceMode === 'bandeau';
+        rail.style.display = show ? '' : 'none';
+        if (show) renderPresenceRail();
+        else { const g = document.getElementById('presence-rail-grid'); if (g) g.innerHTML = ''; } // viewer iframes only — safe to drop
+    }
+    // Tablée — the cameras grid renders as a stage
+    document.getElementById('cameras-grid')?.classList.toggle('stage-mode', presenceMode === 'tablee');
+    if (presenceMode === 'tablee') applyStageMain();
+}
+
+// In-place render of the Bandeau rail tiles (self · GM · peers). Viewer iframes
+// are keyed by stream ID and only re-src'd when their URL changes.
+function renderPresenceRail() {
+    const grid = document.getElementById('presence-rail-grid');
+    if (!grid) return;
+    const expected = new Map(); // sid → label
+    if (vdoRoom && currentCharId) expected.set(derivedStreamId(), (character.name || 'Vous'));
+    if (gmStreamId) expected.set(gmStreamId, 'MJ');
+    peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
+    [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
+    const spot = spotlightSid();
+    expected.forEach((label, sid) => {
+        const isSelf = vdoRoom && currentCharId && sid === derivedStreamId();
+        const src = vdoViewSrc(sid, !!isSelf);
+        let tile = grid.querySelector(`.pr-tile[data-sid="${CSS.escape(sid)}"]`);
+        if (!tile) {
+            tile = document.createElement('div');
+            tile.className = 'pr-tile';
+            tile.dataset.sid = sid;
+            const iframe = document.createElement('iframe');
+            iframe.src = src;
+            iframe.allow = 'autoplay';
+            const lab = document.createElement('div');
+            lab.className = 'pr-label';
+            lab.textContent = label;
+            tile.appendChild(iframe);
+            tile.appendChild(lab);
+            grid.appendChild(tile);
+        } else {
+            const iframe = tile.querySelector('iframe');
+            if (iframe && iframe.src !== src) iframe.src = src;
+            const lab = tile.querySelector('.pr-label');
+            if (lab) lab.textContent = label;
+        }
+        tile.classList.toggle('spotlit', !!spot && sid === spot);
+    });
+}
+
+// Tablée stage: pick the big tile — GM spotlight wins, then the locally clicked
+// face, then the GM stream, then the first tile.
+function applyStageMain() {
+    const grid = document.getElementById('cameras-grid');
+    if (!grid) return;
+    const cells = [...grid.querySelectorAll('.camera-cell')];
+    if (!cells.length) return;
+    const sidOf = cell => {
+        const ifr = cell.querySelector('iframe');
+        try { return ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { return ''; }
+    };
+    const want = spotlightSid() || localStageSid || gmStreamId || '';
+    let main = want ? cells.find(c => sidOf(c) === want) : null;
+    if (!main) main = cells[0];
+    cells.forEach(c => c.classList.toggle('stage-main', c === main));
+}
+
+// Build a VDO.ninja viewer URL; the room/password params are only appended once
+// known (an empty `&room=` would make VDO.ninja try to join a room named "").
+function vdoViewSrc(sid, muted) {
+    let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput`;
+    if (muted) src += '&muted';
+    if (vdoRoom) src += `&room=${encodeURIComponent(vdoRoom)}`;
+    if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
+    return src;
+}
+
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
     console.log('[VDO] renderCamerasTab() called | currentCharId:', currentCharId, '| gmStreamId:', gmStreamId, '| peerCameras:', [...peerCameras.entries()].map(([k,v]) => `${k}:${v.name}(${v.streamId})`).join(', '));
@@ -1168,8 +1302,7 @@ function renderCamerasTab() {
     let selfCell = grid.querySelector('.camera-cell[data-self]');
     if (vdoRoom && currentCharId) {
         const sid = derivedStreamId();
-        let viewSrc = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&room=${encodeURIComponent(vdoRoom)}&autoplay&cleanoutput&muted`;
-        if (vdoRoomPassword) viewSrc += `&password=${encodeURIComponent(vdoRoomPassword)}`;
+        const viewSrc = vdoViewSrc(sid, true);
         if (!selfCell) {
             selfCell = document.createElement('div');
             selfCell.className = 'camera-cell';
@@ -1263,12 +1396,19 @@ function renderCamerasTab() {
     // Update labels for existing cells; add cells for new stream IDs
     expected.forEach((label, sid) => {
         if (rendered.has(sid)) {
-            console.log('[VDO] renderCamerasTab: iframe already exists for', label, '(', sid, ') — updating label only');
-            const labelEl = rendered.get(sid).querySelector('.camera-label');
+            const cell = rendered.get(sid);
+            const labelEl = cell.querySelector('.camera-label');
             if (labelEl) labelEl.textContent = label;
+            // Re-src the iframe if the expected URL changed (e.g. the room/password
+            // arrived after the cell was first created with a room-less URL).
+            const iframe = cell.querySelector('.camera-iframe');
+            const expectedSrc = vdoViewSrc(sid, false);
+            if (iframe && iframe.src !== expectedSrc) {
+                console.log('[VDO] renderCamerasTab: URL changed for', label, '(', sid, ') → reloading iframe');
+                iframe.src = expectedSrc;
+            }
         } else {
-            let iframeSrc = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&room=${encodeURIComponent(vdoRoom)}&autoplay&cleanoutput`;
-            if (vdoRoomPassword) iframeSrc += `&password=${encodeURIComponent(vdoRoomPassword)}`;
+            const iframeSrc = vdoViewSrc(sid, false);
             console.log('[VDO] renderCamerasTab: CREATING new iframe for', label, '(', sid, ') →', iframeSrc);
             const cell = document.createElement('div');
             cell.className = 'camera-cell';
@@ -1303,7 +1443,20 @@ function renderCamerasTab() {
             grid.appendChild(cell);
         }
     });
+    if (presenceMode === 'tablee') applyStageMain();
 }
+
+// Tablée: clicking a face promotes it to the big stage tile (frame 25).
+window.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('cameras-grid')?.addEventListener('click', e => {
+        if (presenceMode !== 'tablee') return;
+        const cell = e.target.closest('.camera-cell');
+        if (!cell || cell.classList.contains('stage-main')) return;
+        const ifr = cell.querySelector('iframe');
+        try { localStageSid = ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { localStageSid = ''; }
+        applyStageMain();
+    });
+});
 
 // ═══════════════════════════════════════════
 //  HP
@@ -2785,10 +2938,18 @@ function initAbly() {
                 renderCombatSidebar();
                 return;
             }
+            if (msg.name === 'spotlight') {
+                console.log('[VDO] spotlight received:', d.charId || '(cleared)');
+                spotlightCharId = d.charId || null;
+                renderPresenceUI();
+                if (document.getElementById('tab-cameras')?.classList.contains('active')) applyStageMain();
+                return;
+            }
             if (msg.name === 'gm-presence') {
                 console.log('[VDO] received gm-presence:', d, '| previous gmStreamId:', gmStreamId, '| previous vdoRoom:', vdoRoom);
                 gmStreamId = d.streamId || '';
                 console.log('[VDO] gmStreamId set to:', gmStreamId);
+                if (d.spotlightCharId !== undefined) spotlightCharId = d.spotlightCharId || null;
                 if (d.vdoRoom !== undefined) {
                     vdoRoom = d.vdoRoom || '';
                     vdoRoomPassword = d.vdoRoomPassword || '';

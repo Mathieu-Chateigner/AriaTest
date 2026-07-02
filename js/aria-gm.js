@@ -639,6 +639,7 @@ function switchCampaign() {
     rollFilter.clear(); playerFilter.clear();
     currentCampaignId = null;
     currentCampaignType = 'ancient';
+    gmSpotlightCharId = null;
     pinnedTabId = null; activeTabId = 'tab-players';
     renderTabLayout();
     showSelectionScreen();
@@ -670,6 +671,7 @@ function initApp() {
     startGMPresenceBroadcast();
     updateGMPushIframe();
     startGMSelfView();
+    applyReadTable();
     if (sweepIntervalId) clearInterval(sweepIntervalId);
     sweepIntervalId = setInterval(sweepOfflinePlayers, 10000);
     if (!gmClickHandlerRegistered) {
@@ -1130,11 +1132,44 @@ function startGMPresenceBroadcast() {
     if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
     if (!currentVdoRoom || !ablyDamage) { console.log('[GM] startGMPresenceBroadcast: skipped (vdoRoom:', currentVdoRoom || 'empty', '| ablyDamage:', !!ablyDamage, ')'); return; }
     const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
-    const publish = () => { console.log('[GM] broadcasting gm-presence | streamId:', gmStreamId, '| room:', currentVdoRoom); ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword }); };
+    const publish = () => { console.log('[GM] broadcasting gm-presence | streamId:', gmStreamId, '| room:', currentVdoRoom); ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
     console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmStreamId);
 }
+// ═══════════════════════════════════════════
+//  PRESENCE — "Lire la table" + Spotlight (design frame 26)
+// ═══════════════════════════════════════════
+let readTable = localStorage.getItem('aria-gm-read-table') === '1';
+let gmSpotlightCharId = null;
+
+// Toggle bigger player faces on the Joueurs cards (frame 26: "lire la table").
+function toggleReadTable() {
+    readTable = !readTable;
+    localStorage.setItem('aria-gm-read-table', readTable ? '1' : '0');
+    applyReadTable();
+}
+function applyReadTable() {
+    document.getElementById('players-grid')?.classList.toggle('read-table', readTable);
+    document.getElementById('tb-read-table')?.classList.toggle('on', readTable);
+}
+// Spotlight a player: their camera goes big on every player's Tablée/Bandeau view.
+// Clicking the same player again clears the spotlight.
+function toggleSpotlight(charId) {
+    gmSpotlightCharId = gmSpotlightCharId === charId ? null : charId;
+    if (ablyDamage) ablyDamage.publish('spotlight', { charId: gmSpotlightCharId });
+    renderPlayerCards();
+}
+
+// Build a VDO.ninja viewer URL for a player stream; room/password only appended
+// once known (an empty `&room=` would make VDO.ninja try to join a room named "").
+function gmVdoViewSrc(streamId) {
+    let src = `https://vdo.ninja/?view=${encodeURIComponent(streamId)}&autoplay&cleanoutput`;
+    if (currentVdoRoom) src += `&room=${encodeURIComponent(currentVdoRoom)}`;
+    if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
+    return src;
+}
+
 // Set the GM VDO.ninja push iframe src so the GM camera streams to the room.
 function updateGMPushIframe() {
     const wrap = document.getElementById('gm-self-view-wrap');
@@ -1142,8 +1177,10 @@ function updateGMPushIframe() {
     if (!wrap || !section) return;
     if (!currentVdoRoom || !currentCampaignId) {
         console.log('[GM] updateGMPushIframe: no vdoRoom, clearing push iframe');
+        // 'about:blank', never '' — an empty src resolves to the page's own URL and
+        // would load a second copy of the GM app inside the iframe.
         const existing = wrap.querySelector('iframe');
-        if (existing) existing.src = '';
+        if (existing && existing.src !== 'about:blank') existing.src = 'about:blank';
         return;
     }
     const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
@@ -1262,7 +1299,7 @@ function handlePresence(data) {
         if (currentVdoRoom && ablyDamage) {
             const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
             console.log('[GM] new session detected — sending immediate gm-presence to', data.name);
-            ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword });
+            ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
         }
     }
 }
@@ -1340,6 +1377,7 @@ function renderPlayerCards() {
                   <div class="pc-name">${_escHtml(p.name || playerId)}</div>
                   <div class="pc-class">${_escHtml(p.charClass || '')}</div>
                 </div>
+                <button class="pc-btn spot${gmSpotlightCharId === playerId ? ' active' : ''}" onclick="toggleSpotlight('${playerId}')" title="Spotlight — la caméra de ce joueur passe en grand chez tous">☀</button>
                 <button class="pc-btn details" onclick="openPlayerDetails('${playerId}')" title="Voir la fiche">≡</button>
               </div>
               <div class="pc-body">
@@ -1377,9 +1415,7 @@ function renderPlayerCards() {
                 const wrap = document.createElement('div');
                 wrap.className = 'pc-camera-wrap';
                 const iframe = document.createElement('iframe');
-                let newCardSrc = `https://vdo.ninja/?view=${encodeURIComponent(p.streamId)}&room=${encodeURIComponent(currentVdoRoom)}&autoplay&cleanoutput`;
-                if (currentVdoRoomPassword) newCardSrc += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
-                iframe.src = newCardSrc;
+                iframe.src = gmVdoViewSrc(p.streamId);
                 iframe.allow = 'autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock';
                 iframe.allowFullscreen = true;
                 iframe.className = 'pc-camera-frame';
@@ -1422,12 +1458,13 @@ function renderPlayerCards() {
                 karmaVal.textContent = `${k > 0 ? '+' : ''}${k}`;
                 karmaVal.className = `pc-karma-val${k > 0 ? ' positive' : k < 0 ? ' negative' : ''}`;
             }
+            const spotBtn = card.querySelector('.pc-btn.spot');
+            if (spotBtn) spotBtn.classList.toggle('active', gmSpotlightCharId === playerId);
             // Camera: only create/update when streamId changes, never destroy existing iframe
             const existingWrap = card.querySelector('.pc-camera-wrap');
             const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
             if (p.streamId) {
-                let expectedSrc = `https://vdo.ninja/?view=${encodeURIComponent(p.streamId)}&room=${encodeURIComponent(currentVdoRoom)}&autoplay&cleanoutput`;
-                if (currentVdoRoomPassword) expectedSrc += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
+                const expectedSrc = gmVdoViewSrc(p.streamId);
                 if (!existingWrap) {
                     const wrap = document.createElement('div');
                     wrap.className = 'pc-camera-wrap';

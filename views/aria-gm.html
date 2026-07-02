@@ -80,6 +80,11 @@
         <div class="topbar-title" onclick="switchCampaign()" title="Changer de campagne" style="cursor:pointer;">ARIA</div>
         <span class="topbar-mj">MJ</span>
         <input class="campaign-name-input" id="campaign-display" value="" placeholder="Campagne" onblur="saveCampaignName(this)" onkeydown="if(event.key==='Enter')this.blur()" />
+        <!-- presence: "Lire la table" toggle — enlarges player faces (design frame 26) -->
+        <span class="tb-presence-label">Présence</span>
+        <button class="tb-read-table" id="tb-read-table" onclick="toggleReadTable()" title="Agrandir les visages des joueurs">
+            <span class="trt-icon">⌗</span> Lire la table<span class="trt-on">· on</span>
+        </button>
         <!-- music mini chip (design frame 12) — shows the now-playing track -->
         <div class="tb-music-chip" id="tb-music-chip" style="visibility:hidden;" title="Piste en cours">
             <span class="tb-music-note">♪</span>

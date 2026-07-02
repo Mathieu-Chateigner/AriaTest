@@ -2820,6 +2820,113 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     background: var(--bg2);
 }
 
+/* ── PRESENCE LAYER (design frame 25) ─────────
+   Three densities: Réduit (dots in the bar) · Bandeau (face rail) · Tablée (stage). */
+
+/* Density pills in the command bar */
+.presence-ctl { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.pres-icon { color: var(--ember); font-size: 13px; }
+.pres-pill {
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+    border: 1px solid var(--line2);
+    color: var(--dim);
+    background: transparent;
+    transition: border-color .15s, color .15s, background .15s;
+    white-space: nowrap;
+}
+.pres-pill:hover { border-color: var(--ember); color: var(--ember2); }
+.pres-pill.active { border-color: var(--ember); color: var(--ink); background: var(--ember); }
+
+/* Réduit — initials dots ("présence sans pixels") */
+.tb-presence-dots { display: flex; align-items: center; gap: 5px; margin-right: 6px; }
+.pres-dot {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    color: var(--warm);
+    background: var(--raise);
+    border: 1px solid var(--line2);
+    flex-shrink: 0;
+    cursor: default;
+}
+
+/* Bandeau — face rail docked to the right edge of .main */
+#presence-rail {
+    width: 172px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--line2);
+    background: var(--rail);
+    padding: 14px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    overflow-y: auto;
+}
+.pr-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+.pr-title {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+.pr-grip { font-size: 10px; color: var(--faint); letter-spacing: -2px; }
+.pr-tile {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--raise);
+    border: 1px solid var(--line);
+    flex-shrink: 0;
+}
+.pr-tile iframe { width: 100%; height: 100%; border: none; display: block; }
+.pr-tile .pr-label {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 4px 6px;
+    background: linear-gradient(0deg, rgba(5,6,9,.82), transparent);
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--warm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+.pr-tile.spotlit { outline: 2px solid var(--violet); outline-offset: -2px; }
+
+/* Tablée — the cameras grid becomes a stage: big face + column of others */
+.cameras-grid.stage-mode {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 188px;
+    gap: 13px;
+    align-items: start;
+}
+.cameras-grid.stage-mode .camera-cell { display: flex; flex-direction: column; min-width: 0; }
+.cameras-grid.stage-mode .camera-cell.stage-main { grid-column: 1; grid-row: 1 / span 99; }
+.cameras-grid.stage-mode .camera-cell:not(.stage-main) { grid-column: 2; cursor: pointer; }
+.cameras-grid.stage-mode .camera-iframe-wrap { width: 100% !important; }
+.cameras-grid.stage-mode .camera-cell:not(.stage-main) iframe { pointer-events: none; }
+.cameras-grid.stage-mode .camera-cell:not(.stage-main) .camera-resize-handle { display: none; }
+.cameras-grid.stage-mode .camera-cell.stage-main .camera-iframe-wrap { border-color: var(--line2); }
+
+/* Under 900px the rail folds away (frame 23 rule applies to presence too) */
+@media (max-width: 900px) {
+    #presence-rail { display: none !important; }
+}
+
 /* ═══════════════════════════════════════════
    RESPONSIVE (#7) — tablets / small windows (≥768px target).
    Below 768px is best-effort, not optimized for phones.

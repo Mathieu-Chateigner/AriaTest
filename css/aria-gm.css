@@ -178,6 +178,47 @@ body::after {
 .topbar-joincode:hover { background: var(--violetsoft); }
 
 .tb-sep { width: 1px; height: 22px; background: var(--line); flex-shrink: 0; }
+
+/* Presence — "Lire la table" toggle (design frame 26) */
+.tb-presence-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    flex-shrink: 0;
+}
+.tb-read-table {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: 1px solid rgba(169,139,221,.4);
+    border-radius: 20px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--violet2);
+    flex-shrink: 0;
+    transition: background .15s, border-color .15s;
+}
+.tb-read-table .trt-icon { font-size: 12px; color: var(--violet2); }
+.tb-read-table .trt-on {
+    display: none;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    border-left: 1px solid rgba(169,139,221,.4);
+    padding-left: 7px;
+}
+.tb-read-table:hover { background: var(--violetsoft); }
+.tb-read-table.on { border-color: var(--violet); background: rgba(169,139,221,.18); }
+.tb-read-table.on .trt-on { display: inline; }
 /* Music mini chip — now-playing track in the command bar (design frame 12) */
 .tb-music-chip {
     display: flex;
@@ -2182,6 +2223,12 @@ body.light-mode {
     border: none;
     display: block;
 }
+/* "Lire la table" (frame 26): faces grow, the sheet stays underneath */
+.players-grid.read-table .pc-camera-wrap { aspect-ratio: 4 / 3; }
+
+.pc-btn.spot { background: none; border: 1px solid var(--line2); color: var(--dim); }
+.pc-btn.spot:hover { background: var(--violetsoft); color: var(--violet2); border-color: var(--violet); }
+.pc-btn.spot.active { background: rgba(169,139,221,.18); color: var(--violet2); border-color: var(--violet); }
 
 /* ═══════════════════════════════════════════
    RESPONSIVE (#7) — tablets / small windows (≥768px target).
