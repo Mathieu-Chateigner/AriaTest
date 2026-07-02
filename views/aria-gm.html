@@ -96,14 +96,34 @@
     <div class="main">
         <div class="content">
             <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('tab-players',this)">Joueurs</button>
-                <button class="tab-btn" onclick="switchTab('tab-monsters',this)">Monstres</button>
-                <button class="tab-btn" onclick="switchTab('tab-gm-roll',this)">Jets</button>
-                <button class="tab-btn" onclick="switchTab('tab-cards',this)">Cartes</button>
-                <button class="tab-btn" onclick="switchTab('tab-alchemy',this)">Alchimie</button>
-                <button class="tab-btn" onclick="switchTab('tab-files',this)">Fichiers</button>
-                <button class="tab-btn" onclick="switchTab('tab-music',this)">Musique</button>
-                <button class="tab-btn" onclick="switchTab('tab-gm-notes',this)">Notes</button>
+                <button class="tab-btn active" data-tab="tab-players" onclick="switchTab('tab-players',this)">Joueurs<span class="tab-pin" title="Ouvrir en 2nd panneau (cliquer à nouveau pour fermer)" onclick="event.stopPropagation();pinTab('tab-players')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-monsters" onclick="switchTab('tab-monsters',this)">Monstres<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-monsters')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-gm-roll" onclick="switchTab('tab-gm-roll',this)">Jets<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-gm-roll')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">Cartes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-cards')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">Alchimie<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-alchemy')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-files" onclick="switchTab('tab-files',this)">Fichiers<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-files')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-music" onclick="switchTab('tab-music',this)">Musique<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-music')">⧉</span></button>
+                <button class="tab-btn" data-tab="tab-gm-notes" onclick="switchTab('tab-gm-notes',this)">Notes<span class="tab-pin" title="Ouvrir en 2nd panneau" onclick="event.stopPropagation();pinTab('tab-gm-notes')">⧉</span></button>
+            </div>
+
+            <!-- SPLIT-VIEW CHROME (design frames 22-24) — pane headers + draggable divider.
+                 Only visible in split mode; panes themselves are the .tab-content divs (never reparented). -->
+            <div class="split-pane-hdr" id="pane-hdr-left" onmousedown="startPaneDrag(event,'left')" title="Glisser pour ré-ancrer">
+                <span class="sph-grip">⋮⋮</span>
+                <span class="sph-label" id="pane-hdr-left-label"></span>
+                <span class="sph-spacer"></span>
+                <span class="sph-focus" id="pane-hdr-left-focus">Focus</span>
+                <button class="sph-close" onmousedown="event.stopPropagation()" onclick="closePane('left')" title="Fermer le panneau">×</button>
+            </div>
+            <div class="split-pane-hdr" id="pane-hdr-right" onmousedown="startPaneDrag(event,'right')" title="Glisser pour ré-ancrer">
+                <span class="sph-grip">⋮⋮</span>
+                <span class="sph-label" id="pane-hdr-right-label"></span>
+                <span class="sph-spacer"></span>
+                <span class="sph-focus" id="pane-hdr-right-focus">Focus</span>
+                <button class="sph-close" onmousedown="event.stopPropagation()" onclick="closePane('right')" title="Fermer le panneau">×</button>
+            </div>
+            <div id="split-divider" onmousedown="startDividerDrag(event)" ondblclick="resetSplitRatio()" title="Glisser pour répartir — double-clic : 50 / 50">
+                <span></span><span></span><span></span>
             </div>
 
             <!-- JOUEURS -->
@@ -528,6 +548,15 @@
     </div>
 
     <div class="shuffle-overlay" id="gm-shuffle-overlay"></div>
+
+    <!-- DRAG-TO-DOCK FX (design frame 24) — ghost chip follows the cursor; the drop
+         overlay darkens the targeted half of the content region -->
+    <div id="dock-overlay">
+        <div class="dock-plus">+</div>
+        <div class="dock-label" id="dock-label"></div>
+        <div class="dock-hint">déposer ici</div>
+    </div>
+    <div id="drag-ghost"><span class="dg-icon">⌗</span><span id="drag-ghost-label"></span></div>
 
     <!-- Hidden YouTube IFrame players for music crossfade -->
     <div id="yt-player-a" style="position:fixed;top:-2px;left:-2px;width:1px;height:1px;overflow:hidden;pointer-events:none;opacity:0;"></div>

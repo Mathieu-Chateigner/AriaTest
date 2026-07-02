@@ -1380,6 +1380,256 @@ Glissez un panneau du bandeau, ou l&rsquo;en-t&ecirc;te d&rsquo;un panneau ouver
     </div>
   </div>
 
+  <!-- ════════ SECTION VI · PRÉSENCE / CAMÉRA ════════ -->
+  <div style="width:1240px;max-width:100%;display:flex;align-items:baseline;gap:18px;margin:30px 0 22px;padding-top:20px;border-top:1px solid var(--line2);">
+    <div style="font-family:'Cormorant Garamond',serif;font-size:15px;font-weight:600;letter-spacing:.3em;color:var(--ember);">VI</div>
+    <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:600;color:var(--warm);">Pr&eacute;sence &mdash; Cam&eacute;ra</div>
+    <div style="flex:1;height:1px;background:var(--line);"></div>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;max-width:440px;text-align:right;line-height:1.7;">Pas de nouvelle fen&ecirc;tre. Les visages sont une couche d&rsquo;ambiance, dans le m&ecirc;me onglet.</div>
+  </div>
+
+  <!-- intent note: pourquoi pas une fenêtre -->
+  <div style="width:1240px;max-width:100%;margin-bottom:26px;display:flex;gap:22px;align-items:flex-start;">
+    <div style="flex:1;font-family:'Cormorant Garamond',serif;font-size:18px;font-style:italic;color:var(--dim);line-height:1.6;max-width:730px;">La question&nbsp;: une fen&ecirc;tre s&eacute;par&eacute;e&nbsp;? Mon parti&nbsp;: <span style="color:var(--ember2);font-style:normal;">non</span>. Une seconde fen&ecirc;tre se d&eacute;synchronise, force l&rsquo;alt-tab et vole l&rsquo;attention &mdash; or au jeu de r&ocirc;le on regarde surtout le contenu partag&eacute;, tout en gardant les visages au coin de l&rsquo;&oelig;il. La cam&eacute;ra devient donc une <span style="color:var(--ember2);font-style:normal;">couche de pr&eacute;sence</span> ancrable, avec trois densit&eacute;s &mdash; et un r&eacute;glage propre &agrave; chaque r&ocirc;le.</div>
+    <div style="width:248px;flex-shrink:0;border-left:1px solid var(--line2);padding-left:18px;display:flex;flex-direction:column;gap:11px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.2em;color:var(--faint);text-transform:uppercase;">Trois densit&eacute;s</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">R&eacute;duit</span>&nbsp;&nbsp;des pastilles dans la barre &mdash; pr&eacute;sence sans pixels.</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">Bandeau</span>&nbsp;&nbsp;un rail de visages ancr&eacute; &agrave; un bord.</div>
+      <div style="font-family:'Archivo',sans-serif;font-size:12.5px;color:var(--text);line-height:1.45;"><span style="color:var(--ember);">Tabl&eacute;e</span>&nbsp;&nbsp;pleine attention pour un beat de r&ocirc;le.</div>
+    </div>
+  </div>
+
+  <!-- 25 · Vue Joueur (interactif) -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">25 &mdash; Vue joueur &middot; densit&eacute; de pr&eacute;sence</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--ember);text-transform:uppercase;border:1px solid var(--embersoft);border-radius:20px;padding:4px 12px;">Interactif &mdash; changez la densit&eacute; &rarr;</div>
+    </div>
+    <div class="aria-frame" style="height:600px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+
+      <!-- command bar -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:0;height:56px;padding:0 18px;background:linear-gradient(180deg,var(--chrome1),var(--rail));border-bottom:1px solid var(--line2);">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;letter-spacing:.16em;color:var(--ember2);">ARIA</div>
+        <div style="width:1px;height:24px;background:var(--line);margin:0 16px;"></div>
+        <span style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--text);">Kaelen Vorr</span>
+        <div style="flex:1;"></div>
+        <!-- réduit: status dots live in the bar -->
+        <sc-if value="{{ showReduit }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:7px;margin-right:16px;">
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-right:3px;">&Agrave; table</span>
+            <sc-for list="{{ dotCast }}" as="d" hint-placeholder-count="5">
+              <div title="{{ d.name }}" style="{{ d.dotStyle }}">{{ d.initials }}</div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <!-- density toggle (always visible) -->
+        <div style="display:flex;align-items:center;gap:7px;">
+          <span style="color:var(--ember);font-size:13px;">&#9673;</span>
+          <sc-if value="{{ showReduit }}" hint-placeholder-val="{{ false }}"><div onClick="{{ setReduit }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--ember);color:var(--ink);background:var(--ember);">R&eacute;duit</div></sc-if>
+          <sc-if value="{{ notReduit }}" hint-placeholder-val="{{ true }}"><div onClick="{{ setReduit }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--line2);color:var(--dim);background:transparent;">R&eacute;duit</div></sc-if>
+          <sc-if value="{{ showBandeau }}" hint-placeholder-val="{{ true }}"><div onClick="{{ setBandeau }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--ember);color:var(--ink);background:var(--ember);">Bandeau</div></sc-if>
+          <sc-if value="{{ notBandeau }}" hint-placeholder-val="{{ false }}"><div onClick="{{ setBandeau }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--line2);color:var(--dim);background:transparent;">Bandeau</div></sc-if>
+          <sc-if value="{{ showTablee }}" hint-placeholder-val="{{ false }}"><div onClick="{{ setTablee }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--ember);color:var(--ink);background:var(--ember);">Tabl&eacute;e</div></sc-if>
+          <sc-if value="{{ notTablee }}" hint-placeholder-val="{{ true }}"><div onClick="{{ setTablee }}" style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-radius:20px;cursor:pointer;border:1px solid var(--line2);color:var(--dim);background:transparent;">Tabl&eacute;e</div></sc-if>
+        </div>
+      </div>
+
+      <!-- BODY -->
+      <div style="position:relative;z-index:2;display:flex;flex:1;min-height:0;">
+
+        <!-- RÉDUIT: sheet full width -->
+        <sc-if value="{{ showReduit }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;display:flex;min-width:0;">
+            <div style="width:240px;flex-shrink:0;background:var(--rail);border-right:1px solid var(--line2);padding:18px 16px;">
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:14px;text-align:center;margin-bottom:14px;">
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;margin-bottom:6px;">Points de vie</div>
+                <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:48px;font-weight:700;line-height:.9;color:var(--ok);">18</div>
+                <div style="height:4px;background:var(--track);border-radius:2px;margin-top:11px;overflow:hidden;"><div style="width:75%;height:100%;background:linear-gradient(90deg,var(--hp1),var(--ok));"></div></div>
+              </div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;line-height:1.7;">Pr&eacute;sence r&eacute;duite &mdash;<br>visages en pastilles, <br>z&eacute;ro pixel vol&eacute; &agrave; la fiche.</div>
+            </div>
+            <div style="flex:1;padding:20px 22px;overflow-y:auto;">
+              <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);margin-bottom:14px;">Comp&eacute;tences</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;">
+                <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+                  <div style="display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 12px;">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">{{ s.name }}</span>
+                    <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--text);">{{ s.pct }}%</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- BANDEAU: sheet + presence rail -->
+        <sc-if value="{{ showBandeau }}" hint-placeholder-val="{{ true }}">
+          <div style="flex:1;display:flex;min-width:0;">
+            <div style="flex:1;padding:20px 22px;overflow-y:auto;min-width:0;">
+              <div style="display:flex;align-items:center;gap:11px;margin-bottom:14px;">
+                <div style="font-family:'Cormorant Garamond',serif;font-size:21px;font-weight:600;color:var(--warm);">Comp&eacute;tences</div>
+                <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;">
+                <sc-for list="{{ skills }}" as="s" hint-placeholder-count="8">
+                  <div style="display:flex;align-items:center;gap:11px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:9px 12px;">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:13px;color:var(--text);">{{ s.name }}</span>
+                    <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:15px;font-weight:700;color:var(--text);">{{ s.pct }}%</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <!-- presence rail (docked right) -->
+            <div style="width:172px;flex-shrink:0;border-left:1px solid var(--line2);background:var(--rail);padding:14px 13px;display:flex;flex-direction:column;gap:9px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;">Pr&eacute;sence</span>
+                <span style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;color:var(--faint);">&#8942;&#8942;</span>
+              </div>
+              <sc-for list="{{ stripTiles }}" as="t" hint-placeholder-count="5">
+                <div style="{{ t.wrapStyle }}">
+                  <div style="{{ t.avatarStyle }}">{{ t.initials }}</div>
+                  <div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:5px;padding:4px 6px;background:linear-gradient(0deg,rgba(5,6,9,.82),transparent);">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:{{ t.nameSize }};font-weight:600;color:var(--warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ t.name }}</span>
+                    <sc-if value="{{ t.mic }}" hint-placeholder-val="{{ true }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok);flex-shrink:0;"></span></sc-if>
+                    <sc-if value="{{ t.you }}" hint-placeholder-val="{{ false }}"></sc-if>
+                  </div>
+                  <sc-if value="{{ t.mic }}" hint-placeholder-val="{{ false }}"></sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- TABLÉE: presence stage + sheet peek -->
+        <sc-if value="{{ showTablee }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;display:flex;min-width:0;">
+            <!-- collapsed sheet peek -->
+            <div style="width:128px;flex-shrink:0;border-right:1px solid var(--line2);background:var(--rail);padding:14px 12px;display:flex;flex-direction:column;gap:11px;">
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;">Fiche &middot; repli</div>
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:11px 9px;text-align:center;">
+                <div style="font-family:ui-monospace,Menlo,monospace;font-size:7.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;margin-bottom:4px;">PV</div>
+                <div style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:30px;font-weight:700;line-height:.9;color:var(--ok);">18</div>
+              </div>
+              <div style="font-family:ui-monospace,Menlo,monospace;font-size:7.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;line-height:1.8;">Cliquez pour <br>rouvrir la fiche</div>
+            </div>
+            <!-- stage -->
+            <div style="flex:1;display:flex;min-width:0;padding:16px;gap:13px;">
+              <!-- big speaker -->
+              <div style="flex:1;min-width:0;{{ '' }}">
+                <div style="{{ tableSpeaker.wrapStyle }}">
+                  <div style="{{ tableSpeaker.avatarStyle }}">{{ tableSpeaker.initials }}</div>
+                  <div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;padding:11px 14px;background:linear-gradient(0deg,rgba(5,6,9,.85),transparent);">
+                    <span style="width:8px;height:8px;border-radius:50%;background:var(--violet);box-shadow:0 0 8px var(--violet);"></span>
+                    <span style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:600;color:var(--warm);">{{ tableSpeaker.name }}</span>
+                    <span style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--violet2);text-transform:uppercase;border:1px solid rgba(169,139,221,.4);border-radius:20px;padding:3px 9px;">parle</span>
+                  </div>
+                </div>
+              </div>
+              <!-- others column -->
+              <div style="width:188px;flex-shrink:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto;">
+                <sc-for list="{{ tableOthers }}" as="t" hint-placeholder-count="4">
+                  <div style="{{ t.wrapStyle }}">
+                    <div style="{{ t.avatarStyle }}">{{ t.initials }}</div>
+                    <div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:5px;padding:5px 8px;background:linear-gradient(0deg,rgba(5,6,9,.82),transparent);">
+                      <span style="flex:1;font-family:'Archivo',sans-serif;font-size:12px;font-weight:600;color:var(--warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ t.name }}</span>
+                      <sc-if value="{{ t.mic }}" hint-placeholder-val="{{ true }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok);flex-shrink:0;"></span></sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:9.5px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;line-height:1.8;">
+      Le locuteur actif s&rsquo;entoure d&rsquo;un halo &middot; cam&eacute;ra coupée &rarr; initiales &middot; point vert = micro ouvert &middot; le rail s&rsquo;ancre &agrave; un bord via le m&ecirc;me syst&egrave;me de glisser-d&eacute;poser
+    </div>
+  </div>
+
+  <!-- 26 · Vue MJ -->
+  <div style="width:1240px;max-width:100%;margin-bottom:30px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px;">
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;">26 &mdash; Vue MJ &middot; lire la table</div>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:.12em;color:var(--violet);text-transform:uppercase;border:1px solid rgba(169,139,221,.25);border-radius:20px;padding:4px 12px;">Visages li&eacute;s aux fiches g&eacute;r&eacute;es</div>
+    </div>
+    <div class="aria-frame" style="height:560px;display:flex;flex-direction:column;">
+      <div class="aria-grain" style="opacity:.05;"></div>
+      <!-- GM command bar -->
+      <div style="position:relative;z-index:2;display:flex;align-items:center;gap:14px;height:54px;padding:0 20px;background:linear-gradient(180deg,var(--chromeV1),var(--chromeV2));border-bottom:1px solid var(--line2);">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;letter-spacing:.16em;color:var(--violet);">ARIA</div>
+        <div style="width:1px;height:22px;background:var(--line);"></div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:var(--text);">Campagne des Cendres</div>
+        <div style="flex:1;"></div>
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:8.5px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase;">Pr&eacute;sence</span>
+        <sc-if value="{{ gmRoom }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ toggleRoom }}" style="display:flex;align-items:center;gap:8px;cursor:pointer;border:1px solid var(--violet);border-radius:20px;padding:6px 14px;background:rgba(169,139,221,.18);">
+            <span style="color:var(--violet2);font-size:12px;">&#9783;</span>
+            <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--violet2);">Lire la table</span>
+            <span style="font-family:ui-monospace,Menlo,monospace;font-size:8px;letter-spacing:.14em;color:var(--violet2);text-transform:uppercase;border-left:1px solid rgba(169,139,221,.4);padding-left:7px;">on</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ gmRoomOff }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ toggleRoom }}" style="display:flex;align-items:center;gap:8px;cursor:pointer;border:1px solid rgba(169,139,221,.4);border-radius:20px;padding:6px 14px;background:transparent;">
+            <span style="color:var(--violet2);font-size:12px;">&#9783;</span>
+            <span style="font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--violet2);">Lire la table</span>
+          </div>
+        </sc-if>
+      </div>
+      <!-- body: managed player cards with bound cameras -->
+      <div style="position:relative;z-index:2;flex:1;overflow-y:auto;padding:20px 22px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:var(--warm);">Joueurs connect&eacute;s</div>
+          <div style="flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent);"></div>
+          <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;">le visage vit dans la fiche &mdash; pas dans une grille s&eacute;par&eacute;e</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+          <sc-for list="{{ gmCast }}" as="p" hint-placeholder-count="4">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow:hidden;">
+              <!-- bound camera -->
+              <sc-if value="{{ gmRoom }}" hint-placeholder-val="{{ false }}">
+                <div style="{{ p.tileStyleTall }}">
+                  <div style="{{ p.avatarStyle }}">{{ p.initials }}</div>
+                  <div style="position:absolute;top:8px;left:8px;width:6px;height:6px;border-radius:50%;background:var(--violet);animation:ariaPulse 2.4s infinite;"></div>
+                  <div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:6px;padding:6px 9px;background:linear-gradient(0deg,rgba(5,6,9,.8),transparent);">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;color:var(--warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</span>
+                    <sc-if value="{{ p.mic }}" hint-placeholder-val="{{ true }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok);"></span></sc-if>
+                    <sc-if value="{{ p.speaking }}" hint-placeholder-val="{{ false }}"><span style="font-family:ui-monospace,Menlo,monospace;font-size:7.5px;letter-spacing:.12em;color:var(--violet2);text-transform:uppercase;">parle</span></sc-if>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ gmRoomOff }}" hint-placeholder-val="{{ true }}">
+                <div style="{{ p.tileStyleShort }}">
+                  <div style="{{ p.avatarStyle }}">{{ p.initials }}</div>
+                  <div style="position:absolute;top:8px;left:8px;width:6px;height:6px;border-radius:50%;background:var(--violet);animation:ariaPulse 2.4s infinite;"></div>
+                  <div style="position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:6px;padding:6px 9px;background:linear-gradient(0deg,rgba(5,6,9,.8),transparent);">
+                    <span style="flex:1;font-family:'Archivo',sans-serif;font-size:11px;font-weight:600;color:var(--warm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</span>
+                    <sc-if value="{{ p.mic }}" hint-placeholder-val="{{ true }}"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok);"></span></sc-if>
+                    <sc-if value="{{ p.speaking }}" hint-placeholder-val="{{ false }}"><span style="font-family:ui-monospace,Menlo,monospace;font-size:7.5px;letter-spacing:.12em;color:var(--violet2);text-transform:uppercase;">parle</span></sc-if>
+                  </div>
+                </div>
+              </sc-if>
+              <!-- managed stats -->
+              <div style="padding:11px 13px;">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:7px;">
+                  <span style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase;">{{ p.cls }}</span>
+                  <span style="font-family:'Archivo',sans-serif;font-variant-numeric:tabular-nums;font-size:13px;color:var(--dim);">{{ p.hp }}/{{ p.max }} PV</span>
+                </div>
+                <div style="height:5px;background:var(--track);border-radius:3px;overflow:hidden;margin-bottom:10px;"><div style="width:{{ p.pct }}%;height:100%;background:linear-gradient(90deg,var(--hp1),var(--ok));border-radius:3px;"></div></div>
+                <div style="display:flex;gap:6px;">
+                  <div style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--violet2);border:1px solid rgba(169,139,221,.3);border-radius:3px;padding:6px 0;cursor:pointer;">&#9728; Spot</div>
+                  <div style="flex:1;text-align:center;font-family:'Archivo',sans-serif;font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:3px;padding:6px 0;cursor:pointer;">&#9669; Muet</div>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:16px;font-family:'Cormorant Garamond',serif;font-size:15px;font-style:italic;color:var(--dim);line-height:1.6;">&laquo; Lire la table &raquo; agrandit les visages d&rsquo;un geste quand le MJ veut capter les r&eacute;actions ; un second geste les replie sous les fiches. Le MJ peut <span style="color:var(--violet2);font-style:normal;">spotlighter</span> un joueur (sa cam&eacute;ra passe en grand chez tous) ou couper son micro.</div>
+      </div>
+    </div>
+  </div>
+
   <!--END-->
 </div>
 </x-dc>
@@ -1390,7 +1640,9 @@ class Component extends DCLogic {
   hpColor(pct) { return pct > 50 ? 'var(--ok)' : pct > 25 ? 'var(--warn)' : 'var(--bad)'; }
 
   // ---- live combat feedback (GM Joueurs panel) ----
-  state = { players: this.basePlayers(), panes: ['skills', 'notes'], focusId: 'notes', dragId: null, drop: null, dx: 0, dy: 0 };
+  state = { players: this.basePlayers(), panes: ['skills', 'notes'], focusId: 'notes', dragId: null, drop: null, dx: 0, dy: 0, presence: 'bandeau', gmRoom: false };
+  setPresence(m) { this.setState({ presence: m }); }
+  toggleRoom() { this.setState({ gmRoom: !this.state.gmRoom }); }
   animSeq = {};
   wsEl = null;
 
@@ -1754,6 +2006,87 @@ class Component extends DCLogic {
       background: 'var(--bg)', cursor: wsDragging ? 'grabbing' : 'default',
     };
 
+    // ===== PRÉSENCE / CAMÉRA =====
+    const feedBg = 'repeating-linear-gradient(135deg,var(--feed1) 0 12px,var(--feed2) 12px 24px)';
+    // player POV cast — "moi" = Kaelen
+    const cast = [
+      { id: 'mj', name: 'Ma\u00eetre du Jeu', role: 'mj', col: 'var(--violet)', cam: true, mic: true, speaking: true, you: false },
+      { id: 'maelis', name: 'Maelis Dor\u00e9', role: 'Mage', col: 'var(--ember)', cam: true, mic: true, speaking: false, you: false },
+      { id: 'brogan', name: 'Brogan Tael', role: 'Guerrier', col: 'var(--ember)', cam: true, mic: false, speaking: false, you: false },
+      { id: 'syle', name: 'Syle Aubevent', role: 'Barde', col: 'var(--ember)', cam: false, mic: true, speaking: false, you: false },
+      { id: 'moi', name: 'Kaelen Vorr', role: 'R\u00f4deur \u00b7 vous', col: 'var(--ok)', cam: true, mic: true, speaking: false, you: true },
+    ];
+    const initials = (n) => n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    const presence = this.state.presence;
+    const presModes = [
+      { id: 'reduit', label: 'R\u00e9duit' },
+      { id: 'bandeau', label: 'Bandeau' },
+      { id: 'tablee', label: 'Tabl\u00e9e' },
+    ].map(m => ({ ...m, active: m.id === presence, inactive: m.id !== presence, onClick: () => this.setPresence(m.id) }));
+    // build cast tiles with derived styles per density
+    const tile = (c, w, h, big) => ({
+      ...c, initials: initials(c.name),
+      camOn: c.cam,
+      ring: c.speaking ? (c.role === 'mj' ? 'var(--violet)' : 'var(--ember)') : 'transparent',
+      wrapStyle: {
+        position: 'relative', width: w, height: h, borderRadius: '5px', overflow: 'hidden', flexShrink: 0,
+        border: '1px solid ' + (c.speaking ? (c.role === 'mj' ? 'rgba(169,139,221,.8)' : 'rgba(236,164,86,.8)') : 'var(--line)'),
+        boxShadow: c.speaking ? '0 0 0 2px ' + (c.role === 'mj' ? 'rgba(169,139,221,.35)' : 'rgba(236,164,86,.30)') : 'none',
+        background: c.cam ? feedBg : 'var(--panel)',
+      },
+      avatarStyle: {
+        position: 'absolute', inset: 0, display: c.cam ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, color: c.col,
+        fontSize: big ? '34px' : '17px', background: 'var(--panel)',
+      },
+      nameSize: big ? '15px' : '11px',
+    });
+    const stripTiles = cast.map(c => tile(c, '108px', '74px', false));
+    const tableSpeaker = (() => { const s = cast.find(c => c.speaking) || cast[0]; return tile(s, '100%', '100%', true); })();
+    const tableOthers = cast.filter(c => !c.speaking).map(c => tile(c, '100%', '92px', false));
+    const dotCast = cast.map(c => ({ ...c, initials: initials(c.name),
+      dotStyle: {
+        position: 'relative', width: '30px', height: '30px', borderRadius: '50%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'Archivo',sans-serif", fontSize: '10px', fontWeight: 700, color: 'var(--warm)',
+        background: c.cam ? feedBg : 'var(--raise)',
+        border: '1px solid ' + (c.speaking ? (c.role === 'mj' ? 'var(--violet)' : 'var(--ember)') : 'var(--line2)'),
+        boxShadow: c.speaking ? '0 0 0 2px ' + (c.role === 'mj' ? 'rgba(169,139,221,.4)' : 'rgba(236,164,86,.35)') : 'none',
+      },
+    }));
+    const showReduit = presence === 'reduit';
+    const showBandeau = presence === 'bandeau';
+    const showTablee = presence === 'tablee';
+    const notReduit = !showReduit, notBandeau = !showBandeau, notTablee = !showTablee;
+    const setReduit = () => this.setPresence('reduit');
+    const setBandeau = () => this.setPresence('bandeau');
+    const setTablee = () => this.setPresence('tablee');
+    // GM room tiles (bound to managed players)
+    const gmRoom = this.state.gmRoom;
+    const gmCast = [
+      { id: 'maelis', name: 'Maelis Dor\u00e9', cls: 'Mage', cam: true, mic: true, speaking: false, hp: 11, max: 16 },
+      { id: 'brogan', name: 'Brogan Tael', cls: 'Guerrier', cam: true, mic: false, speaking: false, hp: 27, max: 30 },
+      { id: 'syle', name: 'Syle Aubevent', cls: 'Barde', cam: false, mic: true, speaking: false, hp: 4, max: 18 },
+      { id: 'kaelen', name: 'Kaelen Vorr', cls: 'R\u00f4deur', cam: true, mic: true, speaking: true, hp: 18, max: 24 },
+    ].map(c => ({ ...c, initials: initials(c.name), pct: Math.round(c.hp / c.max * 100),
+      tileStyleTall: {
+        position: 'relative', height: '150px', borderRadius: '5px', overflow: 'hidden',
+        background: c.cam ? feedBg : 'var(--panel)',
+        border: '1px solid ' + (c.speaking ? 'rgba(169,139,221,.8)' : 'var(--line)'),
+        boxShadow: c.speaking ? '0 0 0 2px rgba(169,139,221,.32)' : 'none',
+      },
+      tileStyleShort: {
+        position: 'relative', height: '92px', borderRadius: '5px', overflow: 'hidden',
+        background: c.cam ? feedBg : 'var(--panel)',
+        border: '1px solid ' + (c.speaking ? 'rgba(169,139,221,.8)' : 'var(--line)'),
+        boxShadow: c.speaking ? '0 0 0 2px rgba(169,139,221,.32)' : 'none',
+      },
+      avatarStyle: {
+        position: 'absolute', inset: 0, display: c.cam ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: "'Cormorant Garamond',serif", fontWeight: 600, fontSize: '26px', color: 'var(--violet2)', background: 'var(--panel)',
+      },
+    }));
+
     const grain = (this.props.grain ?? true) ? 0.05 : 0;
 
     // ===== THEME =====
@@ -1802,6 +2135,10 @@ class Component extends DCLogic {
       gmPlayers, monsters, rollsFeed, tracker, tracks, playlists, files, grain,
       availablePanels, slots, setWs: this.setWs, clearDrop: this.clearDrop, stopDown: this.stopDown,
       dragGhostStyle, wsDragLabel, wsStyle,
+      stripTiles, tableSpeaker, tableOthers, dotCast,
+      showReduit, showBandeau, showTablee, notReduit, notBandeau, notTablee,
+      setReduit, setBandeau, setTablee, feedBg,
+      gmCast, gmRoom, gmRoomOff: !gmRoom, toggleRoom: () => this.toggleRoom(),
       damageAll: () => this.damageAll(), healAll: () => this.healAll(), resetPlayers: () => this.resetPlayers(),
       ...rollStates[rr],
       // section dividers + builder-rendered frames are filled by template-side markup;
