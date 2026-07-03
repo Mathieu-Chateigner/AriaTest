@@ -794,6 +794,9 @@ function renderTabLayout() {
         if (i >= 0 && split) { t.style.gridColumn = String(2 * i + 1); t.style.gridRow = '3'; }
         else { t.style.gridColumn = ''; t.style.gridRow = ''; }
     });
+    // Fill the cameras grid as soon as its pane opens (renders in place —
+    // heartbeats would otherwise leave a freshly docked pane empty for up to 5s).
+    if (openPanes.includes('tab-cameras')) renderCamerasTab();
     updateSplitChrome();
     _persistSplit();
 }
@@ -1250,7 +1253,11 @@ function setPresenceMode(m) {
     localStorage.setItem('aria-presence-mode', m);
     if (m === 'tablee') {
         const btn = document.getElementById('tab-btn-cameras');
-        if (btn && btn.style.display !== 'none') switchTab('tab-cameras', btn);
+        if (btn && btn.style.display !== 'none' && !openPanes.includes('tab-cameras')) {
+            // switchTab is inert while a split is open — dock a cameras pane instead
+            if (openPanes.length > 1) dockTab('tab-cameras', openPanes.length);
+            else switchTab('tab-cameras', btn);
+        }
     }
     renderPresenceUI();
     if (document.getElementById('tab-cameras')?.classList.contains('active')) renderCamerasTab();
