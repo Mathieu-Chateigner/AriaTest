@@ -640,7 +640,7 @@ function switchCampaign() {
     currentCampaignId = null;
     currentCampaignType = 'ancient';
     gmSpotlightCharId = null;
-    pinnedTabId = null; activeTabId = 'tab-players';
+    resetSplitState();
     renderTabLayout();
     showSelectionScreen();
 }
@@ -665,6 +665,7 @@ function initApp() {
     renderMusicTab();
     loadGMNotes();
     initGmDeck();
+    renderTabLayout(); // apply the restored multi-pane layout
     loadConfigInputs();
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
@@ -757,120 +758,172 @@ function addSelectOpt(panel, value, label, onClick) {
 // ═══════════════════════════════════════════
 //  TABS
 // ═══════════════════════════════════════════
-// Switch the active GM panel tab and refresh the monster select if on the GM Roll tab.
-// Split-view: activeTabId is the primary (left) pane; pinnedTabId is an optional
-// secondary (right) pane shown side by side — same model as the player panel.
-let activeTabId = 'tab-players';
-let pinnedTabId = null;
+// Multi-pane split view — same engine as the player panel (violet chrome).
+// openPanes lists the open tabs left → right; paneWeights holds their relative
+// widths (normalized to sum 100). Panes are the existing .tab-content divs
+// (classes + inline grid placement only — never reparented, so player-card
+// camera iframes are untouched). No pane-count limit.
+let openPanes = ['tab-players'];
+let paneWeights = [100];
+let focusIdx = 0;
 
-// Switch the primary tab panel in the GM UI.
-function switchTab(id, _btn) {
-    activeTabId = id;
-    if (pinnedTabId === id) pinnedTabId = null; // a tab can't be in both panes at once
-    renderTabLayout();
-}
-// Pin a tab as a secondary split pane; clicking the same tab's pin icon again closes it.
-function pinTab(id) {
-    if (pinnedTabId === id) pinnedTabId = null;
-    else if (id === activeTabId) return;        // already the primary pane
-    else pinnedTabId = id;
-    renderTabLayout();
-}
-// Close the secondary split pane.
-function unpinTab() { pinnedTabId = null; renderTabLayout(); }
-// Apply active/pinned classes to tab buttons and content panes for single or split view.
-function renderTabLayout() {
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active', 'pinned-pane'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active', 'pinned'));
-    const content = document.querySelector('.content');
-    document.getElementById(activeTabId)?.classList.add('active');
-    document.querySelector(`.tab-btn[data-tab="${activeTabId}"]`)?.classList.add('active');
-    if (pinnedTabId && document.getElementById(pinnedTabId)) {
-        document.getElementById(pinnedTabId).classList.add('active', 'pinned-pane');
-        document.querySelector(`.tab-btn[data-tab="${pinnedTabId}"]`)?.classList.add('pinned');
-        content?.classList.add('split-mode');
-    } else {
-        content?.classList.remove('split-mode');
+// Restore the persisted pane layout (hidden tabs are pruned in renderTabLayout).
+try {
+    const _sl = JSON.parse(localStorage.getItem('aria-gm-split-layout') || 'null');
+    if (_sl && Array.isArray(_sl.panes) && _sl.panes.length) {
+        openPanes = [...new Set(_sl.panes)];
+        paneWeights = (Array.isArray(_sl.weights) && _sl.weights.length === openPanes.length)
+            ? _sl.weights.slice() : openPanes.map(() => 1);
     }
-    if (activeTabId === 'tab-gm-roll' || pinnedTabId === 'tab-gm-roll') refreshMonsterSelect();
+} catch(_) {}
+
+function _persistSplit() {
+    localStorage.setItem('aria-gm-split-layout', JSON.stringify({ panes: openPanes, weights: paneWeights.map(w => Math.round(w * 100) / 100) }));
+}
+function _normWeights() {
+    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
+    paneWeights = paneWeights.map(w => w * 100 / sum);
+}
+// Back to a single default pane (campaign switch).
+function resetSplitState() {
+    openPanes = ['tab-players']; paneWeights = [100]; focusIdx = 0;
+}
+
+// Click on a tab button: classic tab switch — but only in single-pane mode.
+// Once a split is open, panes change through drag-to-dock only. Exception:
+// under the 900px breakpoint the split collapses to the single tab bar
+// (pane headers hidden), so clicks must keep working there.
+function switchTab(id, _btn) {
+    if (openPanes.length > 1) {
+        if (window.innerWidth > 900) return;
+        const j = openPanes.indexOf(id);
+        if (j > 0) {           // move the clicked pane to the visible front slot
+            openPanes.unshift(openPanes.splice(j, 1)[0]);
+            paneWeights.unshift(paneWeights.splice(j, 1)[0]);
+        } else if (j < 0) {
+            openPanes[0] = id; // replace the visible pane, keep the others
+        }
+    } else {
+        openPanes[0] = id;
+    }
+    focusIdx = 0;
+    renderTabLayout();
+}
+
+// Apply classes + grid placement to tab buttons and content panes.
+function renderTabLayout() {
+    // Drop panes whose tab was hidden (conditional tabs set display:none on the button).
+    for (let i = openPanes.length - 1; i >= 0; i--) {
+        const btn = document.querySelector(`.tab-btn[data-tab="${openPanes[i]}"]`);
+        if (!btn || btn.style.display === 'none' || !document.getElementById(openPanes[i])) {
+            openPanes.splice(i, 1); paneWeights.splice(i, 1);
+            if (focusIdx > i) focusIdx--;
+        }
+    }
+    if (!openPanes.length) { openPanes = ['tab-players']; paneWeights = [100]; }
+    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
+    _normWeights();
+    const split = openPanes.length > 1;
+    const content = document.querySelector('.content');
+    content?.classList.toggle('split-mode', split);
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === openPanes[focusIdx]);
+        b.classList.toggle('open', b.dataset.tab !== openPanes[focusIdx] && openPanes.includes(b.dataset.tab));
+    });
+    document.querySelectorAll('.tab-content').forEach(t => {
+        const i = openPanes.indexOf(t.id);
+        t.classList.toggle('active', i >= 0);
+        t.classList.toggle('split-primary', i === 0);
+        if (i >= 0 && split) { t.style.gridColumn = String(2 * i + 1); t.style.gridRow = '3'; }
+        else { t.style.gridColumn = ''; t.style.gridRow = ''; }
+    });
+    if (openPanes.includes('tab-gm-roll')) refreshMonsterSelect();
     updateSplitChrome();
+    _persistSplit();
 }
 
 // ═══════════════════════════════════════════
 //  DRAG-TO-DOCK SPLIT VIEW (design frames 22-24)
 //  Drag a tab button — or an open pane's header — over the content region:
-//  the targeted half darkens; dropping docks that tab left or right.
-//  Panes are the existing .tab-content divs (classes only — never reparented,
-//  so camera iframes and per-tab JS are untouched).
+//  the targeted half of the hovered pane darkens; dropping inserts the tab
+//  at that slot (left or right of any open pane).
 // ═══════════════════════════════════════════
-let splitRatio = parseInt(localStorage.getItem('aria-gm-split-ratio') || '50', 10) || 50;
-let splitFocusSide = 'left';
-let _dockDrag = null;          // { tabId, label, started, startX, startY, side }
+let _dockDrag = null;          // { tabId, label, started, startX, startY, insert }
 let _dockSuppressClick = false;
-let _dividerDragging = false;
+let _dividerDrag = null;       // { idx } — divider between panes idx and idx+1
 
-// Human label for a tab (the button's text node, without the ⧉ pin glyph).
+// Human label for a tab (the button's text).
 function tabLabel(id) {
     const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
-    if (!btn) return '';
-    const tn = [...btn.childNodes].find(n => n.nodeType === 3);
-    return (tn ? tn.textContent : btn.textContent).trim();
-}
-// First visible tab other than `id` (used when the lone pane is docked right).
-function firstOtherVisibleTab(id) {
-    const btn = [...document.querySelectorAll('.tab-btn')]
-        .find(b => b.dataset.tab !== id && b.style.display !== 'none');
-    return btn ? btn.dataset.tab : null;
+    return btn ? btn.textContent.trim() : '';
 }
 
-// Sync the split chrome (pane headers, divider, column ratio) with the tab state.
+// Rebuild the split chrome (pane headers + dividers) to match the pane list.
 function updateSplitChrome() {
     const content = document.querySelector('.content');
     if (!content) return;
-    const split = content.classList.contains('split-mode');
-    if (split) {
-        const l = document.getElementById('pane-hdr-left-label');
-        const r = document.getElementById('pane-hdr-right-label');
-        if (l) l.textContent = tabLabel(activeTabId);
-        if (r) r.textContent = tabLabel(pinnedTabId);
-        const pct = Math.min(75, Math.max(25, splitRatio));
-        content.style.gridTemplateColumns = `minmax(0,${pct}fr) 9px minmax(0,${100 - pct}fr)`;
-        updateSplitFocus();
-    } else {
-        content.style.gridTemplateColumns = '';
-    }
+    content.querySelectorAll('.split-pane-hdr, .split-divider').forEach(el => el.remove());
+    if (openPanes.length < 2) { content.style.gridTemplateColumns = ''; return; }
+    _applySplitColumns();
+    openPanes.forEach((id, i) => {
+        const hdr = document.createElement('div');
+        hdr.className = 'split-pane-hdr';
+        hdr.title = 'Glisser pour ré-ancrer';
+        hdr.style.gridColumn = String(2 * i + 1);
+        hdr.innerHTML = '<span class="sph-grip">⋮⋮</span><span class="sph-label"></span><span class="sph-spacer"></span><span class="sph-focus">Focus</span><button class="sph-close" title="Fermer le panneau">×</button>';
+        hdr.querySelector('.sph-label').textContent = tabLabel(id);
+        hdr.addEventListener('mousedown', e => startPaneDrag(e, i));
+        const close = hdr.querySelector('.sph-close');
+        close.addEventListener('mousedown', e => e.stopPropagation());
+        close.addEventListener('click', () => closePane(i));
+        content.appendChild(hdr);
+        if (i < openPanes.length - 1) {
+            const div = document.createElement('div');
+            div.className = 'split-divider';
+            div.title = 'Glisser pour répartir — double-clic : répartition égale';
+            div.style.gridColumn = String(2 * i + 2);
+            div.innerHTML = '<span></span><span></span><span></span>';
+            div.addEventListener('mousedown', e => startDividerDrag(e, i));
+            div.addEventListener('dblclick', resetSplitRatio);
+            content.appendChild(div);
+        }
+    });
+    updateSplitFocus();
 }
-// Cosmetic "Focus" chip — marks the pane last clicked (frames 22/24).
+// Set the grid column template from the pane weights (light path for divider drag).
+function _applySplitColumns() {
+    const content = document.querySelector('.content');
+    if (content) content.style.gridTemplateColumns = paneWeights.map(w => `minmax(0,${w.toFixed(2)}fr)`).join(' 9px ');
+}
+// Cosmetic "Focus" chip — marks the focused pane (frames 22/24).
 function updateSplitFocus() {
-    document.getElementById('pane-hdr-left-focus')?.classList.toggle('on', splitFocusSide === 'left');
-    document.getElementById('pane-hdr-right-focus')?.classList.toggle('on', splitFocusSide === 'right');
+    document.querySelectorAll('.content > .split-pane-hdr').forEach((h, i) =>
+        h.querySelector('.sph-focus')?.classList.toggle('on', i === focusIdx));
 }
 
-// Close one pane; the surviving pane becomes the single view.
-function closePane(side) {
-    if (side === 'left') { if (pinnedTabId) activeTabId = pinnedTabId; pinnedTabId = null; }
-    else pinnedTabId = null;
-    splitFocusSide = 'left';
+// Close pane i; the remaining panes share the freed width.
+function closePane(i) {
+    if (openPanes.length <= 1) return;
+    openPanes.splice(i, 1); paneWeights.splice(i, 1);
+    if (focusIdx > i) focusIdx--;
+    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
     renderTabLayout();
 }
 
-// Dock a tab on one side; a panel never opens twice — occupants swap instead.
-function dockTab(id, side) {
-    if (side === 'left') {
-        if (id === pinnedTabId) { pinnedTabId = activeTabId; activeTabId = id; }  // swap
-        else activeTabId = id;
+// Dock a tab at insertion slot k (0..N, between existing panes). A panel never
+// opens twice — if the tab is already open, its pane moves to the new slot.
+function dockTab(id, k) {
+    const j = openPanes.indexOf(id);
+    if (j >= 0) {
+        const w = paneWeights[j];
+        openPanes.splice(j, 1); paneWeights.splice(j, 1);
+        if (k > j) k--;
+        openPanes.splice(k, 0, id); paneWeights.splice(k, 0, w);
     } else {
-        if (id === pinnedTabId) { /* already there */ }
-        else if (id === activeTabId) {
-            if (pinnedTabId) { activeTabId = pinnedTabId; pinnedTabId = id; }     // swap
-            else {
-                const other = firstOtherVisibleTab(id);
-                if (!other) return;
-                activeTabId = other; pinnedTabId = id;
-            }
-        } else pinnedTabId = id;
+        openPanes.splice(k, 0, id);
+        paneWeights.splice(k, 0, 100 / Math.max(1, openPanes.length - 1));
     }
-    splitFocusSide = side;
+    focusIdx = k;
     renderTabLayout();
 }
 
@@ -885,16 +938,32 @@ function _dockRegion() {
     return { left: cr.left, right: cr.right, top, bottom: cr.bottom };
 }
 
+// Pane pixel edges across the dock region (accounts for the 9px dividers) — n+1 values.
+function _paneEdges(region) {
+    const n = openPanes.length;
+    const inner = (region.right - region.left) - 9 * (n - 1);
+    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
+    const edges = [region.left];
+    let x = region.left;
+    for (let i = 0; i < n; i++) {
+        x += inner * paneWeights[i] / sum + (i < n - 1 ? 9 : 0);
+        edges.push(i === n - 1 ? region.right : x);
+    }
+    return edges;
+}
+
 // Begin a potential drag from a tab button (starts after a 6px move threshold).
 function _dockBegin(tabId, e) {
-    _dockDrag = { tabId, label: tabLabel(tabId), started: false, startX: e.clientX, startY: e.clientY, side: null };
+    _dockDrag = { tabId, label: tabLabel(tabId), started: false, startX: e.clientX, startY: e.clientY, insert: null };
 }
 // Begin re-anchoring an open pane by its header (frame 24: drag header to re-dock).
-function startPaneDrag(e, side) {
+function startPaneDrag(e, idx) {
     if (e.button !== 0) return;
-    const id = side === 'left' ? activeTabId : pinnedTabId;
+    const id = openPanes[idx];
     if (!id) return;
     e.preventDefault();
+    focusIdx = idx;
+    updateSplitFocus();
     _dockBegin(id, e);
 }
 
@@ -913,19 +982,22 @@ function _dockMove(e) {
     if (ghost) { ghost.style.left = (e.clientX + 14) + 'px'; ghost.style.top = (e.clientY + 12) + 'px'; }
     const region = _dockRegion();
     const overlay = document.getElementById('dock-overlay');
-    let side = null;
+    let insert = null, zone = null;
     if (region && e.clientX >= region.left && e.clientX <= region.right && e.clientY >= region.top && e.clientY <= region.bottom) {
-        const mid = (region.left + region.right) / 2;
-        side = e.clientX < mid ? 'left' : 'right';
+        const edges = _paneEdges(region);
+        let i = 0;
+        while (i < openPanes.length - 1 && e.clientX >= edges[i + 1]) i++;
+        const mid = (edges[i] + edges[i + 1]) / 2;
+        insert = e.clientX < mid ? i : i + 1;
+        zone = e.clientX < mid ? { left: edges[i], right: mid } : { left: mid, right: edges[i + 1] };
     }
-    _dockDrag.side = side;
+    _dockDrag.insert = insert;
     if (overlay) {
-        if (side) {
-            const mid = (region.left + region.right) / 2;
+        if (zone) {
             overlay.style.display = 'flex';
-            overlay.style.left = (side === 'left' ? region.left : mid) + 'px';
+            overlay.style.left = zone.left + 'px';
             overlay.style.top = region.top + 'px';
-            overlay.style.width = ((region.right - region.left) / 2) + 'px';
+            overlay.style.width = (zone.right - zone.left) + 'px';
             overlay.style.height = (region.bottom - region.top) + 'px';
             const lbl = document.getElementById('dock-label');
             if (lbl) lbl.textContent = _dockDrag.label;
@@ -937,7 +1009,7 @@ function _dockMove(e) {
 
 function _dockEnd() {
     if (!_dockDrag) return;
-    const { tabId, started, side } = _dockDrag;
+    const { tabId, started, insert } = _dockDrag;
     _dockDrag = null;
     if (!started) return; // plain click on the tab button — let it through
     _dockSuppressClick = true;
@@ -949,57 +1021,68 @@ function _dockEnd() {
     if (ghost) ghost.style.display = 'none';
     const overlay = document.getElementById('dock-overlay');
     if (overlay) overlay.style.display = 'none';
-    if (side) dockTab(tabId, side);
+    if (insert !== null) dockTab(tabId, insert);
 }
 
-// Divider drag (frame 22/23): resize the split; double-click resets to 50/50.
-function startDividerDrag(e) {
+// Divider drag (frame 22/23): resize the two panes around divider idx;
+// double-click redistributes all panes equally.
+function startDividerDrag(e, idx) {
     if (e.button !== 0) return;
     e.preventDefault();
-    _dividerDragging = true;
+    _dividerDrag = { idx };
     document.body.classList.add('dock-dragging');
 }
 function _dividerMove(e) {
-    if (!_dividerDragging) return;
+    if (!_dividerDrag) return;
     const region = _dockRegion();
     if (!region) return;
-    const pct = ((e.clientX - region.left) / (region.right - region.left)) * 100;
-    splitRatio = Math.min(75, Math.max(25, Math.round(pct)));
-    updateSplitChrome();
+    const i = _dividerDrag.idx;
+    if (i >= openPanes.length - 1) return;
+    const edges = _paneEdges(region);
+    const span = edges[i + 2] - edges[i] - 9;   // px shared by the two panes
+    if (span <= 0) return;
+    const px = Math.min(Math.max(e.clientX - edges[i], span * 0.15), span * 0.85);
+    const pairW = paneWeights[i] + paneWeights[i + 1];
+    paneWeights[i] = pairW * px / span;
+    paneWeights[i + 1] = pairW - paneWeights[i];
+    _applySplitColumns();
 }
 function _dividerEnd() {
-    if (!_dividerDragging) return;
-    _dividerDragging = false;
+    if (!_dividerDrag) return;
+    _dividerDrag = null;
     document.body.classList.remove('dock-dragging');
-    localStorage.setItem('aria-gm-split-ratio', String(splitRatio));
+    _persistSplit();
 }
 function resetSplitRatio() {
-    splitRatio = 50;
-    localStorage.setItem('aria-gm-split-ratio', '50');
-    updateSplitChrome();
+    paneWeights = openPanes.map(() => 100 / openPanes.length);
+    _applySplitColumns();
+    _persistSplit();
 }
 
 // Global listeners for the dock/divider engines (registered once at load).
 window.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('mousedown', e => {
-            if (e.button !== 0 || e.target.closest('.tab-pin')) return;
+            if (e.button !== 0) return;
             _dockBegin(btn.dataset.tab, e);
         });
     });
     document.addEventListener('mousemove', e => { _dockMove(e); _dividerMove(e); });
+    // Chromium suppresses the compat mouseup after a preventDefault'd mousedown
+    // drag (pane headers) — listen to pointerup too; both enders are idempotent.
     document.addEventListener('mouseup', () => { _dockEnd(); _dividerEnd(); });
+    document.addEventListener('pointerup', () => { _dockEnd(); _dividerEnd(); });
     // After a real drag, swallow the click that would otherwise switch tabs.
     document.addEventListener('click', e => {
         if (_dockSuppressClick) { e.stopPropagation(); e.preventDefault(); _dockSuppressClick = false; }
     }, true);
-    // Track which pane holds focus (cosmetic chip in the pane headers).
+    // Track which pane holds focus (drives the Focus chip and tab-click target).
     document.querySelector('.content')?.addEventListener('mousedown', e => {
-        if (!document.querySelector('.content')?.classList.contains('split-mode')) return;
-        const pane = e.target.closest('.tab-content, .split-pane-hdr');
+        if (openPanes.length < 2) return;
+        const pane = e.target.closest('.tab-content');
         if (!pane) return;
-        splitFocusSide = (pane.classList.contains('pinned-pane') || pane.id === 'pane-hdr-right') ? 'right' : 'left';
-        updateSplitFocus();
+        const i = openPanes.indexOf(pane.id);
+        if (i >= 0) { focusIdx = i; updateSplitFocus(); }
     });
 });
 
