@@ -75,8 +75,9 @@
         </div>
     </div>
 
-    <!-- VDO.ninja push iframe — full-viewport, behind app-wrapper in DOM order so app content covers it -->
-    <iframe id="vdo-push-frame" style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;pointer-events:none;" allow="camera; microphone; autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock; encrypted-media" allowfullscreen></iframe>
+    <!-- VDO.ninja push iframe — full-viewport but opacity:0 (never display:none, which can block camera capture).
+         Its self-preview otherwise shows through the app's transparent backgrounds. -->
+    <iframe id="vdo-push-frame" style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;pointer-events:none;opacity:0;" allow="camera; microphone; autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock; encrypted-media" allowfullscreen></iframe>
 
     <!-- APP -->
     <div id="app-wrapper" style="display:none;flex-direction:column;flex:1;">

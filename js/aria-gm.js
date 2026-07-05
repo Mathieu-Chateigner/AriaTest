@@ -1248,7 +1248,9 @@ function toggleSpotlight(charId) {
 // once known (an empty `&room=` would make VDO.ninja try to join a room named "").
 function gmVdoViewSrc(streamId) {
     let src = `https://vdo.ninja/?view=${encodeURIComponent(streamId)}&autoplay&cleanoutput`;
-    if (currentVdoRoom) src += `&room=${encodeURIComponent(currentVdoRoom)}`;
+    // &solo is required alongside &room: without it VDO.ninja ignores &view and
+    // shows the "Join Room with Camera" landing page instead of the stream.
+    if (currentVdoRoom) src += `&solo&room=${encodeURIComponent(currentVdoRoom)}`;
     if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
     return src;
 }

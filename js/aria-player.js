@@ -1367,7 +1367,9 @@ function applyStageMain() {
 function vdoViewSrc(sid, muted) {
     let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput`;
     if (muted) src += '&muted';
-    if (vdoRoom) src += `&room=${encodeURIComponent(vdoRoom)}`;
+    // &solo is required alongside &room: without it VDO.ninja ignores &view and
+    // shows the "Join Room with Camera" landing page instead of the stream.
+    if (vdoRoom) src += `&solo&room=${encodeURIComponent(vdoRoom)}`;
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     return src;
 }
