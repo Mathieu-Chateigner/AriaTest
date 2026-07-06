@@ -1269,7 +1269,9 @@ function updateGMPushIframe() {
         return;
     }
     const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
-    let src = `https://vdo.ninja/?push=${gmStreamId}&room=${encodeURIComponent(currentVdoRoom)}&autostart&webcam&noaudio&cleanoutput`;
+    // Blank &view: "no streams will play; only publishing will be allowed" — without it
+    // the push page renders every guest's video next to the GM's own preview.
+    let src = `https://vdo.ninja/?push=${gmStreamId}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
     console.log('[GM] updateGMPushIframe:', src);
     let iframe = wrap.querySelector('iframe');

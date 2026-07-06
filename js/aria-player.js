@@ -146,7 +146,9 @@ function updatePushIframe() {
         return;
     }
     const sid = derivedStreamId();
-    let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(vdoRoom)}&autostart&webcam&noaudio&cleanoutput`;
+    // Blank &view: "no streams will play; only publishing will be allowed" — without it
+    // the push page joins the room as a full client and downloads every guest's stream.
+    let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(vdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     console.log('[VDO] updatePushIframe: setting push iframe →', src);
     if (pushFrame.src !== src) pushFrame.src = src;

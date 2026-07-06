@@ -176,6 +176,8 @@ Viewer iframes (`?view=STREAMID`) do **not** need the room password — only pus
 
 **Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `vdoViewSrc()` (player) and `gmVdoViewSrc()` (GM) append `&solo&room=...` together. The player's hidden `#vdo-push-frame` is full-viewport with `opacity:0` — never `display:none` (can block camera capture) and never visible (its self-preview shows through the app's transparent backgrounds).
 
+**Push URLs MUST include a blank `&view`** (`?push=SID&room=ROOM&view&...`) — per VDO.ninja docs, an empty `&view` means "no streams will play; only publishing will be allowed". Without it, a push page inside a room acts as a full room client and *renders every other guest's video* next to the self-preview (players appeared inside the GM's "Votre caméra" panel) and silently downloads all remote streams in the player's hidden push iframe.
+
 **Important:** `renderPlayerCards()` in `aria-gm.js` does **in-place DOM updates** (not `grid.innerHTML = ''`) so that camera iframes are never removed from the DOM during routine presence heartbeats. Removing an iframe from the DOM kills its WebRTC stream. The same principle applies to `renderCamerasTab()` in `aria-player.js` — it surgically adds/removes cells rather than clearing the grid.
 
 ### Overlay editor (`aria-overlay-editor.js`)
