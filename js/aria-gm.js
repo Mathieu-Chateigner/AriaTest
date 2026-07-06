@@ -1255,6 +1255,26 @@ function gmVdoViewSrc(streamId) {
     return src;
 }
 
+// Diagnostic tap on the VDO.ninja iframe API: every embedded vdo.ninja iframe posts
+// lifecycle events (camera acquisition, room join, peer connections, errors) to the
+// parent window. Spammy periodic events are filtered out. Remove once cameras are stable.
+window.addEventListener('message', (e) => {
+    if (typeof e.origin !== 'string' || !e.origin.includes('vdo.ninja')) return;
+    const d = e.data;
+    if (!d || typeof d !== 'object' || !d.action) return;
+    if (['stats', 'stats-updated', 'loudness', 'ping', 'guest-stats'].includes(d.action)) return;
+    let label = '(unknown iframe)';
+    document.querySelectorAll('iframe').forEach(f => {
+        if (f.contentWindow === e.source) {
+            const m = (f.src || '').match(/[?&](push|view)=([^&]*)/);
+            label = m ? `${m[1]}=${m[2] || '(blank)'}` : (f.id || (f.src || '').slice(0, 60));
+        }
+    });
+    let detail = '';
+    try { detail = JSON.stringify(d).slice(0, 300); } catch (_) {}
+    console.log('[VDO-EVENT]', label, '|', d.action, '|', detail);
+});
+
 // Set the GM VDO.ninja push iframe src so the GM camera streams to the room.
 function updateGMPushIframe() {
     const wrap = document.getElementById('gm-self-view-wrap');
