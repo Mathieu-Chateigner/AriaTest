@@ -502,7 +502,7 @@ function renderCampaignScreen() {
         const typeBadge = c.ariaType === 'contemporary'
             ? '<span class="sel-card-type contemporary">Contemporain</span>'
             : '<span class="sel-card-type">Médiéval</span>';
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCampaign('${c.id}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div class="sel-card-name">${c.name}</div><div class="sel-card-joincode" onclick="event.stopPropagation();copyJoinCodeFromCard(this,'${c.joinCode||''}')">Code · ${c.joinCode || '—'}</div><div class="sel-card-cta">Diriger &rarr;</div>`;
+        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCampaign('${_escHtml(_escJs(c.id))}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div class="sel-card-name">${_escHtml(c.name)}</div><div class="sel-card-joincode" onclick="event.stopPropagation();copyJoinCodeFromCard(this,'${_escHtml(_escJs(c.joinCode||''))}')">Code · ${_escHtml(c.joinCode || '—')}</div><div class="sel-card-cta">Diriger &rarr;</div>`;
         card.addEventListener('click', () => selectCampaign(c.id));
         grid.appendChild(card);
     });
@@ -542,6 +542,14 @@ function selectCampaign(id) {
 // Delete a campaign and all its scoped localStorage data and Supabase rows.
 function deleteCampaign(id) {
     if (!confirm('Supprimer cette campagne ? Tous les monstres et données seront perdus.')) return;
+    // Delete uploaded objects from Supabase Storage first (the DB rows hold the
+    // only record of their paths — removing rows first would orphan the files).
+    try {
+        const files = JSON.parse(localStorage.getItem('aria-gm-files-' + id) || '[]');
+        files.forEach(f => { if (f.path) deleteFileFromStorage(f.path); });
+        const tracks = _normalizeMusicData(localStorage.getItem('aria-gm-music-' + id)).flatMap(p => p.tracks);
+        tracks.forEach(t => { if (t.type === 'file' && t.path) deleteMusicFileFromStorage(t.path); });
+    } catch(_) {}
     sbDelete('campaigns',                'id=eq.'          + encodeURIComponent(id));
     sbDelete('monsters',                 'campaign_id=eq.' + encodeURIComponent(id));
     sbDelete('campaign_potions',         'campaign_id=eq.' + encodeURIComponent(id));
@@ -1215,7 +1223,7 @@ function startGMPresenceBroadcast() {
     if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
     if (!currentVdoRoom || !ablyDamage) { console.log('[GM] startGMPresenceBroadcast: skipped (vdoRoom:', currentVdoRoom || 'empty', '| ablyDamage:', !!ablyDamage, ')'); return; }
     const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
-    const publish = () => { console.log('[GM] broadcasting gm-presence | streamId:', gmStreamId, '| room:', currentVdoRoom); ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
+    const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
     console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmStreamId);
@@ -1254,26 +1262,6 @@ function gmVdoViewSrc(streamId) {
     if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
     return src;
 }
-
-// Diagnostic tap on the VDO.ninja iframe API: every embedded vdo.ninja iframe posts
-// lifecycle events (camera acquisition, room join, peer connections, errors) to the
-// parent window. Spammy periodic events are filtered out. Remove once cameras are stable.
-window.addEventListener('message', (e) => {
-    if (typeof e.origin !== 'string' || !e.origin.includes('vdo.ninja')) return;
-    const d = e.data;
-    if (!d || typeof d !== 'object' || !d.action) return;
-    if (['stats', 'stats-updated', 'loudness', 'ping', 'guest-stats'].includes(d.action)) return;
-    let label = '(unknown iframe)';
-    document.querySelectorAll('iframe').forEach(f => {
-        if (f.contentWindow === e.source) {
-            const m = (f.src || '').match(/[?&](push|view)=([^&]*)/);
-            label = m ? `${m[1]}=${m[2] || '(blank)'}` : (f.id || (f.src || '').slice(0, 60));
-        }
-    });
-    let detail = '';
-    try { detail = JSON.stringify(d).slice(0, 300); } catch (_) {}
-    console.log('[VDO-EVENT]', label, '|', d.action, '|', detail);
-});
 
 // Set the GM VDO.ninja push iframe src so the GM camera streams to the room.
 function updateGMPushIframe() {
@@ -1386,10 +1374,14 @@ function publishMusicResume() {
 // Process a player presence heartbeat: update the players Map and trigger card/music/file grants.
 function handlePresence(data) {
     if (!data?.playerId || !data?.charId) { console.warn('[GM] handlePresence: missing playerId or charId', data); return; }
+    // charId/playerId are interpolated into element ids and inline handlers — only
+    // accept UUID-shaped tokens so a crafted presence message can't inject markup.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(data.charId)) || !/^[A-Za-z0-9_-]{1,64}$/.test(String(data.playerId))) {
+        console.warn('[GM] handlePresence: IGNORED (malformed charId/playerId)', data.charId, data.playerId);
+        return;
+    }
     if (currentJoinCode && (data.campaignKey || '') !== currentJoinCode) { console.log('[GM] handlePresence: IGNORED (campaignKey mismatch:', data.campaignKey, 'vs', currentJoinCode, ') from', data.name); return; }
     if (currentCampaignType && (data.ariaType || 'ancient') !== currentCampaignType) { console.log('[GM] handlePresence: IGNORED (ariaType mismatch:', data.ariaType, 'vs', currentCampaignType, ') from', data.name); return; }
-    const isNew = !players.has(data.charId);
-    console.log('[GM] handlePresence:', isNew ? 'NEW' : 'update', '| player:', data.name, '| charId:', data.charId, '| hp:', data.hp, '/', data.maxHP, '| streamId:', data.streamId || 'none');
     const playerData = { ...data, ts: Date.now(), online: true };
     players.set(data.charId, playerData);
     saveKnownPlayers();
@@ -1642,8 +1634,7 @@ function openPlayerDetails(playerId) {
         html += `<div class="pdm-section"><div class="pdm-section-title">Recettes alchimiques</div><div class="pdm-tab-toggles">`;
         for (const pot of gmPotions) {
             const granted = grantedRecipeIds.has(pot.id);
-            const safeTitle = (pot.desc || '').replace(/"/g, '&quot;');
-            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${playerId}','${pot.id}')" title="${safeTitle}">${pot.name}</button>`;
+            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${playerId}','${pot.id}')" title="${_escHtml(pot.desc || '')}">${_escHtml(pot.name)}</button>`;
         }
         html += `</div></div>`;
     }
@@ -1848,7 +1839,7 @@ function removeAmfAttack(idx) {
     list.innerHTML = '';
     newMonsterAttacks.forEach((a, i) => {
         const row = document.createElement('div'); row.className = 'atk-row';
-        row.innerHTML = `<input value="${a.name}" placeholder="Nom" oninput="newMonsterAttacks[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${a.pct}" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');newMonsterAttacks[${i}].pct=+this.value||0" /><input value="${a.dmg}" placeholder="1d6" oninput="newMonsterAttacks[${i}].dmg=this.value" /><button class="del-btn" onclick="removeAmfAttack(${i})">✕</button>`;
+        row.innerHTML = `<input value="${_escHtml(a.name)}" placeholder="Nom" oninput="newMonsterAttacks[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${a.pct}" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');newMonsterAttacks[${i}].pct=+this.value||0" /><input value="${_escHtml(a.dmg)}" placeholder="1d6" oninput="newMonsterAttacks[${i}].dmg=this.value" /><button class="del-btn" onclick="removeAmfAttack(${i})">✕</button>`;
         list.appendChild(row);
     });
 }
@@ -2129,7 +2120,7 @@ function renderMonsters() {
         card.innerHTML = `
           <div class="mc-header">
             <span class="group-grip" draggable="true" title="Glisser vers un groupe" ondragstart="_groupDragStart(event,'${m.id}','monster')" ondragend="_groupDragEnd(event)">⠿</span>
-            <div class="mc-name">${m.name}</div>
+            <div class="mc-name">${_escHtml(m.name)}</div>
             ${gName ? `<span class="group-badge">${_escHtml(gName)}</span>` : ''}
             <button class="mc-del" onclick="removeMonster('${m.id}')">✕</button>
           </div>
@@ -2157,9 +2148,9 @@ function renderMonsters() {
               </div>
               ${m.attacks.map((a, i) => `
               <div class="mc-atk-edit-row">
-                <input class="mc-atk-input" value="${a.name}" placeholder="Nom" oninput="updateMonsterAttack('${m.id}',${i},'name',this.value)" />
+                <input class="mc-atk-input" value="${_escHtml(a.name)}" placeholder="Nom" oninput="updateMonsterAttack('${m.id}',${i},'name',this.value)" />
                 <input class="mc-atk-input center" type="text" inputmode="numeric" value="${a.pct}" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');updateMonsterAttack('${m.id}',${i},'pct',+this.value||0)" />
-                <input class="mc-atk-input center" value="${a.dmg || ''}" placeholder="1d6" oninput="updateMonsterAttack('${m.id}',${i},'dmg',this.value)" />
+                <input class="mc-atk-input center" value="${_escHtml(a.dmg || '')}" placeholder="1d6" oninput="updateMonsterAttack('${m.id}',${i},'dmg',this.value)" />
                 <button class="del-btn" onclick="removeMonsterAttack('${m.id}',${i})">✕</button>
               </div>`).join('')}
               <button class="add-atk-btn mc-add-atk" onclick="addMonsterAttack('${m.id}')">+ Attaque</button>
@@ -2229,16 +2220,20 @@ function classify(roll, threshold, success) {
 function renderRollFeed() {
     const feed = document.getElementById('rolls-feed');
 
-    // Rebuild player name pills
+    // Rebuild player name pills. Names come from remote roll payloads (d.char is
+    // player-controlled) — build with textContent, never innerHTML interpolation.
     const pillGroup = document.getElementById('gm-player-pills');
     if (pillGroup) {
         const names = [...new Set(rollFeed.map(d => d.char || d.playerId || '?'))].filter(Boolean);
         playerFilter = new Set([...playerFilter].filter(n => names.includes(n)));
-        pillGroup.innerHTML = names.map(name => {
-            const safe = name.replace(/'/g, "\\'");
-            const active = playerFilter.has(name) ? ' active' : '';
-            return `<button class="rf-pill rf-player${active}" onclick="togglePlayerFilter('${safe}')">${name}</button>`;
-        }).join('');
+        pillGroup.innerHTML = '';
+        names.forEach(name => {
+            const btn = document.createElement('button');
+            btn.className = 'rf-pill rf-player' + (playerFilter.has(name) ? ' active' : '');
+            btn.textContent = name;
+            btn.addEventListener('click', () => togglePlayerFilter(name));
+            pillGroup.appendChild(btn);
+        });
     }
 
     // Apply filters
@@ -2404,7 +2399,7 @@ function showGMRollResult(name, threshold, roll, success, dmgResult) {
     }
     const el = document.getElementById('gm-roll-result');
     el.innerHTML = `
-        <div class="gm-rr-name">${name}</div>
+        <div class="gm-rr-name">${_escHtml(name)}</div>
         <div class="gm-rr-roll">${roll}</div>
         <div class="gm-rr-detail">Seuil : ${threshold}%</div>
         <div class="gm-rr-verdict" style="color:${colors[type]};">${verdicts[type]}</div>
@@ -2548,6 +2543,9 @@ function saveConfig() {
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch (_) {} dddiceSDK = null; }
     if (dddiceResizeHandler) { window.removeEventListener('resize', dddiceResizeHandler); dddiceResizeHandler = null; }
     pendingGMRoll = null; dddiceAPI = null;
+    // Close the old Ably connection before reinit — nulling the refs without closing
+    // leaves the old WebSocket subscribed, duplicating every incoming roll/presence.
+    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
     ablyInstance = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
@@ -2948,17 +2946,17 @@ function renderGMPotions() {
         card.innerHTML = `
             <div class="gm-pot-card-header">
                 <span class="gm-pot-card-icon">◆</span>
-                <input class="gm-pot-name-input" value="${p.name.replace(/"/g,'&quot;')}" placeholder="Nom" oninput="updateGMPotion('${p.id}','name',this.value)" />
+                <input class="gm-pot-name-input" value="${_escHtml(p.name)}" placeholder="Nom" oninput="updateGMPotion('${p.id}','name',this.value)" />
                 <div class="gm-pot-chance-wrap"><input class="gm-pot-chance-badge" type="text" inputmode="numeric" value="${p.successChance || ''}" placeholder="—" oninput="this.value=this.value.replace(/[^0-9]/g,'');updateGMPotion('${p.id}','successChance',+this.value||0)" /><span class="gm-pot-chance-suffix">%</span></div>
             </div>
             <div class="gm-pot-card-body">
                 <div class="gm-pot-field-row">
                     <span class="gm-pot-field-icon">✦</span>
-                    <input class="gm-pot-text-input" value="${(p.desc||'').replace(/"/g,'&quot;')}" placeholder="Description / Effet" oninput="updateGMPotion('${p.id}','desc',this.value)" />
+                    <input class="gm-pot-text-input" value="${_escHtml(p.desc||'')}" placeholder="Description / Effet" oninput="updateGMPotion('${p.id}','desc',this.value)" />
                 </div>
                 <div class="gm-pot-field-row">
                     <span class="gm-pot-field-icon">◈</span>
-                    <input class="gm-pot-text-input" value="${(p.ingredients||'').replace(/"/g,'&quot;')}" placeholder="Ingrédients" oninput="updateGMPotion('${p.id}','ingredients',this.value)" />
+                    <input class="gm-pot-text-input" value="${_escHtml(p.ingredients||'')}" placeholder="Ingrédients" oninput="updateGMPotion('${p.id}','ingredients',this.value)" />
                 </div>
             </div>
             <button class="gm-pot-del-btn" onclick="removeGMPotion('${p.id}')">✕</button>`;
@@ -2974,10 +2972,14 @@ function toggleAlchemyImportPicker(btn) {
     if (!campaigns.length) {
         picker.innerHTML = '<div class="alchemy-import-empty">Aucune autre campagne disponible.</div>';
     } else {
-        picker.innerHTML = campaigns.map(c => {
-            const safeName = c.name.replace(/'/g, '\\\'').replace(/"/g, '&quot;');
-            return `<button class="alchemy-import-option" onclick="importAlchemyFrom('${c.id}','${safeName}')">${c.name}</button>`;
-        }).join('');
+        picker.innerHTML = '';
+        campaigns.forEach(c => {
+            const b = document.createElement('button');
+            b.className = 'alchemy-import-option';
+            b.textContent = c.name;
+            b.addEventListener('click', () => importAlchemyFrom(c.id, c.name));
+            picker.appendChild(b);
+        });
     }
     picker.style.display = '';
 }
@@ -3033,6 +3035,10 @@ function sendVialGrant(playerId, qty) {
 function _escHtml(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// Escape a string for embedding inside a single-quoted JS literal in an inline
+// handler attribute. Always wrap the result in _escHtml too, since the HTML
+// parser decodes the attribute before the JS engine sees it.
+function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 // Render a skill/special percentage for the player-details modal, folding in the
 // player's per-skill permanent modifier (s.bonus) and annotating it when non-zero.
 function _pdmSkillPct(s) {

@@ -20,6 +20,13 @@ function shuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) {
 // Build a freshly shuffled deck of all 54 cards.
 function buildDeck() { return shuffle([...ALL_CARDS]); }
 
+// Escape user-supplied strings before injecting into innerHTML (XSS guard).
+function _escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Escape a string for embedding inside a single-quoted JS literal in an inline
+// handler attribute. Always wrap the result in _escHtml too, since the HTML
+// parser decodes the attribute before the JS engine sees it.
+function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
 // ═══════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════
@@ -129,16 +136,13 @@ let spotlightCharId = null;   // GM spotlight — that player's face goes big fo
 let localStageSid = '';       // locally chosen big tile in Tablée (clicking a face)
 // Derive the VDO.ninja push stream ID from the first 8 chars of the character UUID.
 function derivedStreamId() {
-    const sid = 'aria-' + currentCharId.slice(0, 8);
-    console.log('[VDO] derivedStreamId() →', sid, '| currentCharId:', currentCharId);
-    return sid;
+    return 'aria-' + currentCharId.slice(0, 8);
 }
 // Set the VDO.ninja push iframe src — iframe is full-viewport before #app-wrapper in DOM so browser grants camera access.
 function updatePushIframe() {
     const pushFrame = document.getElementById('vdo-push-frame');
     if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
     if (!vdoRoom || !currentCharId) {
-        console.log('[VDO] updatePushIframe: vdoRoom empty → clearing push iframe src');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the whole app inside the hidden iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
@@ -150,7 +154,6 @@ function updatePushIframe() {
     // the push page joins the room as a full client and downloads every guest's stream.
     let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(vdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
-    console.log('[VDO] updatePushIframe: setting push iframe →', src);
     if (pushFrame.src !== src) pushFrame.src = src;
     stopSelfView();
     updateCamerasTabVisibility();
@@ -542,11 +545,11 @@ function renderSelectionScreen() {
     chars.forEach(c => {
         const card = document.createElement('div');
         card.className = 'sel-card';
-        const campBadge = c.campaignKey ? `<div class="sel-card-campaign">Code · ${c.campaignKey}</div>` : `<div class="sel-card-campaign no-campaign">Sans campagne</div>`;
+        const campBadge = c.campaignKey ? `<div class="sel-card-campaign">Code · ${_escHtml(c.campaignKey)}</div>` : `<div class="sel-card-campaign no-campaign">Sans campagne</div>`;
         const typeBadge = (c.ariaType || 'ancient') === 'contemporary'
             ? `<span class="sel-card-type contemporary">Contemporain</span>`
             : `<span class="sel-card-type">Médiéval</span>`;
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCharacter('${c.id}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div><div class="sel-card-name">${c.name || '—'}</div><div class="sel-card-class">${c.class || ''}</div></div>${campBadge}<div class="sel-card-cta">Incarner &rarr;</div>`;
+        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCharacter('${_escHtml(_escJs(c.id))}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div><div class="sel-card-name">${_escHtml(c.name || '—')}</div><div class="sel-card-class">${_escHtml(c.class || '')}</div></div>${campBadge}<div class="sel-card-cta">Incarner &rarr;</div>`;
         card.addEventListener('click', () => selectCharacter(c.id));
         grid.appendChild(card);
     });
@@ -599,12 +602,15 @@ function deleteCharacter(id) {
     sbDelete('character_state', 'character_id=eq.' + encodeURIComponent(id));
     sbDelete('character_notes', 'character_id=eq.' + encodeURIComponent(id));
     sbDelete('character_files', 'character_id=eq.' + encodeURIComponent(id));
+    sbDelete('character_rolls', 'character_id=eq.' + encodeURIComponent(id));
     const chars = getCharacters().filter(c => c.id !== id);
     saveCharacters(chars);
     localStorage.removeItem('aria-current-hp-' + id);
     localStorage.removeItem('aria-cards-' + id);
     localStorage.removeItem('aria-notes-' + id);
     localStorage.removeItem('aria-player-files-' + id);
+    localStorage.removeItem('aria-player-rolls-' + id);
+    localStorage.removeItem('aria-player-tabs-' + id);
     renderSelectionScreen();
 }
 
@@ -1211,7 +1217,6 @@ function applyTabVisibility() {
 function updateCamerasTabVisibility() {
     const peers = [...peerCameras.values()];
     const hasAny = !!gmStreamId || !!selfViewStream || !!vdoRoom || peers.some(p => p.streamId);
-    console.log('[VDO] updateCamerasTabVisibility: gmStreamId=', gmStreamId, '| selfViewStream=', !!selfViewStream, '| peerCameras=', peers.map(p => `${p.name}(${p.streamId})`).join(', '), '| hasAny=', hasAny);
     const btn = document.getElementById('tab-btn-cameras');
     if (!btn) return;
     btn.style.display = hasAny ? '' : 'none';
@@ -1220,7 +1225,6 @@ function updateCamerasTabVisibility() {
         else renderTabLayout(); // prunes the now-hidden cameras pane
     }
     if (document.getElementById('tab-cameras')?.classList.contains('active')) {
-        console.log('[VDO] cameras tab is active → calling renderCamerasTab()');
         renderCamerasTab();
     }
     renderPresenceUI();
@@ -1376,29 +1380,8 @@ function vdoViewSrc(sid, muted) {
     return src;
 }
 
-// Diagnostic tap on the VDO.ninja iframe API: every embedded vdo.ninja iframe posts
-// lifecycle events (camera acquisition, room join, peer connections, errors) to the
-// parent window. Spammy periodic events are filtered out. Remove once cameras are stable.
-window.addEventListener('message', (e) => {
-    if (typeof e.origin !== 'string' || !e.origin.includes('vdo.ninja')) return;
-    const d = e.data;
-    if (!d || typeof d !== 'object' || !d.action) return;
-    if (['stats', 'stats-updated', 'loudness', 'ping', 'guest-stats'].includes(d.action)) return;
-    let label = '(unknown iframe)';
-    document.querySelectorAll('iframe').forEach(f => {
-        if (f.contentWindow === e.source) {
-            const m = (f.src || '').match(/[?&](push|view)=([^&]*)/);
-            label = m ? `${m[1]}=${m[2] || '(blank)'}` : (f.id || (f.src || '').slice(0, 60));
-        }
-    });
-    let detail = '';
-    try { detail = JSON.stringify(d).slice(0, 300); } catch (_) {}
-    console.log('[VDO-EVENT]', label, '|', d.action, '|', detail);
-});
-
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
-    console.log('[VDO] renderCamerasTab() called | currentCharId:', currentCharId, '| gmStreamId:', gmStreamId, '| peerCameras:', [...peerCameras.entries()].map(([k,v]) => `${k}:${v.name}(${v.streamId})`).join(', '));
     startSelfView();
     const grid = document.getElementById('cameras-grid');
     if (!grid) { console.warn('[VDO] renderCamerasTab: #cameras-grid not found'); return; }
@@ -1470,15 +1453,8 @@ function renderCamerasTab() {
     const expected = new Map();
     if (gmStreamId) expected.set(gmStreamId, 'MJ');
     peerCameras.forEach((p, charId) => {
-        if (p.streamId && charId !== currentCharId) {
-            expected.set(p.streamId, p.name);
-        } else if (charId === currentCharId) {
-            console.log('[VDO] renderCamerasTab: skipping own charId in peerCameras:', charId, p);
-        } else if (!p.streamId) {
-            console.log('[VDO] renderCamerasTab: peer has no streamId:', charId, p);
-        }
+        if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name);
     });
-    console.log('[VDO] renderCamerasTab: expected iframes =', [...expected.entries()].map(([sid, lbl]) => `${lbl}(${sid})`).join(', ') || '(none)');
     // Remove cells whose stream ID is no longer needed (self-view cell is excluded)
     [...grid.querySelectorAll('.camera-cell:not([data-self])')].forEach(cell => {
         const iframe = cell.querySelector('.camera-iframe');
@@ -1496,7 +1472,6 @@ function renderCamerasTab() {
             if (sid) rendered.set(sid, cell);
         } catch {}
     });
-    console.log('[VDO] renderCamerasTab: already-rendered iframes =', [...rendered.keys()].join(', ') || '(none)');
     // Update labels for existing cells; add cells for new stream IDs
     expected.forEach((label, sid) => {
         if (rendered.has(sid)) {
@@ -1507,13 +1482,9 @@ function renderCamerasTab() {
             // arrived after the cell was first created with a room-less URL).
             const iframe = cell.querySelector('.camera-iframe');
             const expectedSrc = vdoViewSrc(sid, false);
-            if (iframe && iframe.src !== expectedSrc) {
-                console.log('[VDO] renderCamerasTab: URL changed for', label, '(', sid, ') → reloading iframe');
-                iframe.src = expectedSrc;
-            }
+            if (iframe && iframe.src !== expectedSrc) iframe.src = expectedSrc;
         } else {
             const iframeSrc = vdoViewSrc(sid, false);
-            console.log('[VDO] renderCamerasTab: CREATING new iframe for', label, '(', sid, ') →', iframeSrc);
             const cell = document.createElement('div');
             cell.className = 'camera-cell';
             const wrap = document.createElement('div');
@@ -1839,7 +1810,7 @@ function renderSkills() {
         div.className = 'skill-item' + (isSoigner ? ' soigner-skill' : '');
         div.dataset.skillName = skill.name;
         const modBadge = bonus ? `<span class="skill-mod" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `<span class="skill-name">${skill.name}</span>${modBadge}${skill.link ? `<span class="skill-link">${skill.link}</span>` : ''}<div class="skill-bar-wrap"><div class="skill-bar-fill" style="width:${eff}%"></div></div><span class="skill-pct">${eff}%</span>`;
+        div.innerHTML = `<span class="skill-name">${_escHtml(skill.name)}</span>${modBadge}${skill.link ? `<span class="skill-link">${_escHtml(skill.link)}</span>` : ''}<div class="skill-bar-wrap"><div class="skill-bar-fill" style="width:${eff}%"></div></div><span class="skill-pct">${eff}%</span>`;
         if (isSoigner) {
             div.addEventListener('click', () => openSoignerTargetPicker(skill.pct + bonus));
         } else {
@@ -1857,7 +1828,7 @@ function renderSkills() {
         div.dataset.skillName = sp.name;
         div.style.borderColor = 'rgba(236,164,86,.3)';
         const modBadge = bonus ? `<span class="skill-mod" style="color:var(--ember2)" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `<span class="skill-link" style="color:var(--ember2)">Spéciale</span><span class="skill-name">${sp.name}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${sp.desc}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--ember2)">${eff}%</span>`;
+        div.innerHTML = `<span class="skill-link" style="color:var(--ember2)">Spéciale</span><span class="skill-name">${_escHtml(sp.name)}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${_escHtml(sp.desc)}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--ember2)">${eff}%</span>`;
         div.addEventListener('click', () => doRoll(sp.name, sp.pct + bonus));
         slist.appendChild(div);
     });
@@ -1878,7 +1849,8 @@ function renderStats() {
     grid.innerHTML = '';
     ['FOR', 'DEX', 'END', 'INT', 'CHA'].forEach(key => {
         const val = character.stats[key] || 0;
-        const threshold = Math.min(100, val * multiplier + liveBM());
+        // Same formula as doRoll: base + persistent/temp BM + karma, clamped 1–100.
+        const threshold = Math.max(1, Math.min(100, val * multiplier + liveBM() + (character.karma ?? 0)));
         const div = document.createElement('div');
         div.className = 'stat-card';
         div.onclick = () => rollStat(key, val);
@@ -1937,7 +1909,7 @@ function renderInventorySidebar() {
     if (!items.length && !showVials) { body.innerHTML = `<div style="font-family:'Cormorant Garamond',serif;font-size:13px;color:var(--parchment-dim);font-style:italic;opacity:.5;">Vide</div>`; }
     else {
         let html = showVials ? `<div class="inv-item"><span style="font-style:italic">Fioles vides</span><span style="color:var(--gold-dim);font-family:'Cormorant Garamond',serif;font-size:12px;">×${vials}</span></div>` : '';
-        html += items.map(it => `<div class="inv-item"><span style="font-style:italic">${it.name || '—'}</span><span style="color:var(--gold-dim);font-family:'Cormorant Garamond',serif;font-size:12px;">×${it.qty || 1}</span></div>`).join('');
+        html += items.map(it => `<div class="inv-item"><span style="font-style:italic">${_escHtml(it.name || '—')}</span><span style="color:var(--gold-dim);font-family:'Cormorant Garamond',serif;font-size:12px;">×${it.qty || 1}</span></div>`).join('');
         body.innerHTML = html;
     }
     const moneyEl = document.getElementById('inv-money-display');
@@ -1972,12 +1944,12 @@ function renderCombatSidebar() {
         if (parrySkill) {
             const pb = +parrySkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, parrySkill.pct + pb + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${parrySkill.name.replace(/'/g, "\\'")}',${parrySkill.pct + pb})">Parade<span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${_escHtml(_escJs(parrySkill.name))}',${parrySkill.pct + pb})">Parade<span class="react-pct">${eff}%</span></button>`;
         }
         if (dodgeSkill) {
             const db = +dodgeSkill.bonus || 0;
             const eff = Math.max(1, Math.min(100, dodgeSkill.pct + db + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${dodgeSkill.name.replace(/'/g, "\\'")}',${dodgeSkill.pct + db})">${dodgeSkill.name}<span class="react-pct">${eff}%</span></button>`;
+            html += `<button class="react-btn" onclick="doRoll('${_escHtml(_escJs(dodgeSkill.name))}',${dodgeSkill.pct + db})">${_escHtml(dodgeSkill.name)}<span class="react-pct">${eff}%</span></button>`;
         }
         html += `</div></div>`;
     }
@@ -1985,7 +1957,7 @@ function renderCombatSidebar() {
     // 2 · Protection — name + value badge
     const prot = character.protection || {};
     if ((prot.nom && prot.nom.trim()) || prot.valeur) {
-        html += `<div class="sb-section"><div class="sb-label">Protection</div><div class="prot-row"><span class="prot-name">${prot.nom || '—'}</span>${prot.valeur ? `<span class="prot-val-badge">${prot.valeur}</span>` : ''}</div></div>`;
+        html += `<div class="sb-section"><div class="sb-label">Protection</div><div class="prot-row"><span class="prot-name">${_escHtml(prot.nom || '—')}</span>${prot.valeur ? `<span class="prot-val-badge">${_escHtml(prot.valeur)}</span>` : ''}</div></div>`;
     }
 
     // 3 · Armes — favourited weapons, left-border rows
@@ -1994,10 +1966,10 @@ function renderCombatSidebar() {
     if (weapons.length) {
         weapons.forEach(w => {
             const hasFormula = w.degats && w.degats.trim();
-            const rollAttr = hasFormula ? ` onclick="rollWeaponDamage('${w.nom.replace(/'/g,"\\'")}','${w.degats.replace(/'/g,"\\'")}')"` : '';
+            const rollAttr = hasFormula ? ` onclick="rollWeaponDamage('${_escHtml(_escJs(w.nom))}','${_escHtml(_escJs(w.degats))}')"` : '';
             const rollableClass = hasFormula ? ' weap-rollable' : '';
             const hint = hasFormula ? `<span class="weap-roll-hint">lancer</span>` : '';
-            html += `<div class="weap-row${rollableClass}"${rollAttr}><span class="weap-name">${w.nom}</span><span class="weap-dmg">${hint}${w.degats || '—'}</span></div>`;
+            html += `<div class="weap-row${rollableClass}"${rollAttr}><span class="weap-name">${_escHtml(w.nom)}</span><span class="weap-dmg">${hint}${_escHtml(w.degats || '—')}</span></div>`;
         });
     } else {
         html += `<div class="sb-empty">Aucune arme</div>`;
@@ -2198,7 +2170,6 @@ function doRoll(skillName, basePct, skipBM = false) {
 }
 // Roll a stat check using the current multiplier.
 function rollStat(key, val) {
-    const t = Math.max(1, Math.min(100, val * multiplier + bonusMalus));
     doRoll(`${multiplier > 1 ? multiplier + '× ' : ''}${key}`, val * multiplier);
 }
 // ── ROLL HISTORY ─────────────────────────────
@@ -2644,6 +2615,7 @@ let musicCurrentIndex = -1;
 let musicIsPlaying    = false;
 let _musicCurrentSlot = 'A';
 let _musicFadeRaf     = null;
+let _musicProgressRaf = null;
 let _musicMuted       = false;
 
 // Effective output volume: 0 when muted, otherwise the master volume.
@@ -2927,24 +2899,12 @@ function initAbly() {
             // Track other players' presence for Soigner targeting
             if (msg.name === 'presence' && d.playerId && d.playerId !== myId) {
                 knownPlayers[d.playerId] = { name: d.name, ts: Date.now() };
-                console.log('[VDO] received peer presence:', d.name, '| charId:', d.charId, '| streamId:', d.streamId, '| campaignKey:', d.campaignKey);
                 if (d.charId) {
-                    if (d.streamId) {
-                        peerCameras.set(d.charId, { name: d.name || d.charId, streamId: d.streamId });
-                        console.log('[VDO] peerCameras.set:', d.charId, '→', { name: d.name, streamId: d.streamId });
-                    } else {
-                        peerCameras.delete(d.charId);
-                        console.log('[VDO] peerCameras.delete (no streamId):', d.charId);
-                    }
-                    console.log('[VDO] peerCameras now:', [...peerCameras.entries()].map(([k,v]) => `${k}:${v.name}(${v.streamId})`).join(', '));
+                    if (d.streamId) peerCameras.set(d.charId, { name: d.name || d.charId, streamId: d.streamId });
+                    else peerCameras.delete(d.charId);
                     updateCamerasTabVisibility();
-                } else {
-                    console.warn('[VDO] peer presence missing charId:', d);
                 }
                 return;
-            }
-            if (msg.name === 'presence' && d.playerId === myId) {
-                console.log('[VDO] received OWN presence echo (playerId match), ignoring for peerCameras');
             }
             // Handle player-to-player heal/damage (from another player's Soigner)
             if (d.source === 'player') {
@@ -3050,17 +3010,12 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'gm-presence') {
-                console.log('[VDO] received gm-presence:', d, '| previous gmStreamId:', gmStreamId, '| previous vdoRoom:', vdoRoom);
                 gmStreamId = d.streamId || '';
-                console.log('[VDO] gmStreamId set to:', gmStreamId);
                 if (d.spotlightCharId !== undefined) spotlightCharId = d.spotlightCharId || null;
                 if (d.vdoRoom !== undefined) {
                     vdoRoom = d.vdoRoom || '';
                     vdoRoomPassword = d.vdoRoomPassword || '';
-                    console.log('[VDO] vdoRoom set to:', vdoRoom, '| calling updatePushIframe()');
                     updatePushIframe();
-                } else {
-                    console.log('[VDO] gm-presence had no vdoRoom field, push iframe unchanged');
                 }
                 updateCamerasTabVisibility();
                 return;
@@ -3097,6 +3052,7 @@ function copyOverlayUrl() {
     const params = new URLSearchParams({ mode: 'player', ably: config.ablyKey || '' });
     if (config.dddiceKey) params.set('dddice_key', config.dddiceKey);
     if (config.dddiceRoom) params.set('dddice_room', extractRoomSlug(config.dddiceRoom));
+    if (currentCharId) params.set('overlay', 'player_' + currentCharId);  // loads this character's overlay editor layout
     if (character.campaignKey) params.set('campaign', character.campaignKey);  // scopes the rolls/cards/damage channels to this campaign
     const url = `${base}?${params}`;
     navigator.clipboard.writeText(url).then(() => {
@@ -3112,9 +3068,8 @@ function publishCard(type, extra = {}) {
 }
 // Publish the player's full presence heartbeat to the aria-damage channel.
 function sendPresence() {
-    if (!ablyDamage) { console.warn('[ARIA] sendPresence: ablyDamage not ready'); return; }
+    if (!ablyDamage) return;
     const sid = derivedStreamId();
-    console.log('[VDO] sendPresence: publishing streamId:', sid, '| playerId:', playerId, '| charId:', currentCharId);
     ablyDamage.publish('presence', {
         playerId, charId: currentCharId, name: character.name, charClass: character.class,
         hp: currentHP, maxHP: getMaxHP(), stats: character.stats,
@@ -3174,6 +3129,9 @@ function saveConfig() {
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch (_) {} dddiceSDK = null; }
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null;
+    // Close the old Ably connection before reinit — nulling the refs without closing
+    // leaves the old WebSocket subscribed, duplicating every incoming message.
+    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
     dddiceAPI = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
@@ -3229,7 +3187,7 @@ function renderWeaponsEditor() {
     (character.weapons || []).forEach((w, i) => {
         const row = document.createElement('div');
         row.className = 'weap-row';
-        row.innerHTML = `<input class="editor-input" value="${w.nom}" placeholder="Nom de l'arme" oninput="character.weapons[${i}].nom=this.value;renderCombatSidebar()" /><input class="editor-input weap-dmg" value="${w.degats}" placeholder="ex: 2d6+2" oninput="character.weapons[${i}].degats=this.value;renderCombatSidebar()" /><button class="weap-fav-btn${w.favourite ? ' active' : ''}" title="Équipée (affichée dans la barre de combat)" onclick="toggleWeaponFavourite(${i})">★</button><button class="del-btn" onclick="removeWeapon(${i})">✕</button>`;
+        row.innerHTML = `<input class="editor-input" value="${_escHtml(w.nom)}" placeholder="Nom de l'arme" oninput="character.weapons[${i}].nom=this.value;renderCombatSidebar()" /><input class="editor-input weap-dmg" value="${_escHtml(w.degats)}" placeholder="ex: 2d6+2" oninput="character.weapons[${i}].degats=this.value;renderCombatSidebar()" /><button class="weap-fav-btn${w.favourite ? ' active' : ''}" title="Équipée (affichée dans la barre de combat)" onclick="toggleWeaponFavourite(${i})">★</button><button class="del-btn" onclick="removeWeapon(${i})">✕</button>`;
         list.appendChild(row);
     });
 }
@@ -3308,7 +3266,7 @@ function renderInventoryEditor() {
         const row = document.createElement('div');
         row.className = 'inv-row';
         // Name stays editable; quantity is adjusted only via the +/- buttons (not a free input).
-        row.innerHTML = `<input class="inv-name-input" value="${(it.name || '').replace(/"/g, '&quot;')}" placeholder="Nom de l'objet" oninput="character.inventory[${i}].name=this.value" />
+        row.innerHTML = `<input class="inv-name-input" value="${_escHtml(it.name || '')}" placeholder="Nom de l'objet" oninput="character.inventory[${i}].name=this.value" />
             <div class="inv-qty-ctrl">
                 <button class="qty-btn" onclick="bumpInventoryQty(${i},-1)">−</button>
                 <span class="inv-qty-val">${it.qty || 1}</span>
@@ -3377,15 +3335,17 @@ function renderPotions() {
         const grid = document.createElement('div');
         grid.className = 'potion-grid';
         recipes.forEach((r, i) => {
-            const chance = Math.max(0, Math.min(100, (r.successChance || 0) + liveBM()));
+            // Same modifiers as the roll itself (doRoll adds BM + karma to the threshold).
+            const chance = Math.max(0, Math.min(100, (r.successChance || 0) + liveBM() + (character.karma ?? 0)));
+            // Recipes arrive from the GM over Ably (potion-grant) — escape everything.
             const meta = [r.ingredients || '', r.desc || ''].filter(Boolean).join(' — ');
             const card = document.createElement('div');
             card.className = 'potion-card';
             card.innerHTML = `
                 <div class="potion-card-top">
-                    <span class="potion-card-name">${r.name}</span>
+                    <span class="potion-card-name">${_escHtml(r.name)}</span>
                 </div>
-                <div class="potion-card-desc">${meta || '&nbsp;'}</div>
+                <div class="potion-card-desc">${meta ? _escHtml(meta) : '&nbsp;'}</div>
                 <div class="potion-card-foot">
                     <span class="potion-card-chance">Succès ${chance}%</span>
                     <button class="potion-card-action" onclick="craftPotion(${i})" ${vials <= 0 || isRolling ? 'disabled' : ''}>Créer →</button>
@@ -3410,10 +3370,10 @@ function renderPotions() {
             card.className = 'potion-card' + (!p.qty ? ' depleted' : '');
             card.innerHTML = `
                 <div class="potion-card-top">
-                    <span class="potion-card-name">${p.name}</span>
+                    <span class="potion-card-name">${_escHtml(p.name)}</span>
                     <span class="potion-card-qty${!p.qty ? ' depleted' : ''}">×${p.qty ?? 0}</span>
                 </div>
-                <div class="potion-card-desc">${p.desc || '&nbsp;'}</div>
+                <div class="potion-card-desc">${p.desc ? _escHtml(p.desc) : '&nbsp;'}</div>
                 <div class="potion-card-foot">
                     <button class="potion-card-del" onclick="removePotion(${i})" title="Retirer">✕</button>
                     <button class="potion-card-action use" onclick="usePotion(${i})" ${!p.qty ? 'disabled' : ''}>Utiliser →</button>
@@ -3537,7 +3497,7 @@ function renderSpecialsEditor() {
     (character.specials || []).forEach((sp, i) => {
         const row = document.createElement('div');
         row.className = 'specials-row';
-        row.innerHTML = `<input value="${sp.name || ''}" placeholder="Nom" oninput="character.specials[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${sp.pct || 0}" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.specials[${i}].pct=+this.value||0" /><input type="text" inputmode="numeric" value="${sp.bonus ? sp.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.specials[${i}].bonus=parseInt(this.value)||0" /><input value="${sp.desc || ''}" placeholder="Description" oninput="character.specials[${i}].desc=this.value" /><button class="del-btn" onclick="removeSpecial(${i})">✕</button>`;
+        row.innerHTML = `<input value="${_escHtml(sp.name || '')}" placeholder="Nom" oninput="character.specials[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${sp.pct || 0}" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.specials[${i}].pct=+this.value||0" /><input type="text" inputmode="numeric" value="${sp.bonus ? sp.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.specials[${i}].bonus=parseInt(this.value)||0" /><input value="${_escHtml(sp.desc || '')}" placeholder="Description" oninput="character.specials[${i}].desc=this.value" /><button class="del-btn" onclick="removeSpecial(${i})">✕</button>`;
         list.appendChild(row);
     });
 }
@@ -3781,10 +3741,6 @@ async function manualReshuffle(remainingOnly) {
 // ═══════════════════════════════════════════
 //  PLAYER FILES
 // ═══════════════════════════════════════════
-// Escape HTML special characters for safe injection into player file display.
-function _pfEscHtml(s) {
-    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 // Return a short uppercase type tag for a file MIME type (mono label, no emoji).
 function _pfFileIcon(type) {
     if (!type) return 'DOC';
@@ -3810,8 +3766,8 @@ function renderPlayerFiles() {
         row.className = 'player-file-row';
         row.innerHTML = `
             <div class="pf-icon">${_pfFileIcon(f.type)}</div>
-            <div class="pf-name">${_pfEscHtml(f.name)}</div>
-            <button class="pf-open-btn" onclick="openFileViewer('${f.id}')">Ouvrir</button>`;
+            <div class="pf-name">${_escHtml(f.name)}</div>
+            <button class="pf-open-btn" onclick="openFileViewer('${_escHtml(_escJs(f.id))}')">Ouvrir</button>`;
         list.appendChild(row);
     });
 }
@@ -3847,8 +3803,8 @@ function openFileViewer(fileId) {
         const wrap = document.createElement('div');
         wrap.className = 'fv-unsupported';
         wrap.innerHTML = `<div class="fv-unsupported-icon">${_pfFileIcon(f.type)}</div>
-            <div class="fv-unsupported-name">${_pfEscHtml(f.name)}</div>
-            <a class="fv-download-link" href="${f.url}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>`;
+            <div class="fv-unsupported-name">${_escHtml(f.name)}</div>
+            <a class="fv-download-link" href="${_escHtml(f.url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>`;
         body.appendChild(wrap);
     }
     document.getElementById('file-viewer-scrim').classList.add('show');

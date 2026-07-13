@@ -74,19 +74,20 @@ js/
 
 ### Communication — Ably (free tier)
 
-All three apps share **one Ably key** (entered on `index.html`) and use four channels, plus a config channel:
+All three apps share **one Ably key** (entered on `index.html`) and use five game channels, plus a config channel:
 
 | Channel | Published by | Consumed by |
 |---|---|---|
 | `aria-rolls` | `aria-player` (per roll) | `aria-gm` (roll feed) + other `aria-player` instances (toast) + `aria-overlay` |
+| `aria-rolls-hidden` | `aria-player` (rolls made with **Jet caché** armed) | `aria-gm` only — other players and the overlay never subscribe |
 | `aria-cards` | `aria-player` or `aria-gm` | `aria-overlay` |
-| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state) + `aria-player` (presence heartbeat every 5s) | `aria-player` (receives GM damage + gm-presence) + `aria-gm` (receives presence) + `aria-overlay` (presence + monster-state) |
-| `aria-music` | `aria-gm` (play/stop commands) | `aria-player` (subscribe only) — GM does **not** subscribe to its own commands |
+| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + monster-state; ignores `source:'player'` damage/heal — see payloads) |
+| `aria-music` | `aria-gm` (play/stop/pause/resume commands) | `aria-player` (subscribe only) — GM does **not** subscribe to its own commands |
 | `aria-overlay-config` | overlay editor (layout/content updates) | `aria-overlay` (receives layout changes in real time) |
 
 #### Per-campaign channel scoping
 
-The four game channels (`aria-rolls`, `aria-cards`, `aria-damage`, `aria-music`) are **scoped per campaign** by suffixing the campaign join code: `aria-rolls-{JOINCODE}`, etc. Each app derives the suffix the same way via a `campaignChannel(base)` helper:
+The five game channels (`aria-rolls`, `aria-rolls-hidden`, `aria-cards`, `aria-damage`, `aria-music`) are **scoped per campaign** by suffixing the campaign join code: `aria-rolls-{JOINCODE}`, etc. Each app derives the suffix the same way via a `campaignChannel(base)` helper:
 - GM: `currentJoinCode`
 - Player: `character.campaignKey`
 - Overlay: `?campaign=JOINCODE` URL param
@@ -138,9 +139,9 @@ Keys are entered once on `index.html`. The in-app ⚙ modal in each panel can al
 
 ### Campaign system (GM)
 
-The GM panel supports multiple campaigns. Each campaign has a **join code** (5-char, e.g. `X7K2M`) that players enter to link their character. Only players whose `campaignKey` matches the active campaign's `joinCode` appear in the Joueurs tab.
+The GM panel supports multiple campaigns. Each campaign has a **join code** (5-char, e.g. `X7K2M`) that players enter to link their character. Only players whose `campaignKey` matches the active campaign's `joinCode` **and** whose `ariaType` matches the campaign's appear in the Joueurs tab.
 
-Campaign object shape: `{ id, name, joinCode, vdoRoom, vdoRoomPassword }`
+Campaign object shape: `{ id, name, joinCode, vdoRoom, vdoRoomPassword, ariaType }` — `ariaType` is `'ancient'` (médiéval, default) or `'contemporary'`.
 
 All campaign-scoped data uses keys suffixed with `currentCampaignId`:
 
@@ -155,14 +156,19 @@ All campaign-scoped data uses keys suffixed with `currentCampaignId`:
 | `aria-gm-music-{id}` | named music playlists for this campaign (`[{ id, name, tracks: [{ id, name, type, url, youtubeId, path }] }]`) |
 | `aria-gm-monster-groups-{id}` | monster grouping: `{ groups: [{ id, name }], assign: { monsterId: groupId } }` |
 | `aria-gm-file-groups-{id}` | file grouping: `{ groups: [{ id, name }], assign: { fileId: groupId } }` |
+| `aria-gm-notes-{id}` | GM notes `[{ id, name, content }]` |
+| `aria-gm-known-players-{id}` | last-seen presence snapshot per charId (repopulates the Joueurs tab offline) |
 
-Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key.
+Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()`, `gmNotesKey()`, `knownPlayersKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key. (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle.)
 
 `generateJoinCode()` produces the join code. If a campaign loaded from storage lacks one, it is generated and saved on `loadCampaignState()`.
 
 ### Player identity
 
-Player is identified by `character.name` from their character sheet. This is used as `playerId` in roll and damage payloads.
+Three distinct identifiers — do not conflate them:
+- `character.name` — display name, sent as `char` in roll payloads and `name` in presence.
+- `playerId` — per-tab session UUID (sessionStorage), used to **target** Ably messages (grants, damage, tab-config). Changes on every refresh.
+- `charId` — stable character UUID, used as the key in the GM `players` Map and to derive the VDO.ninja stream ID.
 
 ### VDO.ninja camera integration
 
@@ -170,7 +176,7 @@ Each participant's camera stream is identified by an **auto-derived stream ID** 
 - Player: `'aria-' + charId.slice(0, 8)` — derived in `derivedStreamId()` in `aria-player.js`
 - GM: `'aria-gm-' + campaignId.slice(0, 8)` — derived inline in `startGMPresenceBroadcast()`
 
-The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. This is broadcast to players every 30s via `gm-presence` on `aria-damage`. Players activate their hidden push iframe (`#vdo-push-frame`) when they receive the room from `gm-presence`. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
+The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. This is broadcast to players every **8s** via `gm-presence` on `aria-damage` (plus immediately when a new player session appears). Players activate their hidden push iframe (`#vdo-push-frame`) when they receive the room from `gm-presence`. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
 
 Viewer iframes (`?view=STREAMID`) do **not** need the room password — only push iframes do.
 
@@ -193,7 +199,7 @@ Loaded at runtime via dynamic `import('https://esm.sh/dddice-js')` — no npm, n
 - `RollFinished` event clears the canvas after 1.5s
 - A 12s safety timer (`dddiceRollSafetyTimer`) forces fallback if the SDK stalls
 - Overlay syncs Ably roll data with dddice animation via `pendingRollData`/`diceFinished` flags; if SDK is not configured, a 3s fixed delay is used instead
-- `saveConfig()` always disconnects/removes resize listener before reinit to prevent accumulation
+- `saveConfig()` always disconnects dddice, removes the resize listener, **and closes the old Ably connection (`ablyInstance.close()`)** before reinit — nulling the Ably refs without closing leaves the old WebSocket subscribed and duplicates every incoming message
 
 ---
 
@@ -211,12 +217,14 @@ Per `Docs/Aide aux combats.pdf`:
 - **Parade**: rolls under **Combat rapproché** skill — once per turn, blocks attack, can still attack same turn
 - **Esquive**: rolls under **Esquiver** skill — abandons all attacks, can dodge multiple times; ranged dodge has −20% malus
 
-The combat sidebar auto-discovers these via regex: `/combat.rapproch/i` for parade, `/esquiv/i` for esquive.
+The combat sidebar auto-discovers these via regex — ancient: `/combat.rapproch/i` for parade, `/esquiv/i` for esquive; contemporary: `/tabasser/i` for parade, `/réflexes/i` for esquive.
 
 ### Special skill: Soigner
-When a skill named exactly `Soigner` is rolled, `applySoigner(success)` fires after the float card (1500ms delay):
-- **Success**: rolls `1d6`, heals self (capped at max PV), broadcasts presence
-- **Failure**: rolls `1d3`, damages self (floored at 0), triggers damage VFX; shows MORT screen if HP hits 0
+Clicking `Soigner` first opens a **target picker** (self or any player seen via presence in the last 30s), then rolls. `applySoigner(success)` fires after the float card (1500ms delay):
+- **Success**: rolls `1d6` — heals self (capped at max PV, broadcasts presence), or publishes `heal` `{ targetId, amount, source: 'player' }` to the chosen target
+- **Failure**: rolls `1d3` — damages self (floored at 0, damage VFX, MORT screen at 0 HP), or publishes `damage` `{ targetId, damage, source: 'player' }` to the target
+
+The **target applies the HP change itself** when it receives the message (it knows its own HP; the sender doesn't). These `source:'player'` payloads carry no `hpBefore/hpAfter/maxHP`, so the overlay skips them.
 
 ---
 
@@ -234,10 +242,13 @@ Each character carries its own `id` (UUID). HP and card state are keyed by that 
 | `aria-current-hp-{id}` | current HP integer for that character |
 | `aria-cards-{id}` | card deck state for that character |
 | `aria-player-tabs-{id}` | `{ cards: bool, alchemy: bool }` tab visibility |
+| `aria-notes-{id}` | notes `[{ id, name, content }]` |
+| `aria-player-files-{id}` | GM-granted files `[{ id, name, type, url }]` |
+| `aria-player-rolls-{id}` | local roll history (max 100, also inserted into Supabase `character_rolls`) |
 
-Tab visibility is managed separately from the character object and persisted per character ID. Helper functions `hpKey()` and `cardKey()` return the scoped key for the active character. Always use these — never hardcode the bare key.
+Tab visibility is managed separately from the character object and persisted per character ID. Helper functions `hpKey()`, `cardKey()`, `notesKey()` return the scoped key for the active character. Always use these — never hardcode the bare key. `deleteCharacter()` must remove **all** of these keys plus the Supabase rows (`characters`, `character_state`, `character_notes`, `character_files`, `character_rolls`).
 
-The **empty vials counter** in the Inventaire tab (`#inv-vials-section`) is only rendered when `playerTabs.alchemy === true`. `renderVialsInInventory()` checks this and empties the section if alchemy is not granted. `applyTabVisibility()` calls `renderVialsInInventory()` so the inventory updates immediately when the GM toggles the alchemy tab.
+The **empty vials row** in the Inventaire tab is only rendered when `playerTabs.alchemy === true` — `renderInventoryEditor()` prepends a `Fioles vides` row with ± controls at the top of the item list. `applyTabVisibility()` calls `renderInventoryEditor()` so the inventory updates immediately when the GM toggles the alchemy tab.
 
 ### Character fields (`aria-characters[n]`)
 
@@ -246,21 +257,26 @@ The **empty vials counter** in the Inventaire tab (`#inv-vials-section`) is only
   id: string,                                // UUID
   name: string,
   class: string,
+  ariaType: 'ancient' | 'contemporary',      // character sheet variant (default 'ancient')
   campaignKey: string,                       // join code of the linked campaign (e.g. 'X7K2M')
-  stats: { FOR, DEX, END, INT, CHA, PV },   // all integers
-  physical: { age, taille, poids, yeux, cheveux, signes },
+  stats: { FOR, DEX, END, INT, CHA, PV },   // all integers; contemporary has only { PV }
+  physical: { age, taille, poids, yeux, cheveux, signes, histoire },
   inventory: [{ name, qty }],
-  weapons: [{ nom, degats }, ...],           // always 3 slots; degats = dice formula
+  weapons: [{ nom, degats, favourite }],     // degats = dice formula; favourite = shown in combat sidebar
   protection: { nom, valeur },
-  skills: [{ name, link, pct, bonus? }],     // link = "FOR/DEX"; bonus = optional per-skill permanent modifier (#12)
+  skills: [{ name, link, pct, bonus? }],     // link = "FOR/DEX" (empty for contemporary); bonus = optional per-skill permanent modifier (#12)
   specials: [{ name, desc, pct, bonus? }],   // fully editable; bonus = optional per-skill permanent modifier
   potions: [{ name, desc, ingredients, qty }],
   potionRecipes: [{ id, name, desc, ingredients, successChance }],
   vials: number,
+  money: { couronne, orbe, sceptre, sou } | { francs },  // ancient coins | contemporary francs
+  karma: number,                             // GM-set modifier (karma-set message), added to every threshold roll
 }
 ```
 
 > `blessures` was removed. `tabs` was removed from the character object — stored separately as `aria-player-tabs-{id}`. `streamId` was removed — stream IDs are now auto-derived from `charId`.
+>
+> **Two character templates** exist (`DEFAULT_CHAR_ANCIENT` / `DEFAULT_CHAR_CONTEMPORARY`): contemporary has its own skill list (Armes à feu, Tabasser, …), no FOR/DEX/END/INT/CHA stats (the Caractéristiques tab is hidden), and francs for money. The GM filters presence by matching `ariaType` against the campaign's type.
 
 ### Monsters (`localStorage: aria-gm-monsters-{id}`)
 ```js
@@ -273,41 +289,65 @@ The **empty vials counter** in the Inventaire tab (`#inv-vials-section`) is only
 
 ### `aria-rolls` / `roll`
 ```js
-{ skillName, threshold, roll, success, char, bonusMalus, playerId }
+{ skillName, threshold, roll, success, char, bonusMalus, playerId, hidden? }
 ```
 `threshold: null` for simple die rolls (d4, d6… buttons) — overlay treats these as display-only.
 
+### `aria-rolls-hidden` / `roll`
+Same payload with `hidden: true`. Published instead of `aria-rolls` while the player's **Jet caché** toggle (`hiddenRollMode`) is armed. Only the GM subscribes; the feed marks these rows with an `MJ` badge. The roller still sees their own float card.
+
 ### `aria-damage` / `damage` | `heal`
 ```js
-{ targetId, damage, hpBefore, hpAfter, maxHP, source: 'gm' }
-{ targetId, amount, hpBefore, hpAfter, maxHP, source: 'gm' }
+{ targetId, damage, hpBefore, hpAfter, maxHP, charName, source: 'gm' }     // GM → player
+{ targetId, amount, hpBefore, hpAfter, maxHP, charName, source: 'gm' }
+{ targetId, damage, source: 'player' }                                     // player → player (Soigner)
+{ targetId, amount, source: 'player' }
 ```
+`charName` is displayed by the overlay's damage/heal VFX. The `source:'player'` variants carry **no HP fields** — the target computes and applies the change itself, and the overlay ignores them.
 
 ### `aria-damage` / `presence` (heartbeat every 5s)
 ```js
 { playerId, charId, name, charClass, hp, maxHP, stats, protection, skills, specials,
-  weapons, inventory, potions, vials, potionRecipeIds, tabs, campaignKey, streamId, ts }
+  weapons, inventory, potions, vials, potionRecipeIds, tabs, money, campaignKey,
+  ariaType, streamId }
 ```
 - `playerId` — session UUID (sessionStorage, changes per tab/refresh); used only for Ably targeting
 - `charId` — character UUID (stable; never changes even if name changes); used as the key in the GM `players` Map
 - `streamId` — auto-derived as `'aria-' + charId.slice(0, 8)`; used for VDO.ninja viewer iframes
 
-The GM filters incoming presence by `campaignKey === currentJoinCode` — messages with a non-matching key are ignored entirely.
+The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign type, and **validates that `charId`/`playerId` are UUID-shaped** (`/^[A-Za-z0-9_-]{1,64}$/`) before using them, since they end up in element ids and inline handlers.
 
-### `aria-damage` / `gm-presence` (every 30s from GM)
+### `aria-damage` / `leave`
 ```js
-{ streamId, vdoRoom, vdoRoomPassword }
+{ playerId }
 ```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`. Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe.
+Sent by the player on `switchCharacter()` so the GM can drop the card immediately instead of waiting for the presence sweep.
+
+### `aria-damage` / `gm-presence` (every 8s from GM, plus immediately for new sessions)
+```js
+{ streamId, vdoRoom, vdoRoomPassword, spotlightCharId }
+```
+`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`. Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up.
+
+### `aria-damage` / `spotlight`
+```js
+{ charId }   // null clears — that player's camera goes big on every player's Bandeau/Tablée view
+```
+
+### `aria-damage` / `karma-set`
+```js
+{ playerId, karma: number }   // GM sets a player's karma; player stores it on the character
+```
 
 ### `aria-damage` / `tab-config`
 ```js
 { playerId, tabs: { cards: bool, alchemy: bool } }
 ```
 
-### `aria-damage` / `potion-grant` | `vial-grant`
+### `aria-damage` / `potion-grant` | `potion-revoke` | `vial-grant`
 ```js
 { playerId, potion: { id, name, desc, ingredients, successChance } }
+{ playerId, potionId: string }
 { playerId, qty: number }
 ```
 
@@ -318,10 +358,12 @@ The GM filters incoming presence by `campaignKey === currentJoinCode` — messag
 ```
 Player stores granted files in `localStorage: aria-player-files-{charId}`. The Fichiers tab auto-hides when `playerFiles` is empty.
 
-### `aria-music` / `play` | `stop`
+### `aria-music` / `play` | `stop` | `pause` | `resume`
 ```js
-{ type: 'play', track: { id, name, type, url, youtubeId }, fadeDuration: number }  // seconds
+{ type: 'play', track: { id, name, type, url, youtubeId }, fadeDuration: number }  // ms
 { type: 'stop' }
+{ type: 'pause' }
+{ type: 'resume' }
 ```
 GM plays locally via `_musicTriggerPlay()` AND broadcasts — it does not subscribe. Player stores volume in `localStorage('aria-music-volume')` (0–100 integer, default 80); the music bar (`#music-bar`) uses `visibility:hidden` until the first track plays.
 
@@ -346,7 +388,7 @@ GM plays locally via `_musicTriggerPlay()` AND broadcasts — it does not subscr
 Displays Joueur / Maître de Jeu cards and a **⚙ Configuration** panel at the bottom. Reads and writes `aria-config` via inline `<script>`. This is the canonical entry point for key configuration.
 
 ### Player character selection screen
-Lists all saved characters. Creating a character prompts for name, class, and an optional campaign join code. The join code is shown as a badge on each character card. `selectCharacter(id)` → `loadCharacterState(id)` → `initApp()`. `switchCharacter()` tears down Ably and dddice before returning.
+Lists all saved characters. Creating a character prompts for name, class, an optional campaign join code, and the character type (Médiéval/Contemporain radio — picks the template). The join code and type are shown as badges on each character card. `selectCharacter(id)` → `loadCharacterState(id)` → `initApp()`. `switchCharacter()` publishes `leave`, then tears down Ably and dddice before returning.
 
 ### GM campaign selection screen
 Lists all campaigns, each showing its join code (click to copy). `selectCampaign(id)` → `loadCampaignState(id)` → `initApp()`. After entering a campaign, the join code is shown in the topbar (click to copy) so the GM can share it with players.
@@ -368,7 +410,9 @@ The **Monstres** and **Fichiers** tabs each have a **group chip bar** (`#monster
 The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` does **in-place DOM updates** — it never clears the grid entirely — to preserve live camera iframes across presence heartbeats.
 
 ### Bonus/Malus bar (player)
-Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected).
+Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected). `doRoll` also adds the character's **karma** to every non-skipBM threshold — all live previews (skills, specials, stat cards, combat reactions, potion chance) must include `liveBM() + (character.karma ?? 0)` so the displayed % matches the rolled threshold.
+
+The bar also holds the **Jet caché** toggle (`hiddenRollMode`) — while armed, rolls publish to `aria-rolls-hidden` (GM only) instead of `aria-rolls`. Resets on character switch.
 
 **Temporary modifier (next N rolls)** — the `Prochains jets` control arms a one-off modifier (`bmNextValue`) that applies to the next `bmNextCount` BM-affected rolls then auto-expires. `bmNextActive()` returns the value while charges remain; `liveBM() = bonusMalus + bmNextActive()` is used for **all live percentage previews** (skills, specials, stat thresholds, combat reactions, potion chance). `doRoll` stamps the total applied modifier into `_appliedBM` (= `bonusMalus + tempBM`, karma excluded) so the roll payload's `bonusMalus` field, the float card, and the GM/overlay feed report what was actually applied; it then consumes one charge (decrement `bmNextCount`, clearing `bmNextValue` at 0). The armed state shows as a pill (`#bm-next-status`) with a ✕ to cancel (`clearBMNext`). All temp state resets on character switch. This is **player-side only** — no payload/protocol change.
 
@@ -381,16 +425,16 @@ Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−3
 - 📋 modal shows full character data and tab toggles
 
 ### Post-roll effect pattern
-Skills with side-effects after a roll use a flag set before `doRoll()` and checked at the top of `handleResult()`:
+Skills with side-effects after a roll use a flag set before `doRoll()` and checked in `handleResult()`:
 ```js
-pendingCraft = recipeIdx;   // or pendingSoigner = true
-doRoll(skillName, pct, /*skipBM=*/true);
+pendingCraft = recipeIdx;
+doRoll(recipe.name, recipe.successChance || 0);   // BM + karma apply (skipBM defaults to false)
 
 // In handleResult():
+if (skillName === 'Soigner') applySoigner(success);
 if (pendingCraft !== null) { applyCraft(success, pendingCraft); pendingCraft = null; }
-if (pendingSoigner)        { applySoigner(success); pendingSoigner = false; }
 ```
-`applyCraft` / `applySoigner` use a 1500ms `setTimeout` so the float card shows before the effect fires.
+Craft and Soigner rolls are **BM-affected** like any skill roll — only the **Jet libre** free roll passes `skipBM=true`. `applyCraft` / `applySoigner` use a 1500ms `setTimeout` so the float card shows before the effect fires.
 
 ---
 
@@ -465,18 +509,23 @@ Use the accessor helpers (`_activePlaylist`/`_playingPlaylist`/`_activeTracks`/`
 Monster and file groups (`monsterGroups`/`fileGroups` + the `monsterGroupAssign`/`fileGroupAssign` membership maps) live **only** in `aria-gm-monster-groups-{id}` / `aria-gm-file-groups-{id}` localStorage — the synced `monsters` / `campaign_files` Supabase tables use **explicit column lists** (no group column) and `loadFromSupabase` rebuilds the local objects from those columns. So a `groupId` stored *on the entity* would be wiped on reload; keeping grouping in its own key makes it durable same-device. Like music grouping, it is **not** in the DB, so a fresh device shows everything under `Tous` (the entities themselves are never lost). The membership map is keyed by entity id; deleting a monster/file prunes its key (`removeMonster`/`removeGmFile`), and deleting a group clears all keys pointing to it (members fall back to `Tous`). A stale `activeXGroupId` (group removed elsewhere) is reset to `null` at the top of `renderMonsters`/`renderGmFiles`.
 
 ### innerHTML and user-supplied strings
-Always escape track names (and any other user-supplied content) before injecting into `innerHTML`. Use `_escHtml(str)` — defined in `aria-gm.js`. In `aria-player.js` use inline `.replace()` chains (no shared helper). Failure to escape is an XSS vector since track names come from YouTube API responses or user input.
+Always escape user-supplied content before injecting into `innerHTML`. Both `aria-gm.js` and `aria-player.js` define the same helpers:
+- `_escHtml(str)` — for text/attribute contexts.
+- `_escJs(str)` — for strings embedded in a single-quoted JS literal inside an inline handler; **always wrap it in `_escHtml` too** (`onclick="fn('${_escHtml(_escJs(v))}')"`), because the HTML parser decodes the attribute before the JS engine sees it.
+
+This is not just self-XSS: skill/weapon/character names travel to the **GM panel** via presence and roll payloads, potion recipes travel to **players** via `potion-grant`, and track names come from YouTube API responses — anyone with the Ably key can publish these. When building lists from remote strings, prefer `document.createElement` + `textContent` + `addEventListener` (see the GM roll-feed player pills). `aria-overlay.js` has its own `esc()` — every interpolated field there must go through it (on-stream XSS in OBS otherwise).
 
 ### VDO.ninja push iframe only works on HTTPS
 `getUserMedia` (camera capture) requires a secure context. The push iframe (`#vdo-push-frame`, `#vdo-gm-push-frame`) will silently do nothing when the app is served from `file://`. It works from the GitHub Pages URL.
 
 ---
 
-## Docs
+## Docs & repo layout notes
 
-- `Docs/bugs_and_issues.md` — tracked open bugs and pending features with exact file/line locations
-- `Docs/development_plan.md` — feature roadmap (P1/P2/Exploration)
-- `Docs/Aide aux combats.pdf` — official ARIA combat rules (parade/esquive source of truth)
+- `Docs/` is **gitignored** (local-only). It holds `Aide aux combats.pdf` — official ARIA combat rules (parade/esquive source of truth) — plus console log captures.
+- `aria/` — **new design handoff** (`aria/project/HANDOFF_claude_code.md` + screenshots). This design is not yet fully implemented here; keep the folder.
+- `AriaTest.sln` / `.vs/` — the user opens the repo in Visual Studio; the `.sln` is tracked, `.vs/` is gitignored.
+- `commits` (repo root, gitignored) — plain-text summary of the latest change batch; see Workflow.
 
 ---
 
@@ -485,10 +534,10 @@ Always escape track names (and any other user-supplied content) before injecting
 Don't hand-build these — use the **📋 Copier URL Overlay (OBS)** button in the player/GM ⚙ config modal, which fills in the right `campaign` (join code) and `overlay` (layout id) params for the active campaign/character.
 
 ```
-https://mathieu-chateigner.github.io/Aria/views/aria-overlay.html?mode=player&ably=KEY&dddice_key=KEY&dddice_room=SLUG&campaign=JOINCODE
+https://mathieu-chateigner.github.io/Aria/views/aria-overlay.html?mode=player&ably=KEY&dddice_key=KEY&dddice_room=SLUG&overlay=player_CHARID&campaign=JOINCODE
 https://mathieu-chateigner.github.io/Aria/views/aria-overlay.html?mode=gm&ably=KEY&dddice_key=KEY&dddice_room=SLUG&overlay=gm_CAMPAIGNID&campaign=JOINCODE
 ```
 
-`campaign=JOINCODE` scopes the rolls/cards/damage channels to one campaign (see *Per-campaign channel scoping*). Omitting it falls back to the global channels — an overlay URL **without** `campaign` will receive nothing once players/GM are on a join code, so always re-copy the URL after this change.
+`campaign=JOINCODE` scopes the rolls/cards/damage channels to one campaign (see *Per-campaign channel scoping*). Omitting it falls back to the global channels — an overlay URL **without** `campaign` will receive nothing once players/GM are on a join code, so always re-copy the URL after this change. `overlay=` is required for the editor-made widget layout to load (player URLs use `player_{charId}`, GM URLs `gm_{campaignId}`).
 
 Browser source size: 1920×1080, transparent background.

@@ -71,8 +71,11 @@ if (ABLY_KEY) {
 
     // Damage
     const dmgCh = ably.channels.get(campaignChannel('aria-damage'));
-    dmgCh.subscribe('damage', msg => showDamage(msg.data));
-    dmgCh.subscribe('heal', msg => showHeal(msg.data));
+    // Player-to-player Soigner events (source:'player') carry only targetId + amount —
+    // no hpBefore/hpAfter/maxHP — so the HP bar animation can't be rendered for them.
+    // The target's own presence heartbeat updates the HP widgets instead.
+    dmgCh.subscribe('damage', msg => { if (msg.data?.source === 'player') return; showDamage(msg.data); });
+    dmgCh.subscribe('heal', msg => { if (msg.data?.source === 'player') return; showHeal(msg.data); });
     dmgCh.subscribe('presence', msg => {
         const d = msg.data;
         if (d?.charId) {
