@@ -81,7 +81,7 @@ All three apps share **one Ably key** (entered on `index.html`) and use five gam
 | `aria-rolls` | `aria-player` (per roll) | `aria-gm` (roll feed) + other `aria-player` instances (toast) + `aria-overlay` |
 | `aria-rolls-hidden` | `aria-player` (rolls made with **Jet caché** armed) | `aria-gm` only — other players and the overlay never subscribe |
 | `aria-cards` | `aria-player` or `aria-gm` | `aria-overlay` |
-| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + monster-state; ignores `source:'player'` damage/heal — see payloads) |
+| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + gm-presence for the camera widgets' VDO room + monster-state; ignores `source:'player'` damage/heal — see payloads) |
 | `aria-music` | `aria-gm` (play/stop/pause/resume commands) | `aria-player` (subscribe only) — GM does **not** subscribe to its own commands |
 | `aria-overlay-config` | overlay editor (layout/content updates) | `aria-overlay` (receives layout changes in real time) |
 
@@ -111,6 +111,9 @@ Both player and GM use a **save key** (UUID) to sync localStorage to Supabase, e
   - No key → calls `showGateway()` which sets `display:flex`, prompting the user to create or enter a key
 - `saveKey` is stored in `localStorage('aria-save-key')` and also held in the module-level `saveKey` variable
 - **Never set `#file-gateway` to `display:flex` in HTML** — it must start hidden to avoid the flash on load
+- `loadFromSupabase()` returns `true`/`false`; `tryRestoreSupabase()` only runs the full push-sync when the load **succeeded** — syncing after a failed (offline) load would overwrite newer remote data with stale local state
+- **GM child tables are restored unconditionally** (even when the DB result is empty): a campaign row only exists after a full sync, so an empty child table means "deleted on another device". Guarding writes with `if (rows.length)` resurrects deleted monsters/potions/files on the next sync — don't reintroduce it
+- `submitExistingKey()` first verifies the key exists in `saves`, then (when switching keys) clears the previous key's local data via `_clearLocalPlayerData()` / `_clearLocalGMData()` so the old key's characters/campaigns never merge into the new key
 
 **Sync architecture** — `js/aria-supabase.js` exposes shared helpers (`sbUpsert`, `sbDelete`, `sbSelect`, `sbInsert`, `runMigration`). Both panels use **per-entity granular sync** — separate debounced functions per data type — rather than one monolithic blob. `localStorage` is always the runtime source of truth; Supabase is only the persistence layer.
 
@@ -188,7 +191,7 @@ Viewer iframes (`?view=STREAMID`) do **not** need the room password — only pus
 
 ### Overlay editor (`aria-overlay-editor.js`)
 
-A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every presence tick.
+A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every presence tick. The overlay caches `vdoRoom`/`vdoRoomPassword` from the GM's `gm-presence` broadcast and builds camera iframe URLs with `vdoCamSrc()` (`&solo&room&password` appended once known — a bare `?view=SID` stays black for streams pushed into a password-protected room); `refreshCameraWidgets()` re-srcs the iframes when the room info arrives.
 
 ### dddice 3D dice (browser SDK)
 
@@ -308,14 +311,15 @@ Same payload with `hidden: true`. Published instead of `aria-rolls` while the pl
 ### `aria-damage` / `presence` (heartbeat every 5s)
 ```js
 { playerId, charId, name, charClass, hp, maxHP, stats, protection, skills, specials,
-  weapons, inventory, potions, vials, potionRecipeIds, tabs, money, campaignKey,
-  ariaType, streamId }
+  weapons, inventory, potions, vials, potionRecipeIds, tabs, money, karma,
+  campaignKey, ariaType, streamId }
 ```
 - `playerId` — session UUID (sessionStorage, changes per tab/refresh); used only for Ably targeting
 - `charId` — character UUID (stable; never changes even if name changes); used as the key in the GM `players` Map
 - `streamId` — auto-derived as `'aria-' + charId.slice(0, 8)`; used for VDO.ninja viewer iframes
+- `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
 
-The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign type, and **validates that `charId`/`playerId` are UUID-shaped** (`/^[A-Za-z0-9_-]{1,64}$/`) before using them, since they end up in element ids and inline handlers.
+The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign type, **validates that `charId`/`playerId` are UUID-shaped** (`/^[A-Za-z0-9_-]{1,64}$/`) since they end up in element ids and inline handlers, and **coerces the numeric fields (`hp`, `maxHP`, `vials`, `karma`) via `_finiteNum()`** since those are interpolated into `innerHTML` by the player-card renders.
 
 ### `aria-damage` / `leave`
 ```js

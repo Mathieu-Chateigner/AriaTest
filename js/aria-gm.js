@@ -273,12 +273,18 @@ async function _syncAllGMData() {
 }
 
 // Load all GM data from Supabase into localStorage for the current save key.
+// The child tables are written unconditionally (even when empty): the campaign row
+// only exists in the DB after a full sync, so an empty result means "deleted on
+// another device" — the old `if (rows.length)` guards let deleted monsters/files/
+// potions survive locally and get re-upserted by the next sync (resurrection bug).
+// Returns true when the load completed (even with no data), false on error —
+// callers must not push local data back up after a failed load.
 async function loadFromSupabase() {
-    if (!_supabaseReady()) return;
+    if (!_supabaseReady()) return false;
     await runMigration(saveKey, 'gm');
     try {
         const camps = await sbSelect('campaigns', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=id,name,join_code,vdo_room,vdo_room_password,aria_type');
-        if (!camps.length) return;
+        if (!camps.length) return true;
         const campaigns = camps.map(c => ({ id: c.id, name: c.name, joinCode: c.join_code, vdoRoom: c.vdo_room || '', vdoRoomPassword: c.vdo_room_password || '', ariaType: c.aria_type || 'ancient' }));
         localStorage.setItem('aria-gm-campaigns', JSON.stringify(campaigns));
         for (const c of campaigns) {
@@ -290,21 +296,18 @@ async function loadFromSupabase() {
                 sbSelect('campaign_notes', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*&order=position.asc'),
                 sbSelect('campaign_music', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*&order=position.asc'),
             ]);
-            if (mons.length) localStorage.setItem('aria-gm-monsters-' + c.id, JSON.stringify(mons.map(m => ({ id: m.id, name: m.name, pv: m.pv, maxPV: m.max_pv, armor: m.armor || 0, stats: m.stats || {}, attacks: m.attacks || [] }))));
-            if (pots.length) localStorage.setItem('aria-gm-potions-' + c.id, JSON.stringify(pots.map(p => ({ id: p.id, name: p.name, desc: p.description, ingredients: p.ingredients, successChance: p.success_chance }))));
-            if (files.length) localStorage.setItem('aria-gm-files-' + c.id, JSON.stringify(files.map(f => ({ id: f.id, name: f.name, type: f.type, url: f.url, path: f.path, grantedTo: f.granted_to || [] }))));
-            if (kp.length) {
-                const obj = {};
-                kp.forEach(row => { if (row.char_id) obj[row.char_id] = row.data; });
-                localStorage.setItem('aria-gm-known-players-' + c.id, JSON.stringify(obj));
-            }
-            if (notes.length) localStorage.setItem('aria-gm-notes-' + c.id, JSON.stringify(notes.map(n => ({ id: n.id, name: n.name, content: n.content }))));
-            if (music.length) {
-                const dbTracks = music.map(t => ({ id: t.id, name: t.name, type: t.type, url: t.url, youtubeId: t.youtube_id, path: t.path }));
-                localStorage.setItem('aria-gm-music-' + c.id, JSON.stringify(_mergeMusicGrouping('aria-gm-music-' + c.id, dbTracks)));
-            }
+            localStorage.setItem('aria-gm-monsters-' + c.id, JSON.stringify(mons.map(m => ({ id: m.id, name: m.name, pv: m.pv, maxPV: m.max_pv, armor: m.armor || 0, stats: m.stats || {}, attacks: m.attacks || [] }))));
+            localStorage.setItem('aria-gm-potions-' + c.id, JSON.stringify(pots.map(p => ({ id: p.id, name: p.name, desc: p.description, ingredients: p.ingredients, successChance: p.success_chance }))));
+            localStorage.setItem('aria-gm-files-' + c.id, JSON.stringify(files.map(f => ({ id: f.id, name: f.name, type: f.type, url: f.url, path: f.path, grantedTo: f.granted_to || [] }))));
+            const obj = {};
+            kp.forEach(row => { if (row.char_id) obj[row.char_id] = row.data; });
+            localStorage.setItem('aria-gm-known-players-' + c.id, JSON.stringify(obj));
+            localStorage.setItem('aria-gm-notes-' + c.id, JSON.stringify(notes.map(n => ({ id: n.id, name: n.name, content: n.content }))));
+            const dbTracks = music.map(t => ({ id: t.id, name: t.name, type: t.type, url: t.url, youtubeId: t.youtube_id, path: t.path }));
+            localStorage.setItem('aria-gm-music-' + c.id, JSON.stringify(_mergeMusicGrouping('aria-gm-music-' + c.id, dbTracks)));
         }
-    } catch(e) { console.warn('[ARIA] GM load failed:', e); }
+        return true;
+    } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
 }
 
 // Show the two-panel gateway (new key + existing key, side by side) with a freshly generated key.
@@ -347,11 +350,27 @@ async function confirmNewKey() {
     showSelectionScreen();
 }
 
+// Campaign-scoped localStorage key prefixes (everything scoped by campaignId).
+const _CAMPAIGN_KEY_PREFIXES = ['aria-gm-monsters-', 'aria-gm-rolls-', 'aria-gm-card-history-', 'aria-gm-potions-', 'aria-gm-known-players-', 'aria-gm-files-', 'aria-gm-notes-', 'aria-gm-music-', 'aria-gm-monster-groups-', 'aria-gm-file-groups-'];
+
+// Remove all locally stored campaigns and their scoped keys (used when switching
+// to a different save key, so the old key's data never merges into the new one).
+function _clearLocalGMData() {
+    getCampaigns().forEach(c => _CAMPAIGN_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id)));
+    localStorage.removeItem('aria-gm-campaigns');
+}
+
 // Load data from Supabase using an existing save key entered by the user.
 async function submitExistingKey() {
     const input = document.getElementById('gateway-key-input');
     const key = input ? input.value.trim() : '';
     if (!key) return;
+    // Verify the key exists before adopting it — a typo would otherwise push the
+    // previous key's local data under a brand-new key on the next sync.
+    const rows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(key) + '&select=save_key');
+    if (!rows.length) { alert('Clé introuvable. Vérifiez la clé saisie.'); return; }
+    // Switching keys: drop the old key's local data so it never merges into the new one.
+    if (saveKey && key !== saveKey) _clearLocalGMData();
     saveKey = key;
     localStorage.setItem('aria-save-key', key);
     await loadFromSupabase();
@@ -391,10 +410,12 @@ function cancelGateway() {
 // On load: restore from Supabase if a save key exists, otherwise show the gateway.
 async function tryRestoreSupabase() {
     if (!saveKey) { showGateway(); return; }
-    await loadFromSupabase();
+    const ok = await loadFromSupabase();
     hideGateway();
     showSelectionScreen();
-    _syncAllGMData();
+    // Only push local data back up if the load succeeded — after a failed (offline)
+    // load, syncing would overwrite newer remote data with stale local state.
+    if (ok) _syncAllGMData();
 }
 
 // ═══════════════════════════════════════════
@@ -1103,6 +1124,10 @@ function extractRoomSlug(val) {
     const m = val.match(/\/room\/([^/?#]+)/);
     return m ? m[1] : val.trim();
 }
+// Extract a roll UUID from either the sdk.roll() response or a RollFinished payload.
+// RollFinished fires for EVERY roll in the shared room; matching UUIDs stops a
+// player's dice from being consumed as the GM's pending roll result.
+function _ddRollUuid(r) { return r?.uuid ?? r?.data?.uuid ?? null; }
 function copyOverlayUrl() {
     const base = window.location.href.replace(/aria-gm\.html.*$/, 'aria-overlay.html');
     const params = new URLSearchParams({ mode: 'gm', ably: config.ablyKey || '' });
@@ -1149,6 +1174,10 @@ async function initDddice() {
         dddiceSDK.on(ThreeDDiceRollEvent.RollFinished, (roll) => {
             setTimeout(() => dddiceSDK?.clear(), 1500);
             if (!pendingGMRoll) return;
+            // Another participant's dice landing mid-animation must not be consumed
+            // as the GM's result (only enforced when both UUIDs are known).
+            const finishedUuid = _ddRollUuid(roll);
+            if (pendingGMRoll.uuid && finishedUuid && finishedUuid !== pendingGMRoll.uuid) return;
             const { name, threshold, atk } = pendingGMRoll;
             pendingGMRoll = null;
             const total = (roll.total_value ?? 0) === 0 ? 100 : (roll.total_value ?? 0);
@@ -1382,7 +1411,20 @@ function handlePresence(data) {
     }
     if (currentJoinCode && (data.campaignKey || '') !== currentJoinCode) { console.log('[GM] handlePresence: IGNORED (campaignKey mismatch:', data.campaignKey, 'vs', currentJoinCode, ') from', data.name); return; }
     if (currentCampaignType && (data.ariaType || 'ancient') !== currentCampaignType) { console.log('[GM] handlePresence: IGNORED (ariaType mismatch:', data.ariaType, 'vs', currentCampaignType, ') from', data.name); return; }
-    const playerData = { ...data, ts: Date.now(), online: true };
+    // Numeric fields are interpolated into innerHTML by the card renders — coerce
+    // them here so a crafted presence payload can't smuggle markup through them.
+    const playerData = {
+        ...data,
+        hp:    _finiteNum(data.hp),
+        maxHP: _finiteNum(data.maxHP),
+        vials: _finiteNum(data.vials) ?? 0,
+        ts: Date.now(), online: true,
+    };
+    // Seed the karma map from the player's stored value on first sight (a GM page
+    // reload wipes the in-memory map; without this, the next ± click would send
+    // karma-set with ±1 and clobber the player's real karma). After seeding, the
+    // GM's local value stays authoritative — the GM is the only karma writer.
+    if (!(data.charId in gmKarma)) gmKarma[data.charId] = _finiteNum(data.karma) ?? 0;
     players.set(data.charId, playerData);
     saveKnownPlayers();
     syncKnownPlayer(data.charId, playerData);
@@ -1452,9 +1494,11 @@ function renderPlayerCards() {
     [...grid.querySelectorAll('[data-char-id]')].forEach(el => {
         if (!players.has(el.dataset.charId)) el.remove();
     });
-    players.forEach((p, playerId) => {
+    players.forEach((p, charId) => {
         const isOnline = p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT;
-        const hp = p.hp ?? p.maxHP ?? '?', maxHP = p.maxHP ?? '?';
+        // Coerce here too: known-players snapshots persisted before the presence
+        // coercion existed can still hold arbitrary values.
+        const hp = _finiteNum(p.hp) ?? _finiteNum(p.maxHP) ?? '?', maxHP = _finiteNum(p.maxHP) ?? '?';
         const pct = maxHP > 0 ? hp / maxHP : 0;
         const hpColor = pct > 0.5 ? 'var(--ok)' : pct > 0.25 ? 'var(--warn)' : 'var(--bad)';
         const hpClass = pct <= 0.25 ? 'critical' : pct <= 0.5 ? 'low' : '';
@@ -1462,22 +1506,22 @@ function renderPlayerCards() {
         const critical = !dead && pct >= 0 && pct <= 0.25;
         const stateCls = dead ? ' is-dead' : (critical ? ' hp-critical' : '');
         const stats = p.stats || {};
-        const k = gmKarma[playerId] ?? 0;
-        let card = grid.querySelector(`[data-char-id="${playerId}"]`);
+        const k = gmKarma[charId] ?? 0;
+        let card = grid.querySelector(`[data-char-id="${charId}"]`);
         if (!card) {
             // First render: build full card structure
             card = document.createElement('div');
-            card.dataset.charId = playerId;
+            card.dataset.charId = charId;
             card.className = `player-card ${isOnline ? 'online' : 'offline'}${stateCls}`;
             card.innerHTML = `
               <div class="pc-header">
                 <div class="pc-online-dot ${isOnline ? 'online' : ''}"></div>
                 <div style="flex:1;min-width:0;">
-                  <div class="pc-name">${_escHtml(p.name || playerId)}</div>
+                  <div class="pc-name">${_escHtml(p.name || charId)}</div>
                   <div class="pc-class">${_escHtml(p.charClass || '')}</div>
                 </div>
-                <button class="pc-btn spot${gmSpotlightCharId === playerId ? ' active' : ''}" onclick="toggleSpotlight('${playerId}')" title="Spotlight — la caméra de ce joueur passe en grand chez tous">☀</button>
-                <button class="pc-btn details" onclick="openPlayerDetails('${playerId}')" title="Voir la fiche">≡</button>
+                <button class="pc-btn spot${gmSpotlightCharId === charId ? ' active' : ''}" onclick="toggleSpotlight('${charId}')" title="Spotlight — la caméra de ce joueur passe en grand chez tous">☀</button>
+                <button class="pc-btn details" onclick="openPlayerDetails('${charId}')" title="Voir la fiche">≡</button>
               </div>
               <div class="pc-body">
                 <div class="pc-hp-row">
@@ -1492,20 +1536,20 @@ function renderPlayerCards() {
                   ${Object.entries(stats).filter(([k]) => k !== 'PV').map(([k, v]) => `<span class="pc-stat">${_escHtml(k)} <span>${_escHtml(v)}</span></span>`).join('')}
                 </div>
                 <div class="pc-actions">
-                  <input class="pc-dmg-input" id="dmg-${playerId}" type="text" inputmode="numeric"
+                  <input class="pc-dmg-input" id="dmg-${charId}" type="text" inputmode="numeric"
                     placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
-                    onkeydown="if(event.key==='Enter')applyPlayerDamage('${playerId}')" />
-                  <button class="pc-btn dmg" onclick="applyPlayerDamage('${playerId}')">−</button>
-                  <input class="pc-heal-input" id="heal-${playerId}" type="text" inputmode="numeric"
+                    onkeydown="if(event.key==='Enter')applyPlayerDamage('${charId}')" />
+                  <button class="pc-btn dmg" onclick="applyPlayerDamage('${charId}')">−</button>
+                  <input class="pc-heal-input" id="heal-${charId}" type="text" inputmode="numeric"
                     placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
-                    onkeydown="if(event.key==='Enter')applyPlayerHeal('${playerId}')" />
-                  <button class="pc-btn heal" onclick="applyPlayerHeal('${playerId}')">+</button>
+                    onkeydown="if(event.key==='Enter')applyPlayerHeal('${charId}')" />
+                  <button class="pc-btn heal" onclick="applyPlayerHeal('${charId}')">+</button>
                 </div>
                 <div class="pc-karma-row">
                   <span class="pc-karma-label">Karma</span>
-                  <button class="pc-karma-btn minus" onclick="setPlayerKarma('${playerId}',-1)">−</button>
+                  <button class="pc-karma-btn minus" onclick="setPlayerKarma('${charId}',-1)">−</button>
                   <span class="pc-karma-val ${k>0?'positive':k<0?'negative':''}">${k>0?'+':''}${k}</span>
-                  <button class="pc-karma-btn plus" onclick="setPlayerKarma('${playerId}',1)">+</button>
+                  <button class="pc-karma-btn plus" onclick="setPlayerKarma('${charId}',1)">+</button>
                 </div>
               </div>`;
             grid.appendChild(card);
@@ -1528,7 +1572,7 @@ function renderPlayerCards() {
             const dot = card.querySelector('.pc-online-dot');
             if (dot) dot.className = `pc-online-dot${isOnline ? ' online' : ''}`;
             const nameEl = card.querySelector('.pc-name');
-            if (nameEl) nameEl.textContent = p.name || playerId;
+            if (nameEl) nameEl.textContent = p.name || charId;
             const classEl = card.querySelector('.pc-class');
             if (classEl) classEl.textContent = p.charClass || '';
             const hpNum = card.querySelector('.pc-hp-num');
@@ -1558,7 +1602,7 @@ function renderPlayerCards() {
                 karmaVal.className = `pc-karma-val${k > 0 ? ' positive' : k < 0 ? ' negative' : ''}`;
             }
             const spotBtn = card.querySelector('.pc-btn.spot');
-            if (spotBtn) spotBtn.classList.toggle('active', gmSpotlightCharId === playerId);
+            if (spotBtn) spotBtn.classList.toggle('active', gmSpotlightCharId === charId);
             // Camera: only create/update when streamId changes, never destroy existing iframe
             const existingWrap = card.querySelector('.pc-camera-wrap');
             const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
@@ -1587,13 +1631,14 @@ function renderPlayerCards() {
     if (focusedId) document.getElementById(focusedId)?.focus();
 }
 // Open the player details modal with character info, tab toggles, and file/potion grants.
-function openPlayerDetails(playerId) {
-    const p = players.get(playerId);
+function openPlayerDetails(charId) {
+    const p = players.get(charId);
     if (!p) return;
-    document.getElementById('pdm-name').textContent = p.name || playerId;
+    document.getElementById('pdm-name').textContent = p.name || charId;
     document.getElementById('pdm-class').textContent = p.charClass || '';
 
-    const hp = p.hp ?? p.maxHP ?? '?', maxHP = p.maxHP ?? '?';
+    // Coerced — these are interpolated into innerHTML and come from remote presence.
+    const hp = _finiteNum(p.hp) ?? _finiteNum(p.maxHP) ?? '?', maxHP = _finiteNum(p.maxHP) ?? '?';
     const pct = maxHP > 0 ? hp / maxHP : 0;
     const hpColor = pct > 0.5 ? 'var(--success)' : pct > 0.25 ? '#e8a020' : 'var(--fail)';
     const stats = p.stats || {};
@@ -1611,8 +1656,8 @@ function openPlayerDetails(playerId) {
     html += `<div class="pdm-section">`;
     html += `<div class="pdm-section-title">Accès aux onglets</div>`;
     html += `<div class="pdm-tab-toggles">`;
-    html += `<button class="pdm-tab-toggle${tabs.cards ? ' active' : ''}" onclick="sendTabConfig('${playerId}','cards',${!tabs.cards})">🂠 Cartes</button>`;
-    html += `<button class="pdm-tab-toggle${tabs.alchemy ? ' active' : ''}" onclick="sendTabConfig('${playerId}','alchemy',${!tabs.alchemy})">Alchimie</button>`;
+    html += `<button class="pdm-tab-toggle${tabs.cards ? ' active' : ''}" onclick="sendTabConfig('${charId}','cards',${!tabs.cards})">🂠 Cartes</button>`;
+    html += `<button class="pdm-tab-toggle${tabs.alchemy ? ' active' : ''}" onclick="sendTabConfig('${charId}','alchemy',${!tabs.alchemy})">Alchimie</button>`;
     html += `</div></div>`;
 
     // Files
@@ -1620,10 +1665,10 @@ function openPlayerDetails(playerId) {
         html += `<div class="pdm-section"><div class="pdm-section-title">Documents</div><div class="pdm-tab-toggles">`;
         for (const f of gmFiles) {
             const isAll = f.grantedTo === 'all';
-            const hasAccess = isAll || (Array.isArray(f.grantedTo) && f.grantedTo.includes(playerId));
+            const hasAccess = isAll || (Array.isArray(f.grantedTo) && f.grantedTo.includes(charId));
             const icon = _fileIcon(f.type);
             const disabledAttr = isAll ? ' disabled title="Accès accordé à tous"' : '';
-            const clickAttr = isAll ? '' : ` onclick="grantFileToPlayer('${f.id}','${playerId}')"`;
+            const clickAttr = isAll ? '' : ` onclick="grantFileToPlayer('${f.id}','${charId}')"`;
             html += `<button class="pdm-tab-toggle${hasAccess ? ' active' : ''}"${disabledAttr}${clickAttr}>${icon} ${_escHtml(f.name)}</button>`;
         }
         html += `</div></div>`;
@@ -1634,7 +1679,7 @@ function openPlayerDetails(playerId) {
         html += `<div class="pdm-section"><div class="pdm-section-title">Recettes alchimiques</div><div class="pdm-tab-toggles">`;
         for (const pot of gmPotions) {
             const granted = grantedRecipeIds.has(pot.id);
-            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${playerId}','${pot.id}')" title="${_escHtml(pot.desc || '')}">${_escHtml(pot.name)}</button>`;
+            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${charId}','${pot.id}')" title="${_escHtml(pot.desc || '')}">${_escHtml(pot.name)}</button>`;
         }
         html += `</div></div>`;
     }
@@ -1698,7 +1743,7 @@ function openPlayerDetails(playerId) {
     html += `</div></div>`;
 
     // Inventory
-    const vials = p.vials ?? 0;
+    const vials = _finiteNum(p.vials) ?? 0;
     const showVials = tabs.alchemy && vials > 0;
     const realInv = inventory.filter(i => i.name);
     if (showVials || realInv.length) {
@@ -1730,23 +1775,25 @@ function closePlayerDetails() {
     document.getElementById('player-details-modal').classList.remove('show');
 }
 // Send a tab-config message to toggle a player's Cartes or Alchimie tab access.
-function sendTabConfig(playerId, tab, enabled) {
+// `charId` is the stable character UUID (the players Map key); the published
+// payload targets the session `p.playerId`.
+function sendTabConfig(charId, tab, enabled) {
     if (!ablyDamage) { console.warn('[GM] sendTabConfig: ablyDamage not ready'); return; }
-    const p = players.get(playerId);
+    const p = players.get(charId);
     if (!p) return;
     if (!p.tabs) p.tabs = { cards: false, alchemy: false };
     p.tabs[tab] = enabled;
     console.log('[GM] sendTabConfig → ', p.name, '| tab:', tab, '=', enabled, '| full tabs:', JSON.stringify(p.tabs));
     ablyDamage.publish('tab-config', { playerId: p.playerId, tabs: p.tabs });
-    openPlayerDetails(playerId); // refresh modal to reflect new state
+    openPlayerDetails(charId); // refresh modal to reflect new state
 }
 
 // Read the damage input for a player, apply armor reduction, and publish the damage.
-function applyPlayerDamage(playerId) {
-    const inp = document.getElementById(`dmg-${playerId}`);
+function applyPlayerDamage(charId) {
+    const inp = document.getElementById(`dmg-${charId}`);
     const rawDmg = parseInt(inp.value);
     if (!rawDmg || rawDmg <= 0) return;
-    const p = players.get(playerId);
+    const p = players.get(charId);
     if (!p) return;
     const prot = p.protection?.valeur || 0;
     const dmg = Math.max(0, rawDmg - prot);
@@ -1757,14 +1804,14 @@ function applyPlayerDamage(playerId) {
     inp.value = '';
     publishDamage(p.playerId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
-    triggerCardFx(playerCardEl(playerId), 'dmg');
+    triggerCardFx(playerCardEl(charId), 'dmg');
 }
 // Read the heal input for a player, clamp to max HP, and publish the heal.
-function applyPlayerHeal(playerId) {
-    const inp = document.getElementById(`heal-${playerId}`);
+function applyPlayerHeal(charId) {
+    const inp = document.getElementById(`heal-${charId}`);
     const amt = parseInt(inp.value);
     if (!amt || amt <= 0) return;
-    const p = players.get(playerId);
+    const p = players.get(charId);
     if (!p) return;
     const hpBefore = p.hp ?? 0;
     const hpAfter = Math.min(p.maxHP || hpBefore, hpBefore + amt);
@@ -1773,7 +1820,7 @@ function applyPlayerHeal(playerId) {
     inp.value = '';
     publishHeal(p.playerId, amt, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
-    triggerCardFx(playerCardEl(playerId), 'heal');
+    triggerCardFx(playerCardEl(charId), 'heal');
 }
 
 // ═══════════════════════════════════════════
@@ -2204,6 +2251,16 @@ function refreshMonsterSelect() {
 // Add an incoming roll to the feed, persist it, and re-render the roll list.
 function handleIncomingRoll(data) {
     if (!data) return;
+    // Normalize numeric fields at the boundary — roll payloads are remote-controlled
+    // and several of these are interpolated into innerHTML by renderRollFeed.
+    data = {
+        ...data,
+        roll: _finiteNum(data.roll) ?? 0,
+        threshold: data.threshold === null || data.threshold === undefined ? null : (_finiteNum(data.threshold) ?? 0),
+        bonusMalus: _finiteNum(data.bonusMalus) ?? 0,
+        success: data.success === null || data.success === undefined ? data.success : !!data.success,
+        hidden: !!data.hidden,
+    };
     rollFeed.unshift({ ...data, receivedAt: Date.now() });
     if (rollFeed.length > 50) rollFeed.pop();
     localStorage.setItem(rollsKey(), JSON.stringify(rollFeed));
@@ -2282,15 +2339,20 @@ function renderRollFeed() {
         entries.forEach(d => {
             const isDie = d.threshold === null;
             const type = isDie ? 'die' : classify(d.roll, d.threshold, d.success);
+            // Coerce here too — entries persisted in localStorage before the ingest
+            // normalization existed can still hold arbitrary values.
+            const roll = _finiteNum(d.roll) ?? 0;
+            const threshold = _finiteNum(d.threshold) ?? 0;
+            const bm = _finiteNum(d.bonusMalus) ?? 0;
             const row = document.createElement('div'); row.className = `roll-entry ${type}${d.hidden ? ' hidden-roll' : ''}`;
             row.innerHTML = `
               <div class="re-char">${d.hidden ? '<span class="re-hidden-badge" title="Jet caché — visible uniquement par le MJ">MJ</span>' : ''}${_escHtml(d.char || d.playerId || '?')}</div>
               <div class="re-context">
                 <div class="re-skill">${_escHtml(d.skillName)}</div>
-                ${isDie ? '' : `<div class="re-threshold">Seuil : ${d.threshold}%${d.bonusMalus ? ` · BM : ${d.bonusMalus > 0 ? '+' : ''}${d.bonusMalus}` : ''}</div>`}
+                ${isDie ? '' : `<div class="re-threshold">Seuil : ${threshold}%${bm ? ` · BM : ${bm > 0 ? '+' : ''}${bm}` : ''}</div>`}
               </div>
               <div class="re-result">
-                <div class="re-roll">${d.roll}</div>
+                <div class="re-roll">${roll}</div>
                 ${isDie ? '' : `<div class="re-verdict ${vcls[type]}">${verdicts[type]}</div>`}
               </div>`;
             feed.appendChild(row);
@@ -2343,8 +2405,9 @@ function doGMFreeRoll() {
     const t = parseInt(document.getElementById('gm-free-threshold').value);
     if (isNaN(t) || t < 1 || t > 100) { alert('Seuil invalide.'); return; }
     if (dddiceSDK && dddiceAPI) {
-        pendingGMRoll = { name, threshold: t, atk: null };
+        pendingGMRoll = { name, threshold: t, atk: null, uuid: null };
         dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }])
+            .then(res => { if (pendingGMRoll) pendingGMRoll.uuid = _ddRollUuid(res); })
             .catch(e => { console.error('dddice GM roll:', e); pendingGMRoll = null; const r = Math.floor(Math.random() * 100) + 1; showGMRollResult(name, t, r, r <= t); });
     } else {
         const roll = Math.floor(Math.random() * 100) + 1;
@@ -2361,8 +2424,9 @@ function doGMMonsterRoll() {
     const atk = (m && atkIdx !== '') ? m.attacks[parseInt(atkIdx)] : null;
     const name = atk ? `${m.name} — ${atk.name}` : m ? `${m.name} (${t}%)` : `Jet MJ (${t}%)`;
     if (dddiceSDK && dddiceAPI) {
-        pendingGMRoll = { name, threshold: t, atk };
+        pendingGMRoll = { name, threshold: t, atk, uuid: null };
         dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }])
+            .then(res => { if (pendingGMRoll) pendingGMRoll.uuid = _ddRollUuid(res); })
             .catch(e => {
                 console.error('dddice GM roll:', e);
                 pendingGMRoll = null;
@@ -2406,8 +2470,8 @@ function showGMRollResult(name, threshold, roll, success, dmgResult) {
         ${dmgHtml}${targetHtml}`;
 }
 // Apply a damage amount to a player from the GM roll result panel, with armor reduction.
-function applyDamageToPlayer(playerId, amount) {
-    const p = players.get(playerId);
+function applyDamageToPlayer(charId, amount) {
+    const p = players.get(charId);
     if (!p) return;
     const prot = p.protection?.valeur || 0;
     const dmg = Math.max(0, amount - prot);
@@ -2416,8 +2480,8 @@ function applyDamageToPlayer(playerId, amount) {
     p.hp = hpAfter;
     publishDamage(p.playerId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
-    const btn = document.querySelector(`.gm-target-btn[data-pid="${playerId}"]`);
-    if (btn) { btn.disabled = true; btn.classList.add('applied'); btn.textContent = `✓ ${p.name || playerId}`; }
+    const btn = document.querySelector(`.gm-target-btn[data-pid="${charId}"]`);
+    if (btn) { btn.disabled = true; btn.classList.add('applied'); btn.textContent = `✓ ${p.name || charId}`; }
 }
 
 // ── GM DICE TRAY ─────────────────────────────
@@ -2833,24 +2897,25 @@ function openGmFileViewer(fileId) {
     document.getElementById('gm-fv-title').textContent = f.name;
     const body = document.getElementById('gm-fv-body');
     body.innerHTML = '';
-    if (f.type && f.type.startsWith('image/')) {
+    const url = _safeUrl(f.url);
+    if (url && f.type && f.type.startsWith('image/')) {
         const img = document.createElement('img');
-        img.src = f.url; img.className = 'fv-image';
+        img.src = url; img.className = 'fv-image';
         body.appendChild(img);
         wireImageZoom(img);
-    } else if (f.type === 'application/pdf') {
+    } else if (url && f.type === 'application/pdf') {
         const iframe = document.createElement('iframe');
-        iframe.src = f.url; iframe.className = 'fv-iframe';
+        iframe.src = url; iframe.className = 'fv-iframe';
         body.appendChild(iframe);
-    } else if (f.type && f.type.startsWith('text/')) {
+    } else if (url && f.type && f.type.startsWith('text/')) {
         const pre = document.createElement('pre');
         pre.className = 'fv-text'; pre.textContent = 'Chargement…';
         body.appendChild(pre);
-        fetch(f.url).then(r => r.text()).then(t => { pre.textContent = t; }).catch(() => { pre.textContent = 'Erreur de chargement.'; });
+        fetch(url).then(r => r.text()).then(t => { pre.textContent = t; }).catch(() => { pre.textContent = 'Erreur de chargement.'; });
     } else {
         const wrap = document.createElement('div');
         wrap.className = 'fv-unsupported';
-        wrap.innerHTML = `<div class="fv-unsupported-icon">${_fileIcon(f.type)}</div><div class="fv-unsupported-name">${_escHtml(f.name)}</div><a class="fv-download-link" href="${f.url}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>`;
+        wrap.innerHTML = `<div class="fv-unsupported-icon">${_fileIcon(f.type)}</div><div class="fv-unsupported-name">${_escHtml(f.name)}</div>${url ? `<a class="fv-download-link" href="${_escHtml(url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>` : ''}`;
         body.appendChild(wrap);
     }
     document.getElementById('gm-file-viewer-scrim').classList.add('show');
@@ -3000,9 +3065,9 @@ function importAlchemyFrom(sourceId, sourceName) {
 }
 
 // Grant or revoke a potion recipe for a player via Ably, toggling state.
-function sendPotionGrant(playerId, potionId) {
+function sendPotionGrant(charId, potionId) {
     if (!ablyDamage) return;
-    const player = players.get(playerId);
+    const player = players.get(charId);
     if (!player) return;
     if (!player.potionRecipeIds) player.potionRecipeIds = [];
     const alreadyGranted = player.potionRecipeIds.includes(potionId);
@@ -3017,12 +3082,12 @@ function sendPotionGrant(playerId, potionId) {
         ablyDamage.publish('potion-grant', { playerId: player.playerId, potion: { ...pot } });
         player.potionRecipeIds.push(potionId);
     }
-    openPlayerDetails(playerId);
+    openPlayerDetails(charId);
 }
 // Send a vial-grant message to give a player a quantity of empty vials.
-function sendVialGrant(playerId, qty) {
+function sendVialGrant(charId, qty) {
     if (!ablyDamage) return;
-    const p = players.get(playerId);
+    const p = players.get(charId);
     if (!p) return;
     console.log('[GM] sendVialGrant:', qty, 'vials to', p.name);
     ablyDamage.publish('vial-grant', { playerId: p.playerId, qty });
@@ -3039,6 +3104,13 @@ function _escHtml(s) {
 // handler attribute. Always wrap the result in _escHtml too, since the HTML
 // parser decodes the attribute before the JS engine sees it.
 function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+// Allow only http(s) URLs from remote-controlled records (file rows live in Supabase
+// and travel over Ably) — a javascript: URL assigned to iframe.src would execute here.
+function _safeUrl(u) { const s = String(u ?? '').trim(); return /^https?:\/\//i.test(s) ? s : ''; }
+// Coerce a remote value to a finite number, or null. Presence payloads are
+// attacker-controllable (anyone with the Ably key) — numbers interpolated into
+// innerHTML must never pass through as strings.
+function _finiteNum(v) { if (v === null || v === undefined || v === '') return null; const n = +v; return Number.isFinite(n) ? n : null; }
 // Render a skill/special percentage for the player-details modal, folding in the
 // player's per-skill permanent modifier (s.bonus) and annotating it when non-zero.
 function _pdmSkillPct(s) {

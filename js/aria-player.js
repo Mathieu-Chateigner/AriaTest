@@ -26,6 +26,10 @@ function _escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g
 // handler attribute. Always wrap the result in _escHtml too, since the HTML
 // parser decodes the attribute before the JS engine sees it.
 function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+// Allow only http(s) URLs from remote-controlled records. File grants travel over
+// Ably and file rows live in Supabase — a javascript: URL assigned to iframe.src
+// would execute in this origin.
+function _safeUrl(u) { const s = String(u ?? '').trim(); return /^https?:\/\//i.test(s) ? s : ''; }
 
 // ═══════════════════════════════════════════
 //  STATE
@@ -314,13 +318,25 @@ async function deleteCharacterFile(fileId) {
     await sbDelete('character_files', 'id=eq.' + encodeURIComponent(fileId));
 }
 
+// Per-character localStorage key prefixes (everything scoped by charId).
+const _CHAR_KEY_PREFIXES = ['aria-current-hp-', 'aria-cards-', 'aria-notes-', 'aria-player-files-', 'aria-player-rolls-', 'aria-player-tabs-'];
+
+// Remove all locally stored characters and their scoped keys (used when switching
+// to a different save key, so the old key's data never merges into the new one).
+function _clearLocalPlayerData() {
+    getCharacters().forEach(c => _CHAR_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id)));
+    localStorage.removeItem('aria-characters');
+}
+
 // Load all player data (characters, states, notes, files) from Supabase into localStorage.
+// Returns true when the load completed (even if the key has no data yet), false on error —
+// callers must not push local data back up after a failed load.
 async function loadFromSupabase() {
-    if (!_supabaseReady()) return;
+    if (!_supabaseReady()) return false;
     try {
         await runMigration(saveKey, 'player');
         const chars = await sbSelect('characters', 'save_key=eq.' + encodeURIComponent(saveKey));
-        if (!chars.length) return;
+        if (!chars.length) return true;
 
         const dbChars = chars.map(row => ({
             id: row.id, name: row.name, class: row.class,
@@ -336,6 +352,12 @@ async function loadFromSupabase() {
             money: row.money || null,
             karma: row.karma ?? 0,
         }));
+        // Clean up scoped keys of characters deleted on another device (the list
+        // below is overwritten, which would otherwise orphan their HP/cards/notes).
+        const dbIds = new Set(dbChars.map(c => c.id));
+        getCharacters().forEach(c => {
+            if (!dbIds.has(c.id)) _CHAR_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id));
+        });
         localStorage.setItem('aria-characters', JSON.stringify(dbChars));
 
         const ids = chars.map(c => c.id).join(',');
@@ -367,7 +389,8 @@ async function loadFromSupabase() {
         Object.entries(filesByChar).forEach(([cid, arr]) =>
             localStorage.setItem('aria-player-files-' + cid, JSON.stringify(arr)));
 
-    } catch(e) { console.warn('[ARIA] Supabase load failed:', e); }
+        return true;
+    } catch(e) { console.warn('[ARIA] Supabase load failed:', e); return false; }
 }
 
 // Show the two-panel gateway (new key + existing key, side by side) with a freshly generated key.
@@ -415,6 +438,12 @@ async function submitExistingKey() {
     const input = document.getElementById('gateway-key-input');
     const key = input ? input.value.trim() : '';
     if (!key) return;
+    // Verify the key exists before adopting it — a typo would otherwise push the
+    // previous key's local data under a brand-new key on the next sync.
+    const rows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(key) + '&select=save_key');
+    if (!rows.length) { alert('Clé introuvable. Vérifiez la clé saisie.'); return; }
+    // Switching keys: drop the old key's local data so it never merges into the new one.
+    if (saveKey && key !== saveKey) _clearLocalPlayerData();
     saveKey = key;
     localStorage.setItem('aria-save-key', key);
     await loadFromSupabase();
@@ -454,10 +483,12 @@ function cancelGateway() {
 // On load: restore from Supabase if a save key exists, otherwise show the gateway.
 async function tryRestoreSupabase() {
     if (!saveKey) { showGateway(); return; }
-    await loadFromSupabase();
+    const ok = await loadFromSupabase();
     hideGateway();
     showSelectionScreen();
-    _syncAllPlayerData();
+    // Only push local data back up if the load succeeded — after a failed (offline)
+    // load, syncing would overwrite newer remote data with stale local state.
+    if (ok) _syncAllPlayerData();
 }
 
 // ═══════════════════════════════════════════
@@ -653,9 +684,13 @@ function switchCharacter() {
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null; pendingSecondaryRoll = null; dddiceAPI = null;
     currentHP = null; bonusMalus = 0; bmNextValue = 0; bmNextCount = 0; _appliedBM = 0; hiddenRollMode = false; rollFilter.clear();
+    pendingCraft = null; soignerTarget = null;
+    Object.keys(knownPlayers).forEach(k => delete knownPlayers[k]);
     resetSplitState();
     if (_musicFadeRaf) { cancelAnimationFrame(_musicFadeRaf); _musicFadeRaf = null; }
     _stopSlot('A'); _stopSlot('B'); musicIsPlaying = false;
+    const musicBar = document.getElementById('music-bar');
+    if (musicBar) musicBar.style.visibility = 'hidden';
     const doCloseAbly = () => {
         if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
         ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
@@ -1757,9 +1792,10 @@ function updateBMDisplay() {
             ns.style.visibility = 'hidden';
         }
     }
-    // Update only the percentage text in existing skill elements — no DOM rebuild
+    // Update only the percentage text in existing skill elements — no DOM rebuild.
+    // Lookup by stored index, not name — duplicate names would all match the first entry.
     document.getElementById('skill-list').querySelectorAll('.skill-item').forEach(div => {
-        const skill = (character.skills || []).find(s => s.name === div.dataset.skillName);
+        const skill = (character.skills || [])[+div.dataset.skillIdx];
         if (skill) {
             const v = Math.max(1, Math.min(100, skill.pct + (+skill.bonus || 0) + bm + (character?.karma ?? 0)));
             div.querySelector('.skill-pct').textContent = v + '%';
@@ -1768,7 +1804,7 @@ function updateBMDisplay() {
         }
     });
     document.getElementById('special-list').querySelectorAll('.skill-item').forEach(div => {
-        const sp = (character.specials || []).find(s => s.name === div.dataset.skillName);
+        const sp = (character.specials || [])[+div.dataset.skillIdx];
         if (sp) div.querySelector('.skill-pct').textContent = Math.max(1, Math.min(100, sp.pct + (+sp.bonus || 0) + bm + (character?.karma ?? 0))) + '%';
     });
     document.getElementById('potion-list')?.querySelectorAll('.recipe-row').forEach((div, i) => {
@@ -1802,13 +1838,14 @@ function renderAll() {
 function renderSkills() {
     const list = document.getElementById('skill-list');
     list.innerHTML = '';
-    [...(character.skills || [])].sort((a, b) => a.name.localeCompare(b.name, 'fr')).forEach(skill => {
+    (character.skills || []).map((skill, idx) => ({ skill, idx })).sort((a, b) => a.skill.name.localeCompare(b.skill.name, 'fr')).forEach(({ skill, idx }) => {
         const bonus = +skill.bonus || 0;
         const eff = Math.max(1, Math.min(100, skill.pct + bonus + liveBM() + (character.karma ?? 0)));
         const div = document.createElement('div');
         const isSoigner = skill.name === 'Soigner';
         div.className = 'skill-item' + (isSoigner ? ' soigner-skill' : '');
         div.dataset.skillName = skill.name;
+        div.dataset.skillIdx = idx; // index into character.skills — survives duplicate names
         const modBadge = bonus ? `<span class="skill-mod" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
         div.innerHTML = `<span class="skill-name">${_escHtml(skill.name)}</span>${modBadge}${skill.link ? `<span class="skill-link">${_escHtml(skill.link)}</span>` : ''}<div class="skill-bar-wrap"><div class="skill-bar-fill" style="width:${eff}%"></div></div><span class="skill-pct">${eff}%</span>`;
         if (isSoigner) {
@@ -1820,12 +1857,13 @@ function renderSkills() {
     });
     const slist = document.getElementById('special-list');
     slist.innerHTML = '';
-    [...(character.specials || [])].sort((a, b) => a.name.localeCompare(b.name, 'fr')).forEach(sp => {
+    (character.specials || []).map((sp, idx) => ({ sp, idx })).sort((a, b) => a.sp.name.localeCompare(b.sp.name, 'fr')).forEach(({ sp, idx }) => {
         const bonus = +sp.bonus || 0;
         const eff = Math.max(1, Math.min(100, sp.pct + bonus + liveBM() + (character.karma ?? 0)));
         const div = document.createElement('div');
         div.className = 'skill-item';
         div.dataset.skillName = sp.name;
+        div.dataset.skillIdx = idx;
         div.style.borderColor = 'rgba(236,164,86,.3)';
         const modBadge = bonus ? `<span class="skill-mod" style="color:var(--ember2)" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
         div.innerHTML = `<span class="skill-link" style="color:var(--ember2)">Spéciale</span><span class="skill-name">${_escHtml(sp.name)}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${_escHtml(sp.desc)}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--ember2)">${eff}%</span>`;
@@ -1999,7 +2037,7 @@ async function rollDieViaDddice(sides, callback) {
     }
     const dieType = sides === 3 ? 'd6' : `d${sides}`;
     const mapFn   = sides === 3 ? v => Math.ceil(v / 2) : null;
-    pendingSecondaryRoll = { callback, mapFn };
+    pendingSecondaryRoll = { callback, mapFn, uuid: null };
     showDddiceCanvas();
     dddiceRollSafetyTimer = setTimeout(() => {
         if (pendingSecondaryRoll) {
@@ -2010,7 +2048,8 @@ async function rollDieViaDddice(sides, callback) {
         }
     }, 12000);
     try {
-        await dddiceSDK.roll([{ type: dieType, theme: dddiceAPI.theme }]);
+        const res = await dddiceSDK.roll([{ type: dieType, theme: dddiceAPI.theme }]);
+        if (pendingSecondaryRoll) pendingSecondaryRoll.uuid = _ddRollUuid(res);
     } catch (e) {
         clearTimeout(dddiceRollSafetyTimer);
         pendingSecondaryRoll = null;
@@ -2113,7 +2152,8 @@ async function rollWeaponDamage(name, formula) {
             const breakdown = modifier !== 0 ? `${diceTotal}${modifier > 0 ? '+' : ''}${modifier}` : String(diceTotal);
             _showWeaponDamageResult(name, formula, { total, breakdown });
         },
-        mapFn: null
+        mapFn: null,
+        uuid: null
     };
     showDddiceCanvas();
     dddiceRollSafetyTimer = setTimeout(() => {
@@ -2124,7 +2164,8 @@ async function rollWeaponDamage(name, formula) {
         }
     }, 12000);
     try {
-        await dddiceSDK.roll(dice.map(d => ({ type: d, theme: dddiceAPI.theme })));
+        const res = await dddiceSDK.roll(dice.map(d => ({ type: d, theme: dddiceAPI.theme })));
+        if (pendingSecondaryRoll) pendingSecondaryRoll.uuid = _ddRollUuid(res);
     } catch (e) {
         clearTimeout(dddiceRollSafetyTimer);
         pendingSecondaryRoll = null;
@@ -2246,13 +2287,13 @@ function renderRollHistory() {
             const row = document.createElement('div');
             if (isDie) {
                 row.className = 'rh-row rh-die';
-                row.innerHTML = `<span class="rh-skill">${r.skillName}</span><span class="rh-roll">${r.roll}</span>`;
+                row.innerHTML = `<span class="rh-skill">${_escHtml(r.skillName)}</span><span class="rh-roll">${+r.roll || 0}</span>`;
             } else {
                 const type = classify(r.roll, r.threshold, r.success);
                 const cls = { success: 'rh-success', fail: 'rh-fail', 'crit-success': 'rh-crit-success', 'crit-fail': 'rh-crit-fail' }[type] || '';
                 const lbl = { success: 'SUCCÈS', fail: 'ÉCHEC', 'crit-success': 'SUCCÈS CRIT.', 'crit-fail': 'ÉCHEC CRIT.' }[type] || '';
                 row.className = `rh-row ${cls}`;
-                row.innerHTML = `<span class="rh-skill">${r.skillName}</span><span class="rh-roll">${r.roll}</span><span class="rh-verdict">${lbl}</span>`;
+                row.innerHTML = `<span class="rh-skill">${_escHtml(r.skillName)}</span><span class="rh-roll">${+r.roll || 0}</span><span class="rh-verdict">${lbl}</span>`;
             }
             list.appendChild(row);
         });
@@ -2360,10 +2401,15 @@ function cancelSoigner() {
 function applySoigner(success) {
     const target = soignerTarget; // capture before async delay
     soignerTarget = null;
+    // The effect fires after a delay + a dice animation — if the user switches
+    // characters in that window, it must not apply to the newly loaded character.
+    const charAtRoll = currentCharId;
     // Small delay so the float card resolves first, then roll the secondary die via dddice
     setTimeout(() => {
+        if (currentCharId !== charAtRoll) return;
         if (success) {
             rollDieViaDddice(6, heal => {
+                if (currentCharId !== charAtRoll) return;
                 publishRoll({ skillName: 'Soigner (soins)', threshold: null, roll: heal, success: null, char: character.name, bonusMalus: 0, playerId });
                 if (!target) {
                     const max = getMaxHP();
@@ -2383,6 +2429,7 @@ function applySoigner(success) {
             });
         } else {
             rollDieViaDddice(3, dmg => {
+                if (currentCharId !== charAtRoll) return;
                 publishRoll({ skillName: 'Soigner (blessure)', threshold: null, roll: dmg, success: null, char: character.name, bonusMalus: 0, playerId });
                 if (!target) {
                     const max = getMaxHP();
@@ -2505,6 +2552,10 @@ function extractRoomSlug(val) {
     const m = val.match(/\/room\/([^/?#]+)/);
     return m ? m[1] : val.trim();
 }
+// Extract a roll UUID from either the sdk.roll() response or a RollFinished payload.
+// RollFinished fires for EVERY roll in the shared room; matching UUIDs stops another
+// participant's dice from being consumed as this tab's pending result.
+function _ddRollUuid(r) { return r?.uuid ?? r?.data?.uuid ?? null; }
 // Initialize the dddice SDK: fetch available themes, create the canvas renderer, and connect to the room.
 async function initDddice() {
     const slug = extractRoomSlug(config.dddiceRoom);
@@ -2539,6 +2590,11 @@ async function initDddice() {
         // The SDK holds a ref to the canvas element only, not the wrapper — so it cannot
         // override the wrapper's visibility.
         dddiceSDK.on(ThreeDDiceRollEvent.RollFinished, (roll) => {
+            // Ignore other participants' rolls landing while ours is pending —
+            // only enforced when both UUIDs are known (older SDK shapes skip the check).
+            const finishedUuid = _ddRollUuid(roll);
+            const pendingUuid = pendingDddiceRoll?.uuid ?? pendingSecondaryRoll?.uuid;
+            if (pendingUuid && finishedUuid && finishedUuid !== pendingUuid) return;
             if (pendingDddiceRoll) {
                 clearTimeout(dddiceRollSafetyTimer);
                 const { skillName, threshold } = pendingDddiceRoll;
@@ -2582,7 +2638,7 @@ function hideDddiceCanvas() { const w = document.getElementById('dddice-wrap'); 
 async function rollViaDddice(skillName, threshold) {
     if (!dddiceSDK) { handleResult(skillName, threshold, Math.floor(Math.random() * 100) + 1); return; }
     try {
-        pendingDddiceRoll = { skillName, threshold };
+        pendingDddiceRoll = { skillName, threshold, uuid: null };
         showDddiceCanvas();
         // Safety fallback: if RollFinished never fires (e.g. network drop after roll creation),
         // unblock the UI after 12s. Cleared by the RollFinished handler on success.
@@ -2593,7 +2649,8 @@ async function rollViaDddice(skillName, threshold) {
                 handleResult(skillName, threshold, Math.floor(Math.random() * 100) + 1);
             }
         }, 12000);
-        await dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }]);
+        const res = await dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }]);
+        if (pendingDddiceRoll) pendingDddiceRoll.uuid = _ddRollUuid(res);
         // Do NOT clear the timer here — roll() resolves on API response (~200ms),
         // well before the animation ends. RollFinished handles the clear.
     } catch (e) { console.error('dddice roll:', e); pendingDddiceRoll = null; hideDddiceCanvas(); handleResult(skillName, threshold, Math.floor(Math.random() * 100) + 1); }
@@ -2615,7 +2672,6 @@ let musicCurrentIndex = -1;
 let musicIsPlaying    = false;
 let _musicCurrentSlot = 'A';
 let _musicFadeRaf     = null;
-let _musicProgressRaf = null;
 let _musicMuted       = false;
 
 // Effective output volume: 0 when muted, otherwise the master volume.
@@ -2870,6 +2926,8 @@ function initAbly() {
                 _stopSlot('A');
                 _stopSlot('B');
                 musicIsPlaying = false;
+                const bar = document.getElementById('music-bar');
+                if (bar) bar.style.visibility = 'hidden';
             } else if (d.type === 'pause') {
                 console.log('[PLAYER] music PAUSE received');
                 const slot = _musicCurrentSlot;
@@ -2877,7 +2935,6 @@ function initAbly() {
                 const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
                 if (yt) { try { yt.pauseVideo(); } catch(_) {} }
                 musicIsPlaying = false;
-                if (_musicProgressRaf) { cancelAnimationFrame(_musicProgressRaf); _musicProgressRaf = null; }
             } else if (d.type === 'resume') {
                 console.log('[PLAYER] music RESUME received');
                 const slot = _musicCurrentSlot;
@@ -3083,6 +3140,7 @@ function sendPresence() {
         potionRecipeIds: (character.potionRecipes || []).map(r => r.id),
         tabs: playerTabs,
         money: character.money || { couronne: 0, orbe: 0, sceptre: 0, sou: 0 },
+        karma: character.karma ?? 0,
         campaignKey: character.campaignKey || '',
         ariaType: character.ariaType || 'ancient',
         streamId: sid,
@@ -3429,7 +3487,9 @@ function craftPotion(recipeIdx) {
 }
 // Apply the craft roll result: add to stock on success, show toast, update inventory.
 function applyCraft(success, recipeIdx) {
+    const charAtRoll = currentCharId; // bail if the user switches characters mid-delay
     setTimeout(() => {
+        if (currentCharId !== charAtRoll) return;
         const recipe = (character.potionRecipes || [])[recipeIdx];
         if (!recipe) return;
         if (success) {
@@ -3485,7 +3545,7 @@ function renderSkillsEditor() {
         .forEach(({ sk, i }) => {
             const row = document.createElement('div');
             row.className = 'skill-editor-row';
-            row.innerHTML = `<span class="sname">${sk.name}</span><input class="spct" type="text" inputmode="numeric" value="${sk.pct}" title="Seuil de base (%)" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.skills[${i}].pct=+this.value||0" /><input class="smod" type="text" inputmode="numeric" value="${sk.bonus ? sk.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.skills[${i}].bonus=parseInt(this.value)||0" />`;
+            row.innerHTML = `<span class="sname">${_escHtml(sk.name)}</span><input class="spct" type="text" inputmode="numeric" value="${sk.pct}" title="Seuil de base (%)" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.skills[${i}].pct=+this.value||0" /><input class="smod" type="text" inputmode="numeric" value="${sk.bonus ? sk.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.skills[${i}].bonus=parseInt(this.value)||0" />`;
             list.appendChild(row);
         });
 }
@@ -3779,23 +3839,24 @@ function openFileViewer(fileId) {
     document.getElementById('fv-title').textContent = f.name;
     const body = document.getElementById('fv-body');
     body.innerHTML = '';
-    if (f.type.startsWith('image/')) {
+    const url = _safeUrl(f.url);
+    if (url && f.type.startsWith('image/')) {
         const img = document.createElement('img');
-        img.src = f.url;
+        img.src = url;
         img.className = 'fv-image';
         body.appendChild(img);
         wireImageZoom(img);
-    } else if (f.type === 'application/pdf') {
+    } else if (url && f.type === 'application/pdf') {
         const iframe = document.createElement('iframe');
-        iframe.src = f.url;
+        iframe.src = url;
         iframe.className = 'fv-iframe';
         body.appendChild(iframe);
-    } else if (f.type.startsWith('text/')) {
+    } else if (url && f.type.startsWith('text/')) {
         const pre = document.createElement('pre');
         pre.className = 'fv-text';
         pre.textContent = 'Chargement…';
         body.appendChild(pre);
-        fetch(f.url)
+        fetch(url)
             .then(r => r.text())
             .then(text => { pre.textContent = text; })
             .catch(() => { pre.textContent = 'Erreur de chargement.'; });
@@ -3804,7 +3865,7 @@ function openFileViewer(fileId) {
         wrap.className = 'fv-unsupported';
         wrap.innerHTML = `<div class="fv-unsupported-icon">${_pfFileIcon(f.type)}</div>
             <div class="fv-unsupported-name">${_escHtml(f.name)}</div>
-            <a class="fv-download-link" href="${_escHtml(f.url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>`;
+            ${url ? `<a class="fv-download-link" href="${_escHtml(url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>` : ''}`;
         body.appendChild(wrap);
     }
     document.getElementById('file-viewer-scrim').classList.add('show');

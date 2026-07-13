@@ -16,8 +16,36 @@ function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt
 
 let overlayConfig = { widgets: [] };
 const presenceCache = new Map();
+const PRESENCE_MAX_AGE = 60000; // heartbeats arrive every 5s; prune players gone for 60s
 const rollHistory = [];
 const ROLL_HISTORY_MAX = 20;
+
+// VDO.ninja room + password, cached from the GM's gm-presence broadcast. Camera
+// widgets need them: streams pushed into a password-protected room are encrypted
+// and a bare ?view=SID viewer stays black without &room + &password (&solo is
+// required alongside &room or VDO.ninja shows its join page instead of the stream).
+let vdoRoom = '';
+let vdoRoomPassword = '';
+function vdoCamSrc(sid) {
+    let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput&transparent`;
+    if (vdoRoom) src += `&solo&room=${encodeURIComponent(vdoRoom)}`;
+    if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
+    return src;
+}
+// Re-src camera widget iframes after the room/password arrive (camera widgets are
+// skipped by updateWidgetData to avoid iframe reloads on every presence tick).
+function refreshCameraWidgets() {
+    document.querySelectorAll('.overlay-widget').forEach(el => {
+        const widget = overlayConfig.widgets.find(w => w.id === el.dataset.widgetId);
+        if (!widget || widget.type !== 'camera') return;
+        const sid = widget.config?.streamId || '';
+        if (!sid) return;
+        const iframe = el.querySelector('iframe');
+        const src = vdoCamSrc(sid);
+        if (iframe) { if (iframe.src !== src) iframe.src = src; }
+        else el.innerHTML = renderWidgetContent(widget);
+    });
+}
 
 let rollDismiss = null;
 let cardDismiss = null;
@@ -79,8 +107,28 @@ if (ABLY_KEY) {
     dmgCh.subscribe('presence', msg => {
         const d = msg.data;
         if (d?.charId) {
-            presenceCache.set(d.charId, d);
+            presenceCache.set(d.charId, { ...d, _ts: Date.now() });
             updateWidgetData();
+        }
+    });
+    // Drop players whose heartbeats stopped — the cache would otherwise show
+    // disconnected players on stream forever.
+    setInterval(() => {
+        const now = Date.now();
+        let changed = false;
+        presenceCache.forEach((p, id) => {
+            if (now - (p._ts || 0) > PRESENCE_MAX_AGE) { presenceCache.delete(id); changed = true; }
+        });
+        if (changed) updateWidgetData();
+    }, 10000);
+    // The GM broadcasts the VDO room (+ password) every 8s — camera widgets need it.
+    dmgCh.subscribe('gm-presence', msg => {
+        const d = msg.data || {};
+        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '';
+        if (room !== vdoRoom || pw !== vdoRoomPassword) {
+            vdoRoom = room;
+            vdoRoomPassword = pw;
+            refreshCameraWidgets();
         }
     });
     // Live monster HP — the GM publishes monster-state on the (campaign-scoped) damage
@@ -664,7 +712,7 @@ function renderWidgetContent(widget) {
         case 'camera': {
             const sid = cfg.streamId || '';
             if (!sid) return '<div class="ow-camera-empty">—</div>';
-            return `<iframe src="https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput&transparent" allow="autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>`;
+            return `<iframe src="${vdoCamSrc(sid)}" allow="autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>`;
         }
         default: return '';
     }
