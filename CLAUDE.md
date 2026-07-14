@@ -431,7 +431,7 @@ The bar also holds the **Jet caché** toggle (`hiddenRollMode`) — while armed,
 ### Post-roll effect pattern
 Skills with side-effects after a roll use a flag set before `doRoll()` and checked in `handleResult()`:
 ```js
-pendingCraft = recipeIdx;
+pendingCraft = recipe.id;   // id, not index — a potion-revoke mid-roll would shift indexes
 doRoll(recipe.name, recipe.successChance || 0);   // BM + karma apply (skipBM defaults to false)
 
 // In handleResult():

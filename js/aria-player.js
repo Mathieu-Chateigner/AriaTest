@@ -739,7 +739,7 @@ function initApp() {
     document.getElementById('tab-alchemy').addEventListener('input', scheduleAutoSave);
     loadNotes();
     if (presenceIntervalId) clearInterval(presenceIntervalId);
-    presenceIntervalId = setInterval(sendPresence, 5000);
+    presenceIntervalId = setInterval(() => { sendPresence(); prunePeers(); }, 5000);
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     updateOverlayEditorBtn();
     const volSlider = document.getElementById('music-bar-volume');
@@ -1807,11 +1807,14 @@ function updateBMDisplay() {
         const sp = (character.specials || [])[+div.dataset.skillIdx];
         if (sp) div.querySelector('.skill-pct').textContent = Math.max(1, Math.min(100, sp.pct + (+sp.bonus || 0) + bm + (character?.karma ?? 0))) + '%';
     });
-    document.getElementById('potion-list')?.querySelectorAll('.recipe-row').forEach((div, i) => {
+    // Recipe cards render one .potion-card-chance each, in recipe order (stock
+    // cards have no chance span), so the NodeList maps 1:1 onto potionRecipes.
+    document.querySelectorAll('#potion-list .potion-card-chance').forEach((el, i) => {
         const r = (character.potionRecipes || [])[i];
-        if (r) div.querySelector('.recipe-chance').textContent = Math.max(0, Math.min(100, (r.successChance || 0) + bm + (character?.karma ?? 0))) + '%';
+        if (r) el.textContent = `Succès ${Math.max(0, Math.min(100, (r.successChance || 0) + bm + (character?.karma ?? 0)))}%`;
     });
     updateHiddenRollBtn();
+    renderStats();          // stat-card thresholds bake in liveBM() + karma at render time
     renderCombatSidebar();
 }
 
@@ -2957,8 +2960,20 @@ function initAbly() {
             if (msg.name === 'presence' && d.playerId && d.playerId !== myId) {
                 knownPlayers[d.playerId] = { name: d.name, ts: Date.now() };
                 if (d.charId) {
-                    if (d.streamId) peerCameras.set(d.charId, { name: d.name || d.charId, streamId: d.streamId });
+                    if (d.streamId) peerCameras.set(d.charId, { name: d.name || d.charId, streamId: d.streamId, playerId: d.playerId, ts: Date.now() });
                     else peerCameras.delete(d.charId);
+                    updateCamerasTabVisibility();
+                }
+                return;
+            }
+            // A peer switched character: drop their Soigner entry and camera tile
+            // immediately (the GM does the same with its player card).
+            if (msg.name === 'leave') {
+                if (d.playerId && d.playerId !== myId) {
+                    delete knownPlayers[d.playerId];
+                    for (const [cid, pc] of peerCameras) {
+                        if (pc.playerId === d.playerId) peerCameras.delete(cid);
+                    }
                     updateCamerasTabVisibility();
                 }
                 return;
@@ -3122,6 +3137,20 @@ function copyOverlayUrl() {
 // Publish a card event (draw/reshuffle) to the aria-cards Ably channel.
 function publishCard(type, extra = {}) {
     if (ablyCards) ablyCards.publish(type, { ...extra, excluded: [...cardExcluded], drawn: [...cardDrawn], deckIds: cardDeck.map(c => c.id), lastCardId });
+}
+// Drop peers whose heartbeats stopped (tab closed without a leave message) so
+// stale camera tiles don't linger and the Caméras tab can auto-hide. Runs on the
+// same 5s interval as the presence heartbeat.
+function prunePeers() {
+    const now = Date.now();
+    let changed = false;
+    peerCameras.forEach((p, cid) => {
+        if (now - (p.ts || 0) > 30000) { peerCameras.delete(cid); changed = true; }
+    });
+    Object.entries(knownPlayers).forEach(([id, p]) => {
+        if (now - (p.ts || 0) > 60000) delete knownPlayers[id];
+    });
+    if (changed) updateCamerasTabVisibility();
 }
 // Publish the player's full presence heartbeat to the aria-damage channel.
 function sendPresence() {
@@ -3482,15 +3511,17 @@ function craftPotion(recipeIdx) {
     if (!recipe) return;
     character.vials = (character.vials ?? 0) - 1;
     saveCurrentCharacter();
-    pendingCraft = recipeIdx;
+    // Store the recipe id, not the index — a potion-revoke arriving before the
+    // roll resolves would shift indexes and credit the wrong recipe.
+    pendingCraft = recipe.id;
     doRoll(recipe.name, recipe.successChance || 0);
 }
 // Apply the craft roll result: add to stock on success, show toast, update inventory.
-function applyCraft(success, recipeIdx) {
+function applyCraft(success, recipeId) {
     const charAtRoll = currentCharId; // bail if the user switches characters mid-delay
     setTimeout(() => {
         if (currentCharId !== charAtRoll) return;
-        const recipe = (character.potionRecipes || [])[recipeIdx];
+        const recipe = (character.potionRecipes || []).find(r => r.id === recipeId);
         if (!recipe) return;
         if (success) {
             if (!character.potions) character.potions = [];
@@ -3840,7 +3871,8 @@ function openFileViewer(fileId) {
     const body = document.getElementById('fv-body');
     body.innerHTML = '';
     const url = _safeUrl(f.url);
-    if (url && f.type.startsWith('image/')) {
+    // f.type can be missing on a malformed grant or an old row — guard like the GM viewer.
+    if (url && f.type && f.type.startsWith('image/')) {
         const img = document.createElement('img');
         img.src = url;
         img.className = 'fv-image';
@@ -3851,7 +3883,7 @@ function openFileViewer(fileId) {
         iframe.src = url;
         iframe.className = 'fv-iframe';
         body.appendChild(iframe);
-    } else if (url && f.type.startsWith('text/')) {
+    } else if (url && f.type && f.type.startsWith('text/')) {
         const pre = document.createElement('pre');
         pre.className = 'fv-text';
         pre.textContent = 'Chargement…';

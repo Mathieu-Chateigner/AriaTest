@@ -29,6 +29,7 @@ let ablyInstance = null, ablyRolls = null, ablyCards = null, ablyDamage = null, 
 let dddiceSDK = null;            // ThreeDDice SDK instance
 let dddiceAPI = null;            // { theme } once connected
 let pendingGMRoll = null;        // { name, threshold, atk } for GM rolls in progress
+let gmRollSafetyTimer = null;    // fallback timer in case RollFinished never fires
 let dddiceResizeHandler = null;  // stored so we can remove it before re-registering
 
 // Players presence map: charId (stable UUID) -> {playerId,name,charClass,hp,maxHP,stats,ts,...}
@@ -662,6 +663,8 @@ function switchCampaign() {
     if (renderPlayerCardsTimer) { clearTimeout(renderPlayerCardsTimer); renderPlayerCardsTimer = null; }
     if (renderMonstersTimer) { clearTimeout(renderMonstersTimer); renderMonstersTimer = null; }
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch(_){} dddiceSDK = null; }
+    clearTimeout(gmRollSafetyTimer);
+    pendingGMRoll = null;
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     players.clear();
@@ -1178,6 +1181,7 @@ async function initDddice() {
             // as the GM's result (only enforced when both UUIDs are known).
             const finishedUuid = _ddRollUuid(roll);
             if (pendingGMRoll.uuid && finishedUuid && finishedUuid !== pendingGMRoll.uuid) return;
+            clearTimeout(gmRollSafetyTimer);
             const { name, threshold, atk } = pendingGMRoll;
             pendingGMRoll = null;
             const total = (roll.total_value ?? 0) === 0 ? 100 : (roll.total_value ?? 0);
@@ -1444,18 +1448,16 @@ function handlePresence(data) {
         }
     }
 }
-// Mark players as offline or remove them if they haven't sent a heartbeat recently.
+// Mark players as offline when they stop sending heartbeats. Never hard-delete
+// here: the players Map doubles as the known-players snapshot (persisted via
+// saveKnownPlayers) that repopulates the Joueurs tab offline — deleting silent
+// entries wiped restored snapshots on the first sweep after entering a campaign.
+// Explicit removal happens through the 'leave' message on character switch.
 function sweepOfflinePlayers() {
     const now = Date.now();
     let changed = false;
     players.forEach((p, id) => {
         const age = now - (p.ts || 0);
-        if (age > PRESENCE_TIMEOUT * 4) {
-            console.log('[GM] sweep: REMOVED player', p.name, '(silent for', Math.round(age/1000), 's)');
-            players.delete(id);
-            changed = true;
-            return;
-        }
         const wasOnline = p.online !== false;
         const isOnline = age < PRESENCE_TIMEOUT;
         if (wasOnline !== isOnline) {
@@ -2399,6 +2401,21 @@ function togglePlayerFilter(name) {
 // ═══════════════════════════════════════════
 //  GM ROLLS
 // ═══════════════════════════════════════════
+// Safety fallback for GM dddice rolls: if RollFinished never fires (e.g. network
+// drop after the roll was created), resolve the pending roll locally after 12s so
+// the result panel never hangs. Cleared by the RollFinished handler on success.
+function armGMRollSafetyTimer() {
+    clearTimeout(gmRollSafetyTimer);
+    gmRollSafetyTimer = setTimeout(() => {
+        if (!pendingGMRoll) return;
+        const { name, threshold, atk } = pendingGMRoll;
+        pendingGMRoll = null;
+        const roll = Math.floor(Math.random() * 100) + 1;
+        const success = roll <= threshold;
+        const dmgResult = (success && atk?.dmg?.trim()) ? rollDiceFormula(atk.dmg) : null;
+        showGMRollResult(name, threshold, roll, success, dmgResult);
+    }, 12000);
+}
 // Execute a free-threshold GM roll from the Jet MJ form.
 function doGMFreeRoll() {
     const name = document.getElementById('gm-free-name').value.trim() || 'Jet MJ';
@@ -2406,9 +2423,10 @@ function doGMFreeRoll() {
     if (isNaN(t) || t < 1 || t > 100) { alert('Seuil invalide.'); return; }
     if (dddiceSDK && dddiceAPI) {
         pendingGMRoll = { name, threshold: t, atk: null, uuid: null };
+        armGMRollSafetyTimer();
         dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }])
             .then(res => { if (pendingGMRoll) pendingGMRoll.uuid = _ddRollUuid(res); })
-            .catch(e => { console.error('dddice GM roll:', e); pendingGMRoll = null; const r = Math.floor(Math.random() * 100) + 1; showGMRollResult(name, t, r, r <= t); });
+            .catch(e => { console.error('dddice GM roll:', e); clearTimeout(gmRollSafetyTimer); pendingGMRoll = null; const r = Math.floor(Math.random() * 100) + 1; showGMRollResult(name, t, r, r <= t); });
     } else {
         const roll = Math.floor(Math.random() * 100) + 1;
         showGMRollResult(name, t, roll, roll <= t);
@@ -2425,10 +2443,12 @@ function doGMMonsterRoll() {
     const name = atk ? `${m.name} — ${atk.name}` : m ? `${m.name} (${t}%)` : `Jet MJ (${t}%)`;
     if (dddiceSDK && dddiceAPI) {
         pendingGMRoll = { name, threshold: t, atk, uuid: null };
+        armGMRollSafetyTimer();
         dddiceSDK.roll([{ type: 'd10x', theme: dddiceAPI.theme }, { type: 'd10', theme: dddiceAPI.theme }])
             .then(res => { if (pendingGMRoll) pendingGMRoll.uuid = _ddRollUuid(res); })
             .catch(e => {
                 console.error('dddice GM roll:', e);
+                clearTimeout(gmRollSafetyTimer);
                 pendingGMRoll = null;
                 const roll = Math.floor(Math.random() * 100) + 1;
                 const success = roll <= t;
@@ -2606,6 +2626,7 @@ function saveConfig() {
     }
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch (_) {} dddiceSDK = null; }
     if (dddiceResizeHandler) { window.removeEventListener('resize', dddiceResizeHandler); dddiceResizeHandler = null; }
+    clearTimeout(gmRollSafetyTimer);
     pendingGMRoll = null; dddiceAPI = null;
     // Close the old Ably connection before reinit — nulling the refs without closing
     // leaves the old WebSocket subscribed, duplicating every incoming roll/presence.
@@ -2653,7 +2674,7 @@ function renderCardHistory() {
         row.className = 'card-history-row';
         row.innerHTML = `
           <div class="chr-player">${_escHtml(entry.playerName || '?')}</div>
-          <div class="chr-card ${colorCls}">${sym} ${label}</div>
+          <div class="chr-card ${colorCls}">${sym} ${_escHtml(label)}</div>
           <div class="chr-time">${new Date(entry.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>`;
         feed.appendChild(row);
     });

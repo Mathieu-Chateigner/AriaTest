@@ -153,7 +153,8 @@ if (ABLY_KEY) {
             const widget = overlayConfig.widgets.find(w => w.id === msg.data.widgetId);
             if (!widget) return;
             widget.config = { ...widget.config, content: msg.data.content };
-            const el = document.querySelector(`.overlay-widget[data-widget-id="${msg.data.widgetId}"]`);
+            // CSS.escape: widgetId is remote — a quote in it would throw inside querySelector.
+            const el = document.querySelector(`.overlay-widget[data-widget-id="${CSS.escape(String(msg.data.widgetId))}"]`);
             if (el) el.innerHTML = renderWidgetContent(widget);
         });
     }
@@ -289,7 +290,10 @@ const SUITS_MAP = {
 
 // Build the inner HTML and metadata for a playing card from its ID.
 function buildPlayingCard(cardId) {
-    // Reconstruct card info from id
+    // Reconstruct card info from id. cardId comes from a remote aria-cards message
+    // (anyone with the Ably key can publish) — treat it as hostile: coerce to string
+    // and escape the rank before it reaches innerHTML.
+    cardId = String(cardId ?? '');
     const isJoker = cardId.startsWith('joker');
     let html = '', label = '', colorCls = '';
 
@@ -307,15 +311,16 @@ function buildPlayingCard(cardId) {
     } else {
         const parts = cardId.split('-');
         const rank = parts[0];
+        const safeRank = esc(rank);
         const suitName = parts.slice(1).join('-');
         const suit = SUITS_MAP[suitName] || { sym: '?', cls: 'pc-black' };
         colorCls = suit.cls;
         const suitNames = { spades: 'Pique', clubs: 'Trèfle', hearts: 'Cœur', diamonds: 'Carreau' };
         label = `${rank} de ${suitNames[suitName] || suitName}`;
         html = `
-          <div class="pc-corner tl"><span class="pc-rank">${rank}</span><span class="pc-suit-small">${suit.sym}</span></div>
+          <div class="pc-corner tl"><span class="pc-rank">${safeRank}</span><span class="pc-suit-small">${suit.sym}</span></div>
           <div class="pc-center">${suit.sym}</div>
-          <div class="pc-corner br"><span class="pc-rank">${rank}</span><span class="pc-suit-small">${suit.sym}</span></div>`;
+          <div class="pc-corner br"><span class="pc-rank">${safeRank}</span><span class="pc-suit-small">${suit.sym}</span></div>`;
     }
     return { html, label, colorCls };
 }
