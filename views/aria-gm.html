@@ -72,6 +72,12 @@
         </div>
     </div>
 
+    <!-- VDO.ninja push iframe (MJ) — same rules as the player's: full-viewport but
+         opacity:0, never display:none. It used to live inside the Joueurs tab, whose
+         .tab-content goes display:none on every tab switch, which can block camera
+         capture. Outside #app-wrapper so no tab/pane layout can ever hide it. -->
+    <iframe id="vdo-gm-push-frame" style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;pointer-events:none;opacity:0;" allow="camera; microphone; autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock; encrypted-media" allowfullscreen></iframe>
+
     <!-- APP -->
     <div id="app-wrapper" style="display:none;flex-direction:column;flex:1;">
 

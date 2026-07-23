@@ -48,6 +48,7 @@ let playerFilter = new Set();
 let cardHistory = [];
 let sweepIntervalId = null;
 let gmPresenceIntervalId = null;
+let gmPresenceWasOn = false;   // true once this session broadcast a VDO room to players
 let currentVdoRoom = '';
 let currentVdoRoomPassword = '';
 let gmClickHandlerRegistered = false;
@@ -656,7 +657,10 @@ function switchCampaign() {
     filesGrantedSessions.clear();
     if (sweepIntervalId) { clearInterval(sweepIntervalId); sweepIntervalId = null; }
     if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
-    publishGMPresenceOff();   // before ablyDamage is dropped — tells players to stop pushing now
+    // Tell players to stop pushing, then close. The close must wait for the ack:
+    // ablyInstance.close() right after a fire-and-forget publish drops the message
+    // (same reason the player awaits its `leave` publish in switchCharacter).
+    const offPublish = publishGMPresenceOff();
     currentVdoRoom = '';
     currentVdoRoomPassword = '';
     stopGMSelfView();
@@ -665,7 +669,10 @@ function switchCampaign() {
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch(_){} dddiceSDK = null; }
     clearTimeout(gmRollSafetyTimer);
     pendingGMRoll = null;
-    if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
+    const inst = ablyInstance;
+    const doCloseAbly = () => { if (inst) { try { inst.close(); } catch(_){} } };
+    if (offPublish?.then) offPublish.then(doCloseAbly, doCloseAbly); else doCloseAbly();
+    ablyInstance = null;
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     players.clear();
     rollFilter.clear(); playerFilter.clear();
@@ -685,6 +692,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     await tryRestoreSupabase();
 });
 
+// Closing the GM tab is the end of the camera session — tell players to stop pushing
+// instead of leaving them broadcasting for the 30s expiry. Best-effort: the browser
+// may kill the page first, which is what the players' expiry still covers.
+window.addEventListener('beforeunload', () => { publishGMPresenceOff(); });
+
 // Initialize the full GM app after a campaign is selected.
 function initApp() {
     console.log('[GM] initApp: campaign:', currentCampaignId, '| joinCode:', currentJoinCode, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
@@ -702,8 +714,7 @@ function initApp() {
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
     startGMPresenceBroadcast();
-    updateGMPushIframe();
-    startGMSelfView();
+    updateGMPushIframe();   // drives both the hidden push frame and the preview
     applyReadTable();
     if (sweepIntervalId) clearInterval(sweepIntervalId);
     sweepIntervalId = setInterval(sweepOfflinePlayers, 10000);
@@ -1254,9 +1265,19 @@ function setAblyStatus(ok) {
 // Tell players the GM camera session is over: an empty room makes them clear the
 // cached room and switch their push iframe to about:blank (releasing the webcam).
 // Players also expire the GM after 30s of silence, but this makes it immediate.
+// Returns the publish promise (or null) so callers that are about to close the Ably
+// connection can wait for the ack — a fire-and-forget publish followed by close() is
+// dropped, which is how the player's `leave` message is already handled.
 function publishGMPresenceOff() {
-    if (!ablyDamage) return;
-    ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
+    // Only meaningful if this session actually broadcast a room. Publishing
+    // unconditionally meant a second GM tab opened on the same campaign (before its
+    // room was configured) told every player "session over" and cut their cameras.
+    if (!ablyDamage || !gmPresenceWasOn) return null;
+    gmPresenceWasOn = false;
+    console.log('[GM] publishGMPresenceOff: telling players to stop pushing');
+    try {
+        return ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
+    } catch (_) { return null; }
 }
 // Start broadcasting gm-presence (streamId + VDO room) to players every 8s.
 function startGMPresenceBroadcast() {
@@ -1268,8 +1289,9 @@ function startGMPresenceBroadcast() {
         if (!currentVdoRoom) publishGMPresenceOff();
         return;
     }
-    const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
+    const gmStreamId = gmDerivedStreamId();
     const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
+    gmPresenceWasOn = true;   // this session has told players about a room — an "off" is now warranted
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
     console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmStreamId);
@@ -1298,10 +1320,16 @@ function toggleSpotlight(charId) {
     renderPlayerCards();
 }
 
+// The GM's own VDO.ninja stream ID, derived from the campaign UUID.
+function gmDerivedStreamId() {
+    return currentCampaignId ? 'aria-gm-' + currentCampaignId.slice(0, 8) : '';
+}
+
 // Build a VDO.ninja viewer URL for a player stream; room/password only appended
 // once known (an empty `&room=` would make VDO.ninja try to join a room named "").
-function gmVdoViewSrc(streamId) {
+function gmVdoViewSrc(streamId, muted) {
     let src = `https://vdo.ninja/?view=${encodeURIComponent(streamId)}&autoplay&cleanoutput`;
+    if (muted) src += '&muted';
     // &solo is required alongside &room: without it VDO.ninja ignores &view and
     // shows the "Join Room with Camera" landing page instead of the stream.
     if (currentVdoRoom) src += `&solo&room=${encodeURIComponent(currentVdoRoom)}`;
@@ -1309,49 +1337,55 @@ function gmVdoViewSrc(streamId) {
     return src;
 }
 
-// Set the GM VDO.ninja push iframe src so the GM camera streams to the room.
+// Drive the GM push iframe (#vdo-gm-push-frame, fixed + opacity:0 outside the app
+// wrapper) and the "Votre caméra" preview in the Joueurs tab.
+//
+// The push frame is deliberately NOT the preview: it used to be the visible iframe
+// inside #tab-players, and .tab-content goes display:none on every tab switch, which
+// can block camera capture. Same split as the player: hidden push + viewer preview.
 function updateGMPushIframe() {
+    const pushFrame = document.getElementById('vdo-gm-push-frame');
     const wrap = document.getElementById('gm-self-view-wrap');
     const section = document.getElementById('gm-self-view-section');
-    if (!wrap || !section) return;
+    if (!pushFrame) { console.warn('[GM] updateGMPushIframe: #vdo-gm-push-frame not found'); return; }
     if (!currentVdoRoom || !currentCampaignId) {
         console.log('[GM] updateGMPushIframe: no vdoRoom, clearing push iframe');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the GM app inside the iframe.
-        const existing = wrap.querySelector('iframe');
-        if (existing && existing.src !== 'about:blank') existing.src = 'about:blank';
+        if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
+        if (wrap) wrap.innerHTML = '';
+        if (section) section.style.display = 'none';   // no room ⇒ no empty preview box
         return;
     }
-    const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
+    const sid = gmDerivedStreamId();
     // Blank &view: "no streams will play; only publishing will be allowed" — without it
     // the push page renders every guest's video next to the GM's own preview.
-    let src = `https://vdo.ninja/?push=${gmStreamId}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
+    let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
     // Redacted: this log is routinely captured/pasted when debugging black streams,
     // and the room password is enough to join the room and watch every player.
     console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
-    let iframe = wrap.querySelector('iframe');
-    if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.allow = 'camera; microphone; autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock; encrypted-media';
-        iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-        wrap.appendChild(iframe);
+    if (pushFrame.src !== src) pushFrame.src = src;
+    // Preview: a muted viewer of our own stream, safe to hide with the tab.
+    if (wrap && section) {
+        const viewSrc = gmVdoViewSrc(sid, true);
+        let iframe = wrap.querySelector('iframe');
+        if (!iframe) {
+            iframe = document.createElement('iframe');
+            iframe.allow = 'autoplay; fullscreen';   // viewer-only
+            iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+            wrap.appendChild(iframe);
+        }
+        if (iframe.src !== viewSrc) iframe.src = viewSrc;
+        section.style.display = '';
     }
-    if (iframe.src !== src) iframe.src = src;
-    section.style.display = '';
 }
-// Show the GM self-view — the push iframe's own preview, and only when a VDO room
-// is configured. There is deliberately no native getUserMedia fallback: without a
-// room nothing is being streamed, so grabbing the webcam would light the camera LED
-// for a preview nobody asked for.
-function startGMSelfView() {
-    const section = document.getElementById('gm-self-view-section');
-    const wrap = document.getElementById('gm-self-view-wrap');
-    if (!section || !wrap) return;
-    if (currentVdoRoom && currentCampaignId) updateGMPushIframe();
-}
-// Tear down the GM self-view: drops the push iframe and hides its container.
+// Tear down the GM camera: stops publishing and drops the preview. There is
+// deliberately no native getUserMedia path anywhere — without a room nothing is
+// streamed, so grabbing the webcam would light the camera LED for nothing.
 function stopGMSelfView() {
+    const pushFrame = document.getElementById('vdo-gm-push-frame');
+    if (pushFrame && pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
     const section = document.getElementById('gm-self-view-section');
     if (section) section.style.display = 'none';
     const wrap = document.getElementById('gm-self-view-wrap');
@@ -1436,9 +1470,8 @@ function handlePresence(data) {
             publishMusicPlay(_currentTrack());
         }
         if (currentVdoRoom && ablyDamage) {
-            const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
             console.log('[GM] new session detected — sending immediate gm-presence to', data.name);
-            ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
+            ablyDamage.publish('gm-presence', { streamId: gmDerivedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
         }
     }
 }

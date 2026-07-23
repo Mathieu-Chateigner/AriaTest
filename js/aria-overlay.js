@@ -32,15 +32,35 @@ function vdoCamSrc(sid) {
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     return src;
 }
-// Re-src camera widget iframes after the room/password arrive (camera widgets are
-// skipped by updateWidgetData to avoid iframe reloads on every presence tick).
+// The GM's own stream, from gm-presence. Needed to decide whether a camera widget
+// pointed at the GM is live, since the GM never appears in presenceCache.
+let gmLiveStreamId = '';
+// Stream IDs currently being pushed: live players (presenceCache is pruned at
+// PRESENCE_MAX_AGE) plus the GM. A widget pointing anywhere else is showing a
+// stream nobody publishes.
+function liveStreamIds() {
+    const live = new Set();
+    if (gmLiveStreamId) live.add(gmLiveStreamId);
+    presenceCache.forEach(p => { if (p.streamId) live.add(p.streamId); });
+    return live;
+}
+// Re-src camera widget iframes after the room/password arrive, and swap them for a
+// placeholder when their stream stops. Camera widgets are skipped by
+// updateWidgetData to avoid iframe reloads on every presence tick, so without this
+// a disconnected player left a black rectangle on stream forever.
+// Never touches a live iframe whose src is already right — that would kill the WebRTC
+// connection and make the picture flicker on every heartbeat.
 function refreshCameraWidgets() {
+    const live = liveStreamIds();
     document.querySelectorAll('.overlay-widget').forEach(el => {
         const widget = overlayConfig.widgets.find(w => w.id === el.dataset.widgetId);
         if (!widget || widget.type !== 'camera') return;
         const sid = widget.config?.streamId || '';
-        if (!sid) return;
         const iframe = el.querySelector('iframe');
+        if (!sid || !live.has(sid)) {
+            if (iframe) el.innerHTML = '<div class="ow-camera-empty">—</div>';
+            return;
+        }
         const src = vdoCamSrc(sid);
         if (iframe) { if (iframe.src !== src) iframe.src = src; }
         else el.innerHTML = renderWidgetContent(widget);
@@ -107,8 +127,11 @@ if (ABLY_KEY) {
     dmgCh.subscribe('presence', msg => {
         const d = msg.data;
         if (d?.charId) {
+            const knownSid = presenceCache.get(d.charId)?.streamId || '';
             presenceCache.set(d.charId, { ...d, _ts: Date.now() });
             updateWidgetData();
+            // A player switching their camera on/off changes widget liveness
+            if ((d.streamId || '') !== knownSid) refreshCameraWidgets();
         }
     });
     // Drop players whose heartbeats stopped — the cache would otherwise show
@@ -119,15 +142,16 @@ if (ABLY_KEY) {
         presenceCache.forEach((p, id) => {
             if (now - (p._ts || 0) > PRESENCE_MAX_AGE) { presenceCache.delete(id); changed = true; }
         });
-        if (changed) updateWidgetData();
+        if (changed) { updateWidgetData(); refreshCameraWidgets(); }
     }, 10000);
     // The GM broadcasts the VDO room (+ password) every 8s — camera widgets need it.
     dmgCh.subscribe('gm-presence', msg => {
         const d = msg.data || {};
-        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '';
-        if (room !== vdoRoom || pw !== vdoRoomPassword) {
+        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '', gmSid = d.streamId || '';
+        if (room !== vdoRoom || pw !== vdoRoomPassword || gmSid !== gmLiveStreamId) {
             vdoRoom = room;
             vdoRoomPassword = pw;
+            gmLiveStreamId = gmSid;   // '' on the GM's "session over" broadcast
             refreshCameraWidgets();
         }
     });
@@ -716,7 +740,9 @@ function renderWidgetContent(widget) {
         }
         case 'camera': {
             const sid = cfg.streamId || '';
-            if (!sid) return '<div class="ow-camera-empty">—</div>';
+            // Same liveness rule as refreshCameraWidgets, so a layout re-render can't
+            // recreate an iframe on a stream nobody is pushing.
+            if (!sid || !liveStreamIds().has(sid)) return '<div class="ow-camera-empty">—</div>';
             // Viewer-only: the overlay never publishes, so no capture permissions.
             return `<iframe src="${vdoCamSrc(sid)}" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>`;
         }

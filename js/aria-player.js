@@ -134,7 +134,6 @@ let gmStreamId = '';
 let gmPresenceTs = 0;         // last gm-presence heartbeat — the GM broadcast is expired like a peer
 let vdoRoom = '';
 let vdoRoomPassword = '';
-let selfViewStream = null;
 // Presence density (design frame 25): 'reduit' (dots) | 'bandeau' (rail) | 'tablee' (stage)
 let presenceMode = localStorage.getItem('aria-presence-mode') || 'bandeau';
 let spotlightCharId = null;   // GM spotlight — that player's face goes big for everyone
@@ -175,7 +174,6 @@ function updatePushIframe() {
     let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(vdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     if (pushFrame.src !== src) pushFrame.src = src;
-    stopSelfView();
     updateCamerasTabVisibility();
 }
 let ablyInstance = null;
@@ -719,7 +717,6 @@ function switchCharacter() {
     vdoRoom = '';
     vdoRoomPassword = '';
     updatePushIframe();
-    stopSelfView();
     peerCameras.clear();
     gmStreamId = '';
     gmPresenceTs = 0;
@@ -734,6 +731,13 @@ function switchCharacter() {
 window.addEventListener('DOMContentLoaded', async () => {
     migrateIfNeeded();
     await tryRestoreSupabase();
+});
+
+// Closing the tab left the GM showing our card (and peers showing our camera tile)
+// until the 30s presence sweep. Best-effort only: the browser may kill the page
+// before the publish reaches the wire, which is exactly what the sweep still covers.
+window.addEventListener('beforeunload', () => {
+    if (ablyDamage) { try { ablyDamage.publish('leave', { playerId }); } catch (_) {} }
 });
 
 // Initialize the full player app after a character is selected.
@@ -1272,7 +1276,7 @@ function applyTabVisibility() {
 // Show/hide the Cameras tab based on whether any active stream IDs are known.
 function updateCamerasTabVisibility() {
     const peers = [...peerCameras.values()];
-    const hasAny = !!gmStreamId || !!selfViewStream || !!vdoRoom || peers.some(p => p.streamId);
+    const hasAny = !!gmStreamId || !!vdoRoom || peers.some(p => p.streamId);
     const btn = document.getElementById('tab-btn-cameras');
     if (!btn) return;
     btn.style.display = hasAny ? '' : 'none';
@@ -1286,25 +1290,11 @@ function updateCamerasTabVisibility() {
     renderPresenceUI();
 }
 
-// Request native camera access for the self-view preview (only when no VDO room is active).
-function startSelfView() {
-    if (vdoRoom) return;  // push iframe handles camera when VDO room is active
-    if (cameraOff) return; // player cut their own camera — never grab it behind their back
-    if (selfViewStream) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then(stream => {
-            selfViewStream = stream;
-            updateCamerasTabVisibility();
-        })
-        .catch(() => {});
-}
-// Stop all tracks of the self-view camera stream.
-function stopSelfView() {
-    if (!selfViewStream) return;
-    selfViewStream.getTracks().forEach(t => t.stop());
-    selfViewStream = null;
-}
+// There is no native getUserMedia self-view. It used to exist as a fallback for
+// "no VDO room", but the Caméras tab only appears when a room or a peer stream is
+// known, so the fallback could never bootstrap — dead code that implied the app
+// grabbed the webcam in cases where it never did. The self tile is a muted viewer
+// of our own pushed stream; the push iframe owns the camera.
 
 // ═══════════════════════════════════════════
 //  PRESENCE LAYER (design frame 25) — three densities, no separate window.
@@ -1459,7 +1449,6 @@ function vdoViewSrc(sid, muted) {
 
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
-    startSelfView();
     const grid = document.getElementById('cameras-grid');
     if (!grid) { console.warn('[VDO] renderCamerasTab: #cameras-grid not found'); return; }
     // Push failure used to be silent — the self tile just stayed black and the only
@@ -1512,42 +1501,6 @@ function renderCamerasTab() {
             } else if (existingIframe.src !== viewSrc) {
                 existingIframe.src = viewSrc;
             }
-            const lbl = selfCell.querySelector('.camera-label');
-            if (lbl) lbl.textContent = character.name || 'Vous';
-        }
-    } else if (selfViewStream) {
-        if (!selfCell) {
-            selfCell = document.createElement('div');
-            selfCell.className = 'camera-cell';
-            selfCell.dataset.self = '1';
-            const wrap = document.createElement('div');
-            wrap.className = 'camera-iframe-wrap';
-            const vid = document.createElement('video');
-            vid.autoplay = true; vid.muted = true; vid.playsInline = true;
-            vid.srcObject = selfViewStream;
-            vid.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
-            wrap.appendChild(vid);
-            const labelEl = document.createElement('div');
-            labelEl.className = 'camera-label';
-            labelEl.textContent = character.name || 'Vous';
-            selfCell.appendChild(wrap);
-            selfCell.appendChild(labelEl);
-            grid.insertBefore(selfCell, grid.firstChild);
-        } else {
-            // Reattach if the stream object changed (stopSelfView + startSelfView gives
-            // a new MediaStream): updating only the label left a dead srcObject behind.
-            let vid = selfCell.querySelector('video');
-            if (!vid) {
-                const wrap = selfCell.querySelector('.camera-iframe-wrap');
-                if (wrap) {
-                    wrap.innerHTML = '';
-                    vid = document.createElement('video');
-                    vid.autoplay = true; vid.muted = true; vid.playsInline = true;
-                    vid.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
-                    wrap.appendChild(vid);
-                }
-            }
-            if (vid && vid.srcObject !== selfViewStream) vid.srcObject = selfViewStream;
             const lbl = selfCell.querySelector('.camera-label');
             if (lbl) lbl.textContent = character.name || 'Vous';
         }
