@@ -50,7 +50,6 @@ let sweepIntervalId = null;
 let gmPresenceIntervalId = null;
 let currentVdoRoom = '';
 let currentVdoRoomPassword = '';
-let gmSelfViewStream = null;
 let gmClickHandlerRegistered = false;
 let renderPlayerCardsTimer = null;
 let renderMonstersTimer = null;
@@ -657,6 +656,7 @@ function switchCampaign() {
     filesGrantedSessions.clear();
     if (sweepIntervalId) { clearInterval(sweepIntervalId); sweepIntervalId = null; }
     if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
+    publishGMPresenceOff();   // before ablyDamage is dropped — tells players to stop pushing now
     currentVdoRoom = '';
     currentVdoRoomPassword = '';
     stopGMSelfView();
@@ -1251,10 +1251,23 @@ function setAblyStatus(ok) {
     ['ably-dot', 'cfg-ably-dot'].forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
     ['ably-status', 'cfg-ably-status'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
 }
+// Tell players the GM camera session is over: an empty room makes them clear the
+// cached room and switch their push iframe to about:blank (releasing the webcam).
+// Players also expire the GM after 30s of silence, but this makes it immediate.
+function publishGMPresenceOff() {
+    if (!ablyDamage) return;
+    ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
+}
 // Start broadcasting gm-presence (streamId + VDO room) to players every 8s.
 function startGMPresenceBroadcast() {
     if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
-    if (!currentVdoRoom || !ablyDamage) { console.log('[GM] startGMPresenceBroadcast: skipped (vdoRoom:', currentVdoRoom || 'empty', '| ablyDamage:', !!ablyDamage, ')'); return; }
+    if (!currentVdoRoom || !ablyDamage) {
+        console.log('[GM] startGMPresenceBroadcast: skipped (vdoRoom:', currentVdoRoom || 'empty', '| ablyDamage:', !!ablyDamage, ')');
+        // The room was just cleared in the config modal: without this final publish
+        // the players keep the last known room and keep streaming their webcam.
+        if (!currentVdoRoom) publishGMPresenceOff();
+        return;
+    }
     const gmStreamId = 'aria-gm-' + currentCampaignId.slice(0, 8);
     const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
     publish();
@@ -1314,7 +1327,9 @@ function updateGMPushIframe() {
     // the push page renders every guest's video next to the GM's own preview.
     let src = `https://vdo.ninja/?push=${gmStreamId}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
     if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
-    console.log('[GM] updateGMPushIframe:', src);
+    // Redacted: this log is routinely captured/pasted when debugging black streams,
+    // and the room password is enough to join the room and watch every player.
+    console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
     let iframe = wrap.querySelector('iframe');
     if (!iframe) {
         iframe = document.createElement('iframe');
@@ -1325,39 +1340,18 @@ function updateGMPushIframe() {
     if (iframe.src !== src) iframe.src = src;
     section.style.display = '';
 }
-// Show GM self-view: visible push iframe if a VDO room is configured, else native camera.
+// Show the GM self-view — the push iframe's own preview, and only when a VDO room
+// is configured. There is deliberately no native getUserMedia fallback: without a
+// room nothing is being streamed, so grabbing the webcam would light the camera LED
+// for a preview nobody asked for.
 function startGMSelfView() {
     const section = document.getElementById('gm-self-view-section');
     const wrap = document.getElementById('gm-self-view-wrap');
     if (!section || !wrap) return;
-    if (currentVdoRoom && currentCampaignId) {
-        updateGMPushIframe();
-        return;
-    }
-    if (gmSelfViewStream) return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then(stream => {
-            gmSelfViewStream = stream;
-            const w = document.getElementById('gm-self-view-wrap');
-            const s = document.getElementById('gm-self-view-section');
-            if (!w || !s) return;
-            w.innerHTML = '';
-            const vid = document.createElement('video');
-            vid.autoplay = true; vid.muted = true; vid.playsInline = true;
-            vid.srcObject = stream;
-            vid.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
-            w.appendChild(vid);
-            s.style.display = '';
-        })
-        .catch(() => {});
+    if (currentVdoRoom && currentCampaignId) updateGMPushIframe();
 }
-// Stop the GM self-view stream and hide its container.
+// Tear down the GM self-view: drops the push iframe and hides its container.
 function stopGMSelfView() {
-    if (gmSelfViewStream) {
-        gmSelfViewStream.getTracks().forEach(t => t.stop());
-        gmSelfViewStream = null;
-    }
     const section = document.getElementById('gm-self-view-section');
     if (section) section.style.display = 'none';
     const wrap = document.getElementById('gm-self-view-wrap');
@@ -1555,13 +1549,15 @@ function renderPlayerCards() {
                 </div>
               </div>`;
             grid.appendChild(card);
-            // Camera iframe for new card (wrapped for resize)
-            if (p.streamId) {
+            // Camera iframe for new card (wrapped for resize). Online only: the
+            // known-players snapshot keeps the last streamId, so offline entries
+            // would otherwise restore dead iframes on campaign load.
+            if (p.streamId && isOnline) {
                 const wrap = document.createElement('div');
                 wrap.className = 'pc-camera-wrap';
                 const iframe = document.createElement('iframe');
                 iframe.src = gmVdoViewSrc(p.streamId);
-                iframe.allow = 'autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock';
+                iframe.allow = 'autoplay; fullscreen';   // viewer-only — see the update branch
                 iframe.allowFullscreen = true;
                 iframe.className = 'pc-camera-frame';
                 wrap.appendChild(iframe);
@@ -1608,14 +1604,17 @@ function renderPlayerCards() {
             // Camera: only create/update when streamId changes, never destroy existing iframe
             const existingWrap = card.querySelector('.pc-camera-wrap');
             const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
-            if (p.streamId) {
+            if (p.streamId && isOnline) {
                 const expectedSrc = gmVdoViewSrc(p.streamId);
                 if (!existingWrap) {
                     const wrap = document.createElement('div');
                     wrap.className = 'pc-camera-wrap';
                     const iframe = document.createElement('iframe');
                     iframe.src = expectedSrc;
-                    iframe.allow = 'autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock';
+                    // Viewer-only: no camera/mic/display-capture. Only the push iframes
+                    // need capture permissions; granting them here widens what a
+                    // third-party frame could ask for, for no benefit.
+                    iframe.allow = 'autoplay; fullscreen';
                     iframe.allowFullscreen = true;
                     iframe.className = 'pc-camera-frame';
                     wrap.appendChild(iframe);

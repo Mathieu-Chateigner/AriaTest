@@ -65,8 +65,15 @@
                 </div>
 
                 <div id="prop-stream-id-wrap" style="display:none">
-                    <label class="props-label">Stream ID</label>
-                    <input type="text" id="prop-stream-id" class="props-input" placeholder="ex: monStream123">
+                    <label class="props-label">Caméra</label>
+                    <!-- Stream IDs are auto-derived from the character/campaign UUID and
+                         shown nowhere else in the app — this list is the only practical
+                         way to fill the field. Free text stays allowed. -->
+                    <select id="prop-stream-pick" class="props-input">
+                        <option value="">— choisir —</option>
+                    </select>
+                    <input type="text" id="prop-stream-id" class="props-input" placeholder="Stream ID" style="margin-top:6px;">
+                    <div id="prop-stream-hint" class="props-hint"></div>
                 </div>
 
                 <button id="btn-delete-widget" class="btn-danger">Supprimer</button>

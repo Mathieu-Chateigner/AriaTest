@@ -2755,6 +2755,17 @@ body.light-mode .other-roll-toast .ort-verdict.cs { color: var(--ember); }
 body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
 
 /* ── CAMERAS TAB ─────────────────────────── */
+.cameras-warning {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--warm);
+    background: rgba(226,90,79,0.10);
+    border: 1px solid rgba(226,90,79,0.35);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    margin-bottom: 10px;
+}
 .cameras-grid {
     display: flex;
     flex-wrap: wrap;
@@ -2828,6 +2839,10 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
 }
 .pres-pill:hover { border-color: var(--ember); color: var(--ember2); }
 .pres-pill.active { border-color: var(--ember); color: var(--ink); background: var(--ember); }
+/* Camera kill switch — reads as "off" at a glance, not as another density pill */
+.pres-pill.cam-toggle { padding: 6px 10px; font-size: 12px; letter-spacing: 0; }
+.pres-pill.cam-toggle.off { border-color: var(--bad); color: var(--bad); background: rgba(226,90,79,0.12); }
+.pres-pill.cam-toggle.off:hover { border-color: var(--bad); color: var(--bad); }
 
 /* Réduit — initials dots ("présence sans pixels") */
 .tb-presence-dots { display: flex; align-items: center; gap: 5px; margin-right: 6px; }
@@ -2844,6 +2859,8 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     flex-shrink: 0;
     cursor: default;
 }
+/* GM spotlight, shown at Réduit density too (it used to be visible only in Bandeau/Tablée) */
+.pres-dot.spotlit { border-color: var(--violet); color: var(--violet2); box-shadow: 0 0 0 2px var(--violetsoft); }
 
 /* Bandeau — face rail docked to the right edge of .main */
 #presence-rail {

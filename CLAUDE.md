@@ -183,6 +183,22 @@ The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign vi
 
 Viewer iframes (`?view=STREAMID`) do **not** need the room password — only push iframes do.
 
+**The GM broadcast is expired like a peer.** Players stamp `gmPresenceTs` on every `gm-presence`; `prunePeers()` (5s tick) clears `gmStreamId`/`vdoRoom`/`vdoRoomPassword` and calls `updatePushIframe()` after **30s** of silence. Without this the cached room lived forever and the player's push iframe kept broadcasting the webcam after the GM closed the session. The GM also publishes an **empty** `gm-presence` (`publishGMPresenceOff()`) when the room is cleared in the config modal and on `switchCampaign()` (before `ablyDamage` is dropped), so the stop is immediate rather than 30s later.
+
+**The webcam is only ever requested when something is actually shown.** `initApp()` does *not* call `startSelfView()` — only `renderCamerasTab()` does, and it early-returns while a VDO room is active (the push iframe owns the camera then). The GM has **no native `getUserMedia` fallback** at all: `startGMSelfView()` only drives the push iframe, so with no room configured no camera is opened.
+
+**Players advertise `streamId` only while pushing** (`sendPresence()` sends `''` when `vdoRoom` is empty), and `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline`. Sending it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
+
+**Players own a camera kill switch.** `cameraOff` (persisted per character in `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) gates the push iframe, the advertised `streamId`, the self tile, and `startSelfView()`. The GM decides the room; the player decides whether to publish into it. The Caméras tab states the fact when it is on.
+
+**Viewer iframes get `allow="autoplay; fullscreen"` and nothing else.** Only the push frames (`#vdo-push-frame`, `#gm-self-view-wrap`'s iframe) need `camera; microphone; display-capture`. Don't copy the push permission list onto a viewer.
+
+**The VDO room password is a shared secret, not a credential.** It is broadcast in cleartext on `aria-damage` (every subscriber gets it — players need it to push), stored plaintext in `campaigns.vdo_room_password` and localStorage. Anyone holding the Ably key — which is pasted into OBS overlay URLs — can join the room. Treat the overlay URL as sensitive. The GM's push-URL log line redacts `password=` because those logs get pasted into bug reports.
+
+**Push failure is reported, not silent.** `renderCamerasTab()` renders `#cameras-warning` when a room is active but `window.isSecureContext` is false (the `file://` case, where `getUserMedia` refuses and the player is invisible to everyone), and when the player cut their own camera.
+
+**The Bandeau rail and the Caméras grid must never both be live** — they open viewer iframes on the same streams, doubling the WebRTC connections per peer. `renderPresenceUI()` hides the rail while `tab-cameras` is in `openPanes`; `renderTabLayout()` calls `renderPresenceUI()` so docking/undocking the pane re-evaluates it.
+
 **Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `vdoViewSrc()` (player) and `gmVdoViewSrc()` (GM) append `&solo&room=...` together. The player's hidden `#vdo-push-frame` is full-viewport with `opacity:0` — never `display:none` (can block camera capture) and never visible (its self-preview shows through the app's transparent backgrounds).
 
 **Push URLs MUST include a blank `&view`** (`?push=SID&room=ROOM&view&...`) — per VDO.ninja docs, an empty `&view` means "no streams will play; only publishing will be allowed". Without it, a push page inside a room acts as a full room client and *renders every other guest's video* next to the self-preview (players appeared inside the GM's "Votre caméra" panel) and silently downloads all remote streams in the player's hidden push iframe.
@@ -191,7 +207,7 @@ Viewer iframes (`?view=STREAMID`) do **not** need the room password — only pus
 
 ### Overlay editor (`aria-overlay-editor.js`)
 
-A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every presence tick. The overlay caches `vdoRoom`/`vdoRoomPassword` from the GM's `gm-presence` broadcast and builds camera iframe URLs with `vdoCamSrc()` (`&solo&room&password` appended once known — a bare `?view=SID` stays black for streams pushed into a password-protected room); `refreshCameraWidgets()` re-srcs the iframes when the room info arrives.
+A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every presence tick. The overlay caches `vdoRoom`/`vdoRoomPassword` from the GM's `gm-presence` broadcast and builds camera iframe URLs with `vdoCamSrc()` (`&solo&room&password` appended once known — a bare `?view=SID` stays black for streams pushed into a password-protected room); `refreshCameraWidgets()` re-srcs the iframes when the room info arrives. The camera widget's stream ID is picked from a **dropdown** (`#prop-stream-pick`, filled by `availableStreams()`) — stream IDs are derived from UUIDs and shown nowhere in the panels, so the free-text field alone was unfillable. The list is rebuilt from same-origin localStorage: `aria-gm-known-players-{campaignId}` for a GM overlay, `aria-characters` for a player one. Manual entry still works and the two fields stay mirrored.
 
 ### dddice 3D dice (browser SDK)
 
@@ -248,6 +264,7 @@ Each character carries its own `id` (UUID). HP and card state are keyed by that 
 | `aria-notes-{id}` | notes `[{ id, name, content }]` |
 | `aria-player-files-{id}` | GM-granted files `[{ id, name, type, url }]` |
 | `aria-player-rolls-{id}` | local roll history (max 100, also inserted into Supabase `character_rolls`) |
+| `aria-camera-off-{id}` | `'1'` when the player cut their own camera (kill switch, survives refresh) |
 
 Tab visibility is managed separately from the character object and persisted per character ID. Helper functions `hpKey()`, `cardKey()`, `notesKey()` return the scoped key for the active character. Always use these — never hardcode the bare key. `deleteCharacter()` must remove **all** of these keys plus the Supabase rows (`characters`, `character_state`, `character_notes`, `character_files`, `character_rolls`).
 
@@ -316,7 +333,7 @@ Same payload with `hidden: true`. Published instead of `aria-rolls` while the pl
 ```
 - `playerId` — session UUID (sessionStorage, changes per tab/refresh); used only for Ably targeting
 - `charId` — character UUID (stable; never changes even if name changes); used as the key in the GM `players` Map
-- `streamId` — auto-derived as `'aria-' + charId.slice(0, 8)`; used for VDO.ninja viewer iframes
+- `streamId` — auto-derived as `'aria-' + charId.slice(0, 8)`, but sent as `''` unless a `vdoRoom` is active and `cameraOff` is false (an advertised ID nobody is pushing renders as a black iframe on every receiver); used for VDO.ninja viewer iframes
 - `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
 
 The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign type, **validates that `charId`/`playerId` are UUID-shaped** (`/^[A-Za-z0-9_-]{1,64}$/`) since they end up in element ids and inline handlers, and **coerces the numeric fields (`hp`, `maxHP`, `vials`, `karma`) via `_finiteNum()`** since those are interpolated into `innerHTML` by the player-card renders.
@@ -331,7 +348,7 @@ Sent by the player on `switchCharacter()` so the GM can drop the card immediatel
 ```js
 { streamId, vdoRoom, vdoRoomPassword, spotlightCharId }
 ```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`. Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up.
+`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`. Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up. An **all-empty** payload is the explicit "camera session over" signal (`publishGMPresenceOff()`) — players clear the room and stop pushing.
 
 ### `aria-damage` / `spotlight`
 ```js

@@ -151,6 +151,7 @@
             <button class="pres-pill" id="pres-pill-reduit" onclick="setPresenceMode('reduit')" title="Pastilles dans la barre — présence sans pixels">Réduit</button>
             <button class="pres-pill" id="pres-pill-bandeau" onclick="setPresenceMode('bandeau')" title="Rail de visages ancré au bord">Bandeau</button>
             <button class="pres-pill" id="pres-pill-tablee" onclick="setPresenceMode('tablee')" title="Pleine attention — scène de visages">Tablée</button>
+            <button class="pres-pill cam-toggle" id="pres-cam-toggle" onclick="toggleCamera()" title="Couper / rétablir ma caméra">📹</button>
         </div>
 
         <span class="rolling-ind" id="rolling-ind">Lancer…</span>
@@ -369,6 +370,7 @@
 
             <!-- CAMERAS -->
             <div class="tab-content" id="tab-cameras">
+                <div class="cameras-warning" id="cameras-warning" style="display:none;"></div>
                 <div class="cameras-grid" id="cameras-grid"></div>
             </div>
 

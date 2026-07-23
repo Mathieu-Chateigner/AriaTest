@@ -275,7 +275,59 @@ function syncPropsPanel() {
     if (hasMaxItems) document.getElementById('prop-maxitems').value = widget.config?.maxItems || 8;
     const hasStreamId = widget.type === 'camera';
     document.getElementById('prop-stream-id-wrap').style.display = hasStreamId ? '' : 'none';
-    if (hasStreamId) document.getElementById('prop-stream-id').value = widget.config?.streamId || '';
+    if (hasStreamId) {
+        document.getElementById('prop-stream-id').value = widget.config?.streamId || '';
+        refreshStreamPicker();
+    }
+}
+
+// Stream IDs are derived from UUIDs (player: 'aria-' + charId[0..8], GM:
+// 'aria-gm-' + campaignId[0..8]) and displayed nowhere in the player/GM panels, so
+// the camera widget's ID field was unfillable without the devtools. Rebuild the
+// list from the same localStorage the panels write, on the same origin.
+function availableStreams() {
+    const out = [];
+    if (OWNER_TYPE === 'gm' && OWNER_ID) {
+        out.push({ sid: 'aria-gm-' + OWNER_ID.slice(0, 8), label: 'MJ (vous)' });
+        let known = {};
+        try { known = JSON.parse(localStorage.getItem('aria-gm-known-players-' + OWNER_ID) || '{}'); } catch (_) {}
+        Object.values(known).forEach(p => {
+            if (!p?.charId) return;
+            out.push({ sid: 'aria-' + String(p.charId).slice(0, 8), label: p.name || p.charId });
+        });
+    } else if (OWNER_ID) {
+        let chars = [];
+        try { chars = JSON.parse(localStorage.getItem('aria-characters') || '[]'); } catch (_) {}
+        const me = chars.find(c => c.id === OWNER_ID);
+        out.push({ sid: 'aria-' + OWNER_ID.slice(0, 8), label: (me?.name || 'Vous') + ' (vous)' });
+    }
+    return out;
+}
+
+// Fill the picker with the detected streams and mirror the current value into it.
+function refreshStreamPicker() {
+    const pick  = document.getElementById('prop-stream-pick');
+    const input = document.getElementById('prop-stream-id');
+    const hint  = document.getElementById('prop-stream-hint');
+    if (!pick || !input) return;
+    const streams = availableStreams();
+    pick.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '— choisir —';
+    pick.appendChild(none);
+    streams.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.sid;
+        opt.textContent = s.label;   // textContent: names come from presence payloads
+        pick.appendChild(opt);
+    });
+    pick.value = streams.some(s => s.sid === input.value) ? input.value : '';
+    if (hint) {
+        hint.textContent = streams.length > 1
+            ? 'Joueurs vus au moins une fois dans cette campagne.'
+            : 'Aucun joueur détecté — ouvre le panneau MJ avec les joueurs connectés, puis rouvre cet éditeur.';
+    }
 }
 
 // Bind change and input events on all properties panel fields.
@@ -308,6 +360,18 @@ function bindPropsPanel() {
         const widget = widgets.find(w => w.id === selectedId);
         if (!widget) return;
         widget.config.streamId = document.getElementById('prop-stream-id').value.trim();
+        const pick = document.getElementById('prop-stream-pick');
+        if (pick) pick.value = [...pick.options].some(o => o.value === widget.config.streamId) ? widget.config.streamId : '';
+        scheduleAutoSave();
+    });
+
+    document.getElementById('prop-stream-pick').addEventListener('change', () => {
+        const widget = widgets.find(w => w.id === selectedId);
+        if (!widget) return;
+        const sid = document.getElementById('prop-stream-pick').value;
+        if (!sid) return;   // '— choisir —' keeps whatever was typed manually
+        widget.config.streamId = sid;
+        document.getElementById('prop-stream-id').value = sid;
         scheduleAutoSave();
     });
 

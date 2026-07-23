@@ -131,6 +131,7 @@ let dddiceRollSafetyTimer = null; // fallback timer in case RollFinished never f
 let ablyRolls = null, ablyCards = null, ablyDamage = null, ablyMusic = null, ablyRollsHidden = null;
 let peerCameras = new Map(); // charId → { name, streamId }
 let gmStreamId = '';
+let gmPresenceTs = 0;         // last gm-presence heartbeat — the GM broadcast is expired like a peer
 let vdoRoom = '';
 let vdoRoomPassword = '';
 let selfViewStream = null;
@@ -138,6 +139,21 @@ let selfViewStream = null;
 let presenceMode = localStorage.getItem('aria-presence-mode') || 'bandeau';
 let spotlightCharId = null;   // GM spotlight — that player's face goes big for everyone
 let localStageSid = '';       // locally chosen big tile in Tablée (clicking a face)
+// Player-side camera kill switch. The GM decides the room; this decides whether we
+// publish into it at all. Persisted per character so it survives a refresh — a
+// player who opted out must not be re-broadcast by the next page load.
+let cameraOff = false;
+function cameraOffKey() { return 'aria-camera-off-' + currentCharId; }
+// Toggle the local camera. Off ⇒ push iframe goes to about:blank (webcam released)
+// and presence advertises no stream ID, so no peer opens a viewer on a dead stream.
+function toggleCamera() {
+    cameraOff = !cameraOff;
+    if (currentCharId) localStorage.setItem(cameraOffKey(), cameraOff ? '1' : '0');
+    console.log('[VDO] camera', cameraOff ? 'OFF (local)' : 'ON');
+    updatePushIframe();
+    sendPresence();
+    updateCamerasTabVisibility();
+}
 // Derive the VDO.ninja push stream ID from the first 8 chars of the character UUID.
 function derivedStreamId() {
     return 'aria-' + currentCharId.slice(0, 8);
@@ -146,7 +162,7 @@ function derivedStreamId() {
 function updatePushIframe() {
     const pushFrame = document.getElementById('vdo-push-frame');
     if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
-    if (!vdoRoom || !currentCharId) {
+    if (!vdoRoom || !currentCharId || cameraOff) {
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the whole app inside the hidden iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
@@ -706,6 +722,7 @@ function switchCharacter() {
     stopSelfView();
     peerCameras.clear();
     gmStreamId = '';
+    gmPresenceTs = 0;
     spotlightCharId = null;
     localStageSid = '';
     showSelectionScreen();
@@ -723,6 +740,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 function initApp() {
     console.log('[PLAYER] initApp: char:', character.name, '| charId:', currentCharId, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     currentHP = null;
+    cameraOff = localStorage.getItem(cameraOffKey()) === '1';
     playerTabs = JSON.parse(localStorage.getItem('aria-player-tabs-' + currentCharId) || '{"cards":false,"alchemy":false}');
     playerFiles = JSON.parse(localStorage.getItem('aria-player-files-' + currentCharId) || '[]');
     initCurrentHP();
@@ -745,7 +763,9 @@ function initApp() {
     const volSlider = document.getElementById('music-bar-volume');
     if (volSlider) volSlider.value = String(musicMasterVolume);
     updatePushIframe();
-    startSelfView();
+    // No startSelfView() here: requesting the webcam at boot lit the camera LED even
+    // when no VDO room existed and the Caméras tab was never opened. renderCamerasTab()
+    // asks for it only when the tab is actually shown.
 }
 
 // Configure the overlay editor button href for this character.
@@ -840,6 +860,7 @@ function renderTabLayout() {
     // Fill the cameras grid as soon as its pane opens (renders in place —
     // heartbeats would otherwise leave a freshly docked pane empty for up to 5s).
     if (openPanes.includes('tab-cameras')) renderCamerasTab();
+    renderPresenceUI(); // the rail hides while the Caméras pane is open — see below
     updateSplitChrome();
     _persistSplit();
 }
@@ -1267,7 +1288,8 @@ function updateCamerasTabVisibility() {
 
 // Request native camera access for the self-view preview (only when no VDO room is active).
 function startSelfView() {
-    if (vdoRoom) return; // push iframe handles camera when VDO room is active
+    if (vdoRoom) return;  // push iframe handles camera when VDO room is active
+    if (cameraOff) return; // player cut their own camera — never grab it behind their back
     if (selfViewStream) return;
     if (!navigator.mediaDevices?.getUserMedia) return;
     navigator.mediaDevices.getUserMedia({ video: true, audio: false })
@@ -1307,7 +1329,7 @@ function setPresenceMode(m) {
 // The stream ID currently spotlighted by the GM ('' if none / unknown).
 function spotlightSid() {
     if (!spotlightCharId) return '';
-    if (spotlightCharId === currentCharId) return currentCharId ? derivedStreamId() : '';
+    if (spotlightCharId === currentCharId) return (currentCharId && !cameraOff) ? derivedStreamId() : '';
     return peerCameras.get(spotlightCharId)?.streamId || '';
 }
 
@@ -1319,26 +1341,46 @@ function renderPresenceUI() {
     if (ctl) ctl.style.display = hasAny ? '' : 'none';
     ['reduit', 'bandeau', 'tablee'].forEach(m =>
         document.getElementById('pres-pill-' + m)?.classList.toggle('active', presenceMode === m));
+    // Camera kill switch — only meaningful while a room is active
+    const camBtn = document.getElementById('pres-cam-toggle');
+    if (camBtn) {
+        camBtn.style.display = vdoRoom ? '' : 'none';
+        camBtn.classList.toggle('off', cameraOff);
+        camBtn.textContent = cameraOff ? '🚫' : '📹';
+        camBtn.title = cameraOff ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
+    }
     // Réduit — initials dots in the command bar ("présence sans pixels")
     const dots = document.getElementById('tb-presence-dots');
     if (dots) {
         if (hasAny && presenceMode === 'reduit') {
+            // Built with createElement/textContent: peer names come from presence
+            // payloads (anyone with the Ably key can publish them).
             const people = [];
-            if (gmStreamId) people.push('MJ');
-            peerCameras.forEach((p, charId) => { if (charId !== currentCharId && p.streamId) people.push(p.name || '?'); });
-            dots.innerHTML = people.map(n => {
-                const safe = n.replace(/[<>&"]/g, '');
-                return `<span class="pres-dot" title="${safe}">${safe.slice(0, 2).toUpperCase()}</span>`;
-            }).join('');
+            if (gmStreamId) people.push({ name: 'MJ', spotlit: false });
+            peerCameras.forEach((p, charId) => {
+                if (charId !== currentCharId && p.streamId) people.push({ name: p.name || '?', spotlit: charId === spotlightCharId });
+            });
+            dots.innerHTML = '';
+            people.forEach(pp => {
+                const dot = document.createElement('span');
+                // Réduit used to ignore the spotlight entirely — the GM highlighted a
+                // player and this density showed nothing.
+                dot.className = 'pres-dot' + (pp.spotlit ? ' spotlit' : '');
+                dot.title = pp.spotlit ? pp.name + ' — spotlight MJ' : pp.name;
+                dot.textContent = pp.name.slice(0, 2).toUpperCase();
+                dots.appendChild(dot);
+            });
             dots.style.display = people.length ? '' : 'none';
         } else {
             dots.style.display = 'none';
         }
     }
-    // Bandeau — face rail docked to the right edge
+    // Bandeau — face rail docked to the right edge. Suppressed while the Caméras
+    // pane is open: the rail and the grid would each open a viewer iframe on the
+    // same streams, doubling the WebRTC connections (and the bandwidth) per peer.
     const rail = document.getElementById('presence-rail');
     if (rail) {
-        const show = hasAny && presenceMode === 'bandeau';
+        const show = hasAny && presenceMode === 'bandeau' && !openPanes.includes('tab-cameras');
         rail.style.display = show ? '' : 'none';
         if (show) renderPresenceRail();
         else { const g = document.getElementById('presence-rail-grid'); if (g) g.innerHTML = ''; } // viewer iframes only — safe to drop
@@ -1354,13 +1396,13 @@ function renderPresenceRail() {
     const grid = document.getElementById('presence-rail-grid');
     if (!grid) return;
     const expected = new Map(); // sid → label
-    if (vdoRoom && currentCharId) expected.set(derivedStreamId(), (character.name || 'Vous'));
+    if (vdoRoom && currentCharId && !cameraOff) expected.set(derivedStreamId(), (character.name || 'Vous'));
     if (gmStreamId) expected.set(gmStreamId, 'MJ');
     peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
     [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
     const spot = spotlightSid();
     expected.forEach((label, sid) => {
-        const isSelf = vdoRoom && currentCharId && sid === derivedStreamId();
+        const isSelf = vdoRoom && currentCharId && !cameraOff && sid === derivedStreamId();
         const src = vdoViewSrc(sid, !!isSelf);
         let tile = grid.querySelector(`.pr-tile[data-sid="${CSS.escape(sid)}"]`);
         if (!tile) {
@@ -1420,9 +1462,23 @@ function renderCamerasTab() {
     startSelfView();
     const grid = document.getElementById('cameras-grid');
     if (!grid) { console.warn('[VDO] renderCamerasTab: #cameras-grid not found'); return; }
+    // Push failure used to be silent — the self tile just stayed black and the only
+    // clue was a console line. getUserMedia needs a secure context, so the file://
+    // case is detectable up front; a cut camera is stated too.
+    const warn = document.getElementById('cameras-warning');
+    if (warn) {
+        let msg = '';
+        if (vdoRoom && !window.isSecureContext) {
+            msg = '⚠ Caméra indisponible : la page doit être servie en HTTPS (page GitHub Pages) — depuis un fichier local le navigateur refuse l’accès webcam. Vous voyez les autres, ils ne vous voient pas.';
+        } else if (vdoRoom && cameraOff) {
+            msg = '📹 Votre caméra est coupée — les autres ne vous voient pas. Bouton 🚫 dans la barre du haut pour rétablir.';
+        }
+        warn.textContent = msg;
+        warn.style.display = msg ? '' : 'none';
+    }
     // Self-view: viewer of own stream when VDO room active (push is in #vdo-push-frame), native otherwise
     let selfCell = grid.querySelector('.camera-cell[data-self]');
-    if (vdoRoom && currentCharId) {
+    if (vdoRoom && currentCharId && !cameraOff) {
         const sid = derivedStreamId();
         const viewSrc = vdoViewSrc(sid, true);
         if (!selfCell) {
@@ -1478,6 +1534,20 @@ function renderCamerasTab() {
             selfCell.appendChild(labelEl);
             grid.insertBefore(selfCell, grid.firstChild);
         } else {
+            // Reattach if the stream object changed (stopSelfView + startSelfView gives
+            // a new MediaStream): updating only the label left a dead srcObject behind.
+            let vid = selfCell.querySelector('video');
+            if (!vid) {
+                const wrap = selfCell.querySelector('.camera-iframe-wrap');
+                if (wrap) {
+                    wrap.innerHTML = '';
+                    vid = document.createElement('video');
+                    vid.autoplay = true; vid.muted = true; vid.playsInline = true;
+                    vid.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+                    wrap.appendChild(vid);
+                }
+            }
+            if (vid && vid.srcObject !== selfViewStream) vid.srcObject = selfViewStream;
             const lbl = selfCell.querySelector('.camera-label');
             if (lbl) lbl.textContent = character.name || 'Vous';
         }
@@ -1526,7 +1596,8 @@ function renderCamerasTab() {
             wrap.className = 'camera-iframe-wrap';
             const iframe = document.createElement('iframe');
             iframe.src = iframeSrc;
-            iframe.allow = 'autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock';
+            // Viewer-only: no camera/mic/display-capture — only #vdo-push-frame needs those.
+            iframe.allow = 'autoplay; fullscreen';
             iframe.allowFullscreen = true;
             iframe.className = 'camera-iframe';
             wrap.appendChild(iframe);
@@ -3082,6 +3153,7 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'gm-presence') {
+                gmPresenceTs = Date.now();
                 gmStreamId = d.streamId || '';
                 if (d.spotlightCharId !== undefined) spotlightCharId = d.spotlightCharId || null;
                 if (d.vdoRoom !== undefined) {
@@ -3147,6 +3219,18 @@ function prunePeers() {
     peerCameras.forEach((p, cid) => {
         if (now - (p.ts || 0) > 30000) { peerCameras.delete(cid); changed = true; }
     });
+    // Expire the GM the same way. Without this the cached vdoRoom lives forever:
+    // the MJ tile stays on screen and — worse — the push iframe keeps broadcasting
+    // the player's webcam long after the GM closed the session.
+    if ((gmStreamId || vdoRoom) && gmPresenceTs && now - gmPresenceTs > 30000) {
+        console.log('[VDO] gm-presence expired (30s) — clearing room + stopping push');
+        gmStreamId = '';
+        vdoRoom = '';
+        vdoRoomPassword = '';
+        spotlightCharId = null;
+        updatePushIframe();   // → about:blank, camera released
+        changed = true;
+    }
     Object.entries(knownPlayers).forEach(([id, p]) => {
         if (now - (p.ts || 0) > 60000) delete knownPlayers[id];
     });
@@ -3155,7 +3239,10 @@ function prunePeers() {
 // Publish the player's full presence heartbeat to the aria-damage channel.
 function sendPresence() {
     if (!ablyDamage) return;
-    const sid = derivedStreamId();
+    // Only advertise a stream ID while the push iframe is actually publishing. Sending
+    // it unconditionally made the GM (and every peer) open a viewer iframe on a stream
+    // nobody was pushing — a permanent black box per player.
+    const sid = (vdoRoom && !cameraOff) ? derivedStreamId() : '';
     ablyDamage.publish('presence', {
         playerId, charId: currentCharId, name: character.name, charClass: character.class,
         hp: currentHP, maxHP: getMaxHP(), stats: character.stats,

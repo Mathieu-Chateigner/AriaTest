@@ -717,7 +717,8 @@ function renderWidgetContent(widget) {
         case 'camera': {
             const sid = cfg.streamId || '';
             if (!sid) return '<div class="ow-camera-empty">—</div>';
-            return `<iframe src="${vdoCamSrc(sid)}" allow="autoplay; fullscreen; display-capture; picture-in-picture; screen-wake-lock" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>`;
+            // Viewer-only: the overlay never publishes, so no capture permissions.
+            return `<iframe src="${vdoCamSrc(sid)}" allow="autoplay; fullscreen" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>`;
         }
         default: return '';
     }
