@@ -1465,7 +1465,8 @@ function renderCamerasTab() {
         warn.textContent = msg;
         warn.style.display = msg ? '' : 'none';
     }
-    // Self-view: viewer of own stream when VDO room active (push is in #vdo-push-frame), native otherwise
+    // Self tile: a muted viewer of our own pushed stream. The camera itself belongs to
+    // #vdo-push-frame; there is no native <video> path. No room, or camera cut ⇒ no self tile.
     let selfCell = grid.querySelector('.camera-cell[data-self]');
     if (vdoRoom && currentCharId && !cameraOff) {
         const sid = derivedStreamId();

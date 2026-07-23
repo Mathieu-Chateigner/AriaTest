@@ -81,7 +81,7 @@ All three apps share **one Ably key** (entered on `index.html`) and use five gam
 | `aria-rolls` | `aria-player` (per roll) | `aria-gm` (roll feed) + other `aria-player` instances (toast) + `aria-overlay` |
 | `aria-rolls-hidden` | `aria-player` (rolls made with **Jet caché** armed) | `aria-gm` only — other players and the overlay never subscribe |
 | `aria-cards` | `aria-player` or `aria-gm` | `aria-overlay` |
-| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + gm-presence for the camera widgets' VDO room + monster-state; ignores `source:'player'` damage/heal — see payloads) |
+| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch **and on tab close**, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + **leave** + gm-presence for the camera widgets' VDO room + monster-state; ignores `source:'player'` damage/heal — see payloads) |
 | `aria-music` | `aria-gm` (play/stop/pause/resume commands) | `aria-player` (subscribe only) — GM does **not** subscribe to its own commands |
 | `aria-overlay-config` | overlay editor (layout/content updates) | `aria-overlay` (receives layout changes in real time) |
 
@@ -344,7 +344,7 @@ The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinC
 ```js
 { playerId }
 ```
-Sent by the player on `switchCharacter()` and on `beforeunload` so the GM can drop the card immediately instead of waiting for the presence sweep. The unload publish is best-effort — the browser may kill the page first, which is what the 30s sweep still covers.
+Sent by the player on `switchCharacter()` and on `beforeunload`. **Both the GM and the overlay subscribe to it** — the GM drops the player card, the overlay drops the `presenceCache` entry and refreshes its camera widgets. Without the overlay half, a face and its camera stayed on stream for the full `PRESENCE_MAX_AGE` (60s) after the player left. The unload publish is best-effort — the browser may kill the page first, which is what the 30s sweep still covers.
 
 ### `aria-damage` / `gm-presence` (every 8s from GM, plus immediately for new sessions)
 ```js

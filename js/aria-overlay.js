@@ -134,6 +134,22 @@ if (ABLY_KEY) {
             if ((d.streamId || '') !== knownSid) refreshCameraWidgets();
         }
     });
+    // A player announcing its departure (character switch or tab close). The GM drops
+    // its card immediately on this message; without it here the overlay kept the face
+    // and its camera widget on stream for the full PRESENCE_MAX_AGE — 60s of black
+    // rectangle in front of the audience.
+    dmgCh.subscribe('leave', msg => {
+        const sessionId = msg.data?.playerId;
+        if (!sessionId) return;
+        for (const [charId, p] of presenceCache) {
+            if (p.playerId === sessionId) {
+                presenceCache.delete(charId);
+                updateWidgetData();
+                refreshCameraWidgets();
+                break;
+            }
+        }
+    });
     // Drop players whose heartbeats stopped — the cache would otherwise show
     // disconnected players on stream forever.
     setInterval(() => {

@@ -1000,3 +1000,8 @@ body.shake {
 .ow-roll-result { font-family: 'Cormorant Garamond', serif; font-weight: 600; }
 .ow-roll-result.success { color: var(--success); }
 .ow-roll-result.fail { color: var(--fail); }
+
+/* Camera widget placeholder — shown whenever the widget's stream isn't being pushed
+   (player disconnected, camera cut, stream ID not set yet). This is on air, so it
+   renders as nothing at all rather than a stray dash where a face used to be. */
+.ow-camera-empty { width: 100%; height: 100%; visibility: hidden; }
