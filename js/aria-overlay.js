@@ -176,12 +176,20 @@ if (ABLY_KEY) {
     // The GM broadcasts the VDO room (+ password) every 8s — camera widgets need it.
     dmgCh.subscribe('gm-presence', msg => {
         const d = msg.data || {};
-        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '', gmSid = d.streamId || '';
+        const gmSid = d.streamId || '';
+        // Only non-empty broadcasts update state. An empty payload is the GM's
+        // "session over" signal, also fired from its beforeunload — so acting on it
+        // at once cleared vdoRoom and re-src'd every live PLAYER camera iframe (their
+        // URL loses &room), flickering every camera on the OBS output on a plain GM
+        // refresh. Liveness is dropped uniformly by the GM_PRESENCE_MAX_AGE expiry
+        // below, which measures from the last real broadcast.
+        if (!gmSid) return;
         gmPresenceTs = Date.now();
+        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '';
         if (room !== vdoRoom || pw !== vdoRoomPassword || gmSid !== gmLiveStreamId) {
             vdoRoom = room;
             vdoRoomPassword = pw;
-            gmLiveStreamId = gmSid;   // '' on the GM's "session over" broadcast
+            gmLiveStreamId = gmSid;
             refreshCameraWidgets();
         }
     });
