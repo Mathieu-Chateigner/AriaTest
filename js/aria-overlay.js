@@ -33,8 +33,13 @@ function vdoCamSrc(sid) {
     return src;
 }
 // The GM's own stream, from gm-presence. Needed to decide whether a camera widget
-// pointed at the GM is live, since the GM never appears in presenceCache.
+// pointed at the GM is live, since the GM never appears in presenceCache. Expired on
+// silence like any player: the explicit "session over" broadcast never arrives if the
+// GM loses the network or crashes, and a GM camera widget would then sit black on
+// stream forever. Players are covered by the presenceCache prune.
 let gmLiveStreamId = '';
+let gmPresenceTs = 0;
+const GM_PRESENCE_MAX_AGE = 30000;   // gm-presence arrives every 8s
 // Stream IDs currently being pushed: live players (presenceCache is pruned at
 // PRESENCE_MAX_AGE) plus the GM. A widget pointing anywhere else is showing a
 // stream nobody publishes.
@@ -158,12 +163,21 @@ if (ABLY_KEY) {
         presenceCache.forEach((p, id) => {
             if (now - (p._ts || 0) > PRESENCE_MAX_AGE) { presenceCache.delete(id); changed = true; }
         });
-        if (changed) { updateWidgetData(); refreshCameraWidgets(); }
+        if (changed) updateWidgetData();
+        // Same treatment for the GM's own stream — only the widget liveness is dropped,
+        // not vdoRoom: clearing the room would change every viewer URL and re-src live
+        // player iframes for nothing.
+        if (gmLiveStreamId && gmPresenceTs && now - gmPresenceTs > GM_PRESENCE_MAX_AGE) {
+            gmLiveStreamId = '';
+            changed = true;
+        }
+        if (changed) refreshCameraWidgets();
     }, 10000);
     // The GM broadcasts the VDO room (+ password) every 8s — camera widgets need it.
     dmgCh.subscribe('gm-presence', msg => {
         const d = msg.data || {};
         const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '', gmSid = d.streamId || '';
+        gmPresenceTs = Date.now();
         if (room !== vdoRoom || pw !== vdoRoomPassword || gmSid !== gmLiveStreamId) {
             vdoRoom = room;
             vdoRoomPassword = pw;

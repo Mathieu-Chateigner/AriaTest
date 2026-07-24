@@ -1276,8 +1276,13 @@ function publishGMPresenceOff() {
     gmPresenceWasOn = false;
     console.log('[GM] publishGMPresenceOff: telling players to stop pushing');
     try {
-        return ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
-    } catch (_) { return null; }
+        const p = ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
+        // Re-arm on failure: the flag is what allows a later attempt (campaign switch,
+        // tab close) to try again. Burning it on a publish that never left would mean
+        // players only stop via the 30s expiry.
+        p?.catch?.(() => { gmPresenceWasOn = true; });
+        return p;
+    } catch (_) { gmPresenceWasOn = true; return null; }
 }
 // Start broadcasting gm-presence (streamId + VDO room) to players every 8s.
 function startGMPresenceBroadcast() {

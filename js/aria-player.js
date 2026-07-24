@@ -132,6 +132,11 @@ let ablyRolls = null, ablyCards = null, ablyDamage = null, ablyMusic = null, abl
 let peerCameras = new Map(); // charId → { name, streamId }
 let gmStreamId = '';
 let gmPresenceTs = 0;         // last gm-presence heartbeat — the GM broadcast is expired like a peer
+// Grace period before acting on the GM's explicit "session over" broadcast. Must stay
+// above the 8s gm-presence interval so a GM page refresh (which fires the same signal
+// from beforeunload) doesn't restart every player's camera.
+const GM_OFF_GRACE_MS = 12000;
+let gmOffGraceTimer = null;
 let vdoRoom = '';
 let vdoRoomPassword = '';
 // Presence density (design frame 25): 'reduit' (dots) | 'bandeau' (rail) | 'tablee' (stage)
@@ -714,6 +719,7 @@ function switchCharacter() {
     } else {
         doCloseAbly();
     }
+    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
     vdoRoom = '';
     vdoRoomPassword = '';
     updatePushIframe();
@@ -1429,6 +1435,9 @@ function applyStageMain() {
         const ifr = cell.querySelector('iframe');
         try { return ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { return ''; }
     };
+    // Forget a locally-promoted tile once its stream is gone, otherwise the stale
+    // choice silently wins again if that peer reconnects later.
+    if (localStageSid && !cells.some(c => sidOf(c) === localStageSid)) localStageSid = '';
     const want = spotlightSid() || localStageSid || gmStreamId || '';
     let main = want ? cells.find(c => sidOf(c) === want) : null;
     if (!main) main = cells[0];
@@ -3108,10 +3117,33 @@ function initAbly() {
             }
             if (msg.name === 'gm-presence') {
                 gmPresenceTs = Date.now();
+                const newRoom = d.vdoRoom === undefined ? vdoRoom : (d.vdoRoom || '');
+                // An empty room is the GM's explicit "session over". Don't tear down on
+                // the spot: the GM also emits it from beforeunload, so a simple page
+                // refresh would kill and fully restart every player's camera (iframe
+                // reload + WebRTC renegotiation). Wait out one broadcast cycle instead —
+                // GM_OFF_GRACE_MS is longer than the 8s heartbeat, so a reload never
+                // interrupts anything, while a real shutdown still stops in ~12s.
+                if (!newRoom && (vdoRoom || gmStreamId)) {
+                    if (!gmOffGraceTimer) {
+                        console.log('[VDO] GM signalled session over — stopping in', GM_OFF_GRACE_MS / 1000, 's unless it comes back');
+                        gmOffGraceTimer = setTimeout(() => {
+                            gmOffGraceTimer = null;
+                            stopGMSession('grace period elapsed after GM signalled session over');
+                            updateCamerasTabVisibility();
+                        }, GM_OFF_GRACE_MS);
+                    }
+                    return;   // keep the current room/tile until the grace period ends
+                }
+                // The GM is (still) here — cancel any pending stop.
+                if (gmOffGraceTimer) {
+                    console.log('[VDO] GM came back before the grace period elapsed — camera untouched');
+                    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
+                }
                 gmStreamId = d.streamId || '';
                 if (d.spotlightCharId !== undefined) spotlightCharId = d.spotlightCharId || null;
                 if (d.vdoRoom !== undefined) {
-                    vdoRoom = d.vdoRoom || '';
+                    vdoRoom = newRoom;
                     vdoRoomPassword = d.vdoRoomPassword || '';
                     updatePushIframe();
                 }
@@ -3164,6 +3196,18 @@ function copyOverlayUrl() {
 function publishCard(type, extra = {}) {
     if (ablyCards) ablyCards.publish(type, { ...extra, excluded: [...cardExcluded], drawn: [...cardDrawn], deckIds: cardDeck.map(c => c.id), lastCardId });
 }
+// Forget the GM camera session: MJ tile gone, room dropped, push iframe blanked
+// (which releases the webcam). Shared by the explicit "session over" broadcast and
+// by the 30s silence expiry.
+function stopGMSession(reason) {
+    console.log('[VDO] stopping GM session —', reason);
+    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
+    gmStreamId = '';
+    vdoRoom = '';
+    vdoRoomPassword = '';
+    spotlightCharId = null;
+    updatePushIframe();   // → about:blank, camera released
+}
 // Drop peers whose heartbeats stopped (tab closed without a leave message) so
 // stale camera tiles don't linger and the Caméras tab can auto-hide. Runs on the
 // same 5s interval as the presence heartbeat.
@@ -3177,12 +3221,7 @@ function prunePeers() {
     // the MJ tile stays on screen and — worse — the push iframe keeps broadcasting
     // the player's webcam long after the GM closed the session.
     if ((gmStreamId || vdoRoom) && gmPresenceTs && now - gmPresenceTs > 30000) {
-        console.log('[VDO] gm-presence expired (30s) — clearing room + stopping push');
-        gmStreamId = '';
-        vdoRoom = '';
-        vdoRoomPassword = '';
-        spotlightCharId = null;
-        updatePushIframe();   // → about:blank, camera released
+        stopGMSession('gm-presence expired (30s)');
         changed = true;
     }
     Object.entries(knownPlayers).forEach(([id, p]) => {
