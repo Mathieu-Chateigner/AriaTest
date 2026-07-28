@@ -56,6 +56,41 @@ let currentVdoRoomPassword = '';
 // for the GM to go camera-off was clearing the room — which cuts every player's
 // camera too. Persisted per campaign so it survives a refresh.
 let gmCameraOff = false;
+// Per-tab id, the GM's equivalent of the player's `playerId`. sessionStorage, so it
+// survives a reload of this tab (which lets a refreshed tab reclaim its own push
+// claim instead of locking itself out) but differs between tabs.
+let gmTabId = sessionStorage.getItem('aria-gm-tab-id');
+if (!gmTabId) { gmTabId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('aria-gm-tab-id', gmTabId); }
+// Single-pusher claim, the mirror of the player's. gmDerivedStreamId() is a pure
+// function of campaignId, so two GM tabs on one campaign would publish into the same
+// VDO room under the same ID. The TTL is deliberately the same 30s the app already
+// uses to decide a participant is gone (PRESENCE_TIMEOUT): a tab that stopped
+// renewing has also stopped broadcasting gm-presence, so there is no reason to
+// declare it dead any sooner.
+const GM_PUSH_CLAIM_TTL = 30000;
+let gmPushClaimHeld = false;
+function gmPushClaimKey() { return 'aria-gm-push-claim-' + currentCampaignId; }
+// Claim (or renew) the right to push the GM camera. Returns whether we hold it.
+function refreshGMPushClaim() {
+    if (!currentCampaignId) return false;
+    let cur = null;
+    try { cur = JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null'); } catch (_) {}
+    const heldByOther = cur && cur.tabId && cur.tabId !== gmTabId
+        && (Date.now() - (cur.ts || 0) < GM_PUSH_CLAIM_TTL);
+    if (heldByOther) return false;
+    try { localStorage.setItem(gmPushClaimKey(), JSON.stringify({ tabId: gmTabId, ts: Date.now() })); } catch (_) {}
+    return true;
+}
+// Give up the claim if it is ours, so another GM tab can push immediately.
+function releaseGMPushClaim() {
+    if (currentCampaignId) {
+        try {
+            const cur = JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null');
+            if (cur && cur.tabId === gmTabId) localStorage.removeItem(gmPushClaimKey());
+        } catch (_) {}
+    }
+    gmPushClaimHeld = false;
+}
 let gmClickHandlerRegistered = false;
 let renderPlayerCardsTimer = null;
 let renderMonstersTimer = null;
@@ -496,6 +531,9 @@ function loadCampaignState(id) {
     // Read after currentCampaignId is set — gmCameraOffKey() depends on it. A GM who
     // opted out must not be re-broadcast by the next page load.
     gmCameraOff = localStorage.getItem(gmCameraOffKey()) === '1';
+    // Same: the claim key is campaign-scoped. Taken here so the first
+    // updateGMPushIframe() in initApp already knows whether this tab may push.
+    gmPushClaimHeld = refreshGMPushClaim();
     monsters    = JSON.parse(localStorage.getItem(monstersKey())  || '[]');
     rollFeed    = JSON.parse(localStorage.getItem(rollsKey())     || '[]');
     cardHistory = JSON.parse(localStorage.getItem(cardHistKey()) || '[]');
@@ -675,6 +713,7 @@ function switchCampaign() {
     const offPublish = publishGMPresenceOff();
     currentVdoRoom = '';
     currentVdoRoomPassword = '';
+    releaseGMPushClaim();   // while currentCampaignId still resolves the key
     stopGMSelfView();
     if (renderPlayerCardsTimer) { clearTimeout(renderPlayerCardsTimer); renderPlayerCardsTimer = null; }
     if (renderMonstersTimer) { clearTimeout(renderMonstersTimer); renderMonstersTimer = null; }
@@ -712,7 +751,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 // Closing the GM tab is the end of the camera session — tell players to stop pushing
 // instead of leaving them broadcasting for the 30s expiry. Best-effort: the browser
 // may kill the page first, which is what the players' expiry still covers.
-window.addEventListener('beforeunload', () => { publishGMPresenceOff(); });
+window.addEventListener('beforeunload', () => {
+    publishGMPresenceOff();
+    // Hand the push claim over now rather than making another GM tab wait out the TTL.
+    releaseGMPushClaim();
+});
 
 // Initialize the full GM app after a campaign is selected.
 function initApp() {
@@ -1330,8 +1373,18 @@ function startGMPresenceBroadcast() {
         return;
     }
     // Computed per tick, not captured once: the kill switch and the spotlight both
-    // change between heartbeats.
-    const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
+    // change between heartbeats. The push claim is renewed on the same tick — this is
+    // the only timer that runs exactly when the GM has a room, which is exactly when
+    // pushing matters.
+    const publish = () => {
+        const had = gmPushClaimHeld;
+        gmPushClaimHeld = refreshGMPushClaim();
+        if (gmPushClaimHeld !== had) {
+            console.log('[GM] push claim', gmPushClaimHeld ? 'acquired' : 'lost to another GM tab');
+            updateGMPushIframe();
+        }
+        ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
+    };
     gmPresenceWasOn = true;   // this session has told players about a room — an "off" is now warranted
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
@@ -1421,26 +1474,37 @@ function updateGMPushIframe() {
     const section = document.getElementById('gm-self-view-section');
     if (!pushFrame) { console.warn('[GM] updateGMPushIframe: #vdo-gm-push-frame not found'); return; }
     renderGMCameraToggle();
-    if (!currentVdoRoom || !currentCampaignId || gmCameraOff) {
-        console.log('[GM] updateGMPushIframe:', gmCameraOff ? 'camera cut by the GM' : 'no vdoRoom', '— clearing push iframe');
+    // Two separate questions. `streamLive` — is the GM's stream being published at
+    // all (by this tab or a sibling)? `shouldPush` — should THIS tab own the webcam?
+    // The preview follows the first, the push frame the second, exactly as on the
+    // player side: a tab that isn't the pusher still views what its sibling publishes.
+    const sid = gmDerivedStreamId();
+    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff;
+    const shouldPush = streamLive && gmPushClaimHeld;
+    if (!shouldPush) {
+        const why = !streamLive ? (gmCameraOff ? 'camera cut by the GM' : 'no vdoRoom')
+                                : 'another GM tab holds the push claim';
+        console.log('[GM] updateGMPushIframe:', why, '— clearing push iframe');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the GM app inside the iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
-        if (wrap) wrap.innerHTML = '';
-        if (section) section.style.display = 'none';   // no room ⇒ no empty preview box
-        return;
+    } else {
+        // Blank &view: "no streams will play; only publishing will be allowed" — without it
+        // the push page renders every guest's video next to the GM's own preview.
+        let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
+        if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
+        // Redacted: this log is routinely captured/pasted when debugging black streams,
+        // and the room password is enough to join the room and watch every player.
+        console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
+        if (pushFrame.src !== src) pushFrame.src = src;
     }
-    const sid = gmDerivedStreamId();
-    // Blank &view: "no streams will play; only publishing will be allowed" — without it
-    // the push page renders every guest's video next to the GM's own preview.
-    let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
-    if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
-    // Redacted: this log is routinely captured/pasted when debugging black streams,
-    // and the room password is enough to join the room and watch every player.
-    console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
-    if (pushFrame.src !== src) pushFrame.src = src;
     // Preview: a muted viewer of our own stream, safe to hide with the tab.
     if (wrap && section) {
+        if (!streamLive) {
+            if (wrap.innerHTML) wrap.innerHTML = '';
+            section.style.display = 'none';   // nothing published ⇒ no empty preview box
+            return;
+        }
         const viewSrc = gmVdoViewSrc(sid, true);
         let iframe = wrap.querySelector('iframe');
         if (!iframe) {
@@ -2708,10 +2772,27 @@ function applyTheme(light) {
     document.body.classList.toggle('light-mode', !!light);
 }
 window.addEventListener('storage', e => {
-    if (e.key !== 'aria-config') return;
-    const newCfg = JSON.parse(e.newValue || '{}');
-    config = { ...config, ...newCfg };
-    applyTheme(!!config.lightMode);
+    if (e.key === 'aria-config') {
+        const newCfg = JSON.parse(e.newValue || '{}');
+        config = { ...config, ...newCfg };
+        applyTheme(!!config.lightMode);
+        return;
+    }
+    // The kill switch is per-campaign localStorage state read only in
+    // loadCampaignState, so a sibling GM tab never learned the camera had been cut —
+    // and since both tabs broadcast gm-presence every 8s, they alternated an empty and
+    // a real streamId, making the MJ tile appear and disappear on every player's rail
+    // (and flipping gmLiveStreamId on the OBS overlay). Fires only in the other tabs,
+    // so it never re-enters the one that toggled.
+    if (currentCampaignId && e.key === gmCameraOffKey()) {
+        const off = e.newValue === '1';
+        if (off === gmCameraOff) return;
+        gmCameraOff = off;
+        console.log('[GM] camera', gmCameraOff ? 'OFF' : 'ON', '(synced from another tab)');
+        updateGMPushIframe();
+        // No gm-presence publish here: the tab that toggled already sent one, and the
+        // 8s heartbeat carries the new streamId regardless.
+    }
 });
 // Populate the config modal inputs from the current config and campaign.
 function loadConfigInputs() {

@@ -173,9 +173,11 @@ function derivedStreamId() {
 //
 // So pushing is claimed. One tab holds a timestamped claim in localStorage and
 // refreshes it on the existing 5s presence tick; the others view normally but never
-// push and never advertise a streamId. The claim expires so a crashed tab cannot lock
-// the camera out permanently, and it is released on character switch and tab close so
-// the survivor takes over on its next tick rather than waiting out the TTL.
+// push. They DO keep advertising the streamId — see the note in sendPresence: the
+// claim decides which tab owns the webcam, not whether the stream exists. The claim
+// expires so a crashed tab cannot lock the camera out permanently, and it is released
+// on character switch and tab close so the survivor takes over on its next tick
+// rather than waiting out the TTL.
 const PUSH_CLAIM_TTL = 12000;   // > 2 presence ticks, so a live holder never lapses
 let pushClaimHeld = false;
 function pushClaimKey() { return 'aria-push-claim-' + currentCharId; }
@@ -3387,10 +3389,28 @@ function applyTheme(light) {
     document.body.classList.toggle('light-mode', !!light);
 }
 window.addEventListener('storage', e => {
-    if (e.key !== 'aria-config') return;
-    const newCfg = JSON.parse(e.newValue || '{}');
-    config = { ...config, ...newCfg };
-    applyTheme(!!config.lightMode);
+    if (e.key === 'aria-config') {
+        const newCfg = JSON.parse(e.newValue || '{}');
+        config = { ...config, ...newCfg };
+        applyTheme(!!config.lightMode);
+        return;
+    }
+    // The kill switch is per-character localStorage state, but it was read only in
+    // initApp — so a sibling tab on the same character never learned the camera had
+    // been cut. It went on advertising the streamId on its own 5s timer while the
+    // claiming tab advertised '', and since the GM keys its player cards by charId,
+    // its single card flipped between a camera tile and none every few seconds — on a
+    // stream nobody was pushing any more. (The `storage` event only fires in the
+    // *other* tabs, so this never re-enters the tab that toggled.)
+    if (currentCharId && e.key === cameraOffKey()) {
+        const off = e.newValue === '1';
+        if (off === cameraOff) return;
+        cameraOff = off;
+        console.log('[VDO] camera', cameraOff ? 'OFF' : 'ON', '(synced from another tab)');
+        updatePushIframe();
+        sendPresence();
+        updateCamerasTabVisibility();
+    }
 });
 // Populate the config modal inputs from the current config and character.
 function loadConfigInputs() {
