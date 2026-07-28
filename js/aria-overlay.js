@@ -23,6 +23,40 @@ let overlayConfig = { widgets: [] };
 let layoutFromAbly = false;
 const presenceCache = new Map();
 const PRESENCE_MAX_AGE = 60000; // heartbeats arrive every 5s; prune players gone for 60s
+
+// One character can be open in several tabs: same charId, one playerId per tab. The
+// cache is keyed by charId and holds a single playerId, so matching `leave` against it
+// dropped the face and its camera widget off the OBS output when a player merely
+// closed a second tab — restored on their next heartbeat, up to 5s of hole on stream.
+// Track sessions and only drop the entry when the last one goes.
+const presenceSessions = new Map();   // charId → Map(playerId → lastSeen ts)
+function _touchPresenceSession(charId, playerId) {
+    let s = presenceSessions.get(charId);
+    if (!s) { s = new Map(); presenceSessions.set(charId, s); }
+    s.set(playerId, Date.now());
+}
+// Which character does this session belong to? '' when unknown.
+function _charForPresenceSession(playerId) {
+    for (const [cid, s] of presenceSessions) if (s.has(playerId)) return cid;
+    for (const [cid, p] of presenceCache) if (p.playerId === playerId) return cid;
+    return '';
+}
+// Drop one session; returns a surviving live playerId, or '' when it was the last.
+// Stale sessions are pruned here too, so a tab that died without publishing `leave`
+// cannot keep a departed player on stream.
+function _dropPresenceSession(charId, playerId) {
+    const s = presenceSessions.get(charId);
+    if (!s) return '';
+    s.delete(playerId);
+    const now = Date.now();
+    let survivor = '';
+    for (const [pid, ts] of s) {
+        if (now - ts > PRESENCE_MAX_AGE) s.delete(pid);
+        else if (!survivor) survivor = pid;
+    }
+    if (!s.size) presenceSessions.delete(charId);
+    return survivor;
+}
 const rollHistory = [];
 const ROLL_HISTORY_MAX = 20;
 
@@ -148,6 +182,7 @@ if (ABLY_KEY) {
         const d = msg.data;
         if (d?.charId) {
             const knownSid = presenceCache.get(d.charId)?.streamId || '';
+            if (d.playerId) _touchPresenceSession(d.charId, d.playerId);
             presenceCache.set(d.charId, { ...d, _ts: Date.now() });
             updateWidgetData();
             // A player switching their camera on/off changes widget liveness
@@ -161,14 +196,19 @@ if (ABLY_KEY) {
     dmgCh.subscribe('leave', msg => {
         const sessionId = msg.data?.playerId;
         if (!sessionId) return;
-        for (const [charId, p] of presenceCache) {
-            if (p.playerId === sessionId) {
-                presenceCache.delete(charId);
-                updateWidgetData();
-                refreshCameraWidgets();
-                break;
-            }
+        const charId = _charForPresenceSession(sessionId);
+        if (!charId) return;
+        const survivor = _dropPresenceSession(charId, sessionId);
+        if (survivor) {
+            // Still open in another tab — that tab keeps feeding this character, so
+            // the face and its camera stay. Only the departed session is forgotten.
+            const p = presenceCache.get(charId);
+            if (p && p.playerId === sessionId) p.playerId = survivor;
+            return;
         }
+        presenceCache.delete(charId);
+        updateWidgetData();
+        refreshCameraWidgets();
     });
     // Drop players whose heartbeats stopped — the cache would otherwise show
     // disconnected players on stream forever.
@@ -177,6 +217,13 @@ if (ABLY_KEY) {
         let changed = false;
         presenceCache.forEach((p, id) => {
             if (now - (p._ts || 0) > PRESENCE_MAX_AGE) { presenceCache.delete(id); changed = true; }
+        });
+        // Same sweep for the session map, or a player who vanished without a `leave`
+        // would leave entries behind that make a later `leave` look like it has a
+        // survivor and keep a dead face on stream.
+        presenceSessions.forEach((s, id) => {
+            s.forEach((ts, pid) => { if (now - ts > PRESENCE_MAX_AGE) s.delete(pid); });
+            if (!s.size) presenceSessions.delete(id);
         });
         if (changed) updateWidgetData();
         // Same treatment for the GM's own stream — only the widget liveness is dropped,

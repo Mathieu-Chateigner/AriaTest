@@ -36,6 +36,43 @@ let dddiceResizeHandler = null;  // stored so we can remove it before re-registe
 const players = new Map();
 const PRESENCE_TIMEOUT = 30000; // 30s offline threshold
 
+// One character can be open in several tabs: same charId, one playerId per tab. The
+// card is keyed by charId and stores a single playerId (the one messages are targeted
+// at), which is whichever tab heartbeat last — so matching `leave` against it dropped
+// the card, and its live camera iframe, roughly half the time a player closed one of
+// two tabs. It also cleared the spotlight, which no later heartbeat restores.
+// So sessions are tracked per character and the card only goes when the last one does.
+const playerSessions = new Map();   // charId → Map(playerId → lastSeen ts)
+function _touchPlayerSession(charId, playerId) {
+    let s = playerSessions.get(charId);
+    if (!s) { s = new Map(); playerSessions.set(charId, s); }
+    s.set(playerId, Date.now());
+}
+// Which character does this session belong to? '' when unknown.
+function _charIdForSession(playerId) {
+    for (const [cid, s] of playerSessions) if (s.has(playerId)) return cid;
+    // Entries restored from the known-players snapshot have a playerId but never had
+    // a session recorded, so fall back to the stored one.
+    for (const [cid, p] of players) if (p.playerId === playerId) return cid;
+    return '';
+}
+// Drop one session. Returns a surviving live playerId for that character, or '' when
+// that was the last one (stale sessions are pruned on the way through — a tab that
+// crashed without publishing `leave` must not keep a card alive forever).
+function _dropPlayerSession(charId, playerId) {
+    const s = playerSessions.get(charId);
+    if (!s) return '';
+    s.delete(playerId);
+    const now = Date.now();
+    let survivor = '';
+    for (const [pid, ts] of s) {
+        if (now - ts > PRESENCE_TIMEOUT) s.delete(pid);
+        else if (!survivor) survivor = pid;
+    }
+    if (!s.size) playerSessions.delete(charId);
+    return survivor;
+}
+
 // Campaign state — loaded after selection
 let currentCampaignId = null;
 let currentJoinCode = null;
@@ -63,29 +100,48 @@ let gmTabId = sessionStorage.getItem('aria-gm-tab-id');
 if (!gmTabId) { gmTabId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('aria-gm-tab-id', gmTabId); }
 // Single-pusher claim, the mirror of the player's. gmDerivedStreamId() is a pure
 // function of campaignId, so two GM tabs on one campaign would publish into the same
-// VDO room under the same ID. The TTL is deliberately the same 30s the app already
-// uses to decide a participant is gone (PRESENCE_TIMEOUT): a tab that stopped
-// renewing has also stopped broadcasting gm-presence, so there is no reason to
-// declare it dead any sooner.
-const GM_PUSH_CLAIM_TTL = 30000;
+// VDO room under the same ID. The TTL covers ~2.5 missed renewals of the 8s
+// gm-presence tick — the same ratio the player uses (12s TTL on a 5s tick). It used
+// to be 30s to match PRESENCE_TIMEOUT, which meant a crashed pusher's stream ID stayed
+// advertised for up to 38s (TTL + one tick) while nobody published it: a black
+// rectangle on every player's rail and on the OBS output for that whole window.
+const GM_PUSH_CLAIM_TTL = 20000;
 let gmPushClaimHeld = false;
 function gmPushClaimKey() { return 'aria-gm-push-claim-' + currentCampaignId; }
+function _readGMPushClaim() {
+    if (!currentCampaignId) return null;
+    try { return JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null'); } catch (_) { return null; }
+}
+// Is SOME tab pushing the GM camera right now? Answered from the shared claim record,
+// so every tab on this campaign gets the same answer — which is what makes it safe to
+// gate the advertised stream ID on it. Gating on gmPushClaimHeld instead would have
+// the non-pushing tab advertise '' while its sibling advertises the real ID, flipping
+// the MJ tile on every player's rail every 8s.
+function gmPushClaimLive() {
+    const cur = _readGMPushClaim();
+    return !!cur && !!cur.tabId && (Date.now() - (cur.ts || 0) < GM_PUSH_CLAIM_TTL);
+}
 // Claim (or renew) the right to push the GM camera. Returns whether we hold it.
 function refreshGMPushClaim() {
     if (!currentCampaignId) return false;
-    let cur = null;
-    try { cur = JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null'); } catch (_) {}
+    const cur = _readGMPushClaim();
     const heldByOther = cur && cur.tabId && cur.tabId !== gmTabId
         && (Date.now() - (cur.ts || 0) < GM_PUSH_CLAIM_TTL);
     if (heldByOther) return false;
-    try { localStorage.setItem(gmPushClaimKey(), JSON.stringify({ tabId: gmTabId, ts: Date.now() })); } catch (_) {}
-    return true;
+    try {
+        localStorage.setItem(gmPushClaimKey(), JSON.stringify({ tabId: gmTabId, ts: Date.now() }));
+        // Read back before believing it. Two tabs that both find the slot free both
+        // write; localStorage serializes the writes, so the loser sees a foreign id
+        // here and backs off now instead of double-pushing until its next tick.
+        const back = _readGMPushClaim();
+        return !!back && back.tabId === gmTabId;
+    } catch (_) { return false; }
 }
 // Give up the claim if it is ours, so another GM tab can push immediately.
 function releaseGMPushClaim() {
     if (currentCampaignId) {
         try {
-            const cur = JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null');
+            const cur = _readGMPushClaim();
             if (cur && cur.tabId === gmTabId) localStorage.removeItem(gmPushClaimKey());
         } catch (_) {}
     }
@@ -457,6 +513,10 @@ async function tryRestoreSupabase() {
     // Only push local data back up if the load succeeded — after a failed (offline)
     // load, syncing would overwrite newer remote data with stale local state.
     if (ok) _syncAllGMData();
+    // After showSelectionScreen so the screen is the fallback if nothing is remembered
+    // (and the one we return to on "changer de campagne"). _syncAllGMData reads every
+    // campaign straight from localStorage, so it does not care that one is now active.
+    restoreLastCampaign();
 }
 
 // ═══════════════════════════════════════════
@@ -546,6 +606,7 @@ function loadCampaignState(id) {
     musicPlayingPlaylistId = null;
     musicCurrentIndex = -1;
     players.clear();
+    playerSessions.clear();
     const knownRaw = JSON.parse(localStorage.getItem(knownPlayersKey()) || '{}');
     Object.entries(knownRaw).forEach(([, p]) => {
         // Same id check as handlePresence. This snapshot is written from presence
@@ -604,16 +665,36 @@ function showApp() {
     document.getElementById('app-wrapper').style.display = 'flex';
 }
 
+// Remembered across reloads so a refresh comes straight back into the campaign.
+// Players hold their camera for GM_OFF_GRACE_MS (12s) after the GM's beforeunload
+// fires its "session over" broadcast, which only helps if the GM is broadcasting
+// again inside that window — landing on the selection screen and waiting for a click
+// blew through it, so every GM refresh tore down and restarted every player's camera.
+// Cleared by an explicit "changer de campagne", which is a deliberate exit.
+const LAST_CAMPAIGN_KEY = 'aria-gm-last-campaign';
+
 // Select a campaign, load its state, and initialize the GM app.
 function selectCampaign(id) {
     if (!loadCampaignState(id)) return;
+    localStorage.setItem(LAST_CAMPAIGN_KEY, id);
     showApp();
     initApp();
+}
+
+// Re-enter the campaign this browser was last in, if it still exists.
+function restoreLastCampaign() {
+    const id = localStorage.getItem(LAST_CAMPAIGN_KEY);
+    if (!id) return false;
+    if (!getCampaigns().some(c => c.id === id)) { localStorage.removeItem(LAST_CAMPAIGN_KEY); return false; }
+    console.log('[GM] restoring last campaign:', id);
+    selectCampaign(id);
+    return true;
 }
 
 // Delete a campaign and all its scoped localStorage data and Supabase rows.
 function deleteCampaign(id) {
     if (!confirm('Supprimer cette campagne ? Tous les monstres et données seront perdus.')) return;
+    if (localStorage.getItem(LAST_CAMPAIGN_KEY) === id) localStorage.removeItem(LAST_CAMPAIGN_KEY);
     // Delete uploaded objects from Supabase Storage first (the DB rows hold the
     // only record of their paths — removing rows first would orphan the files).
     try {
@@ -726,12 +807,14 @@ function switchCampaign() {
     ablyInstance = null;
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     players.clear();
+    playerSessions.clear();
     // Emptying the Map is not enough — nothing re-renders the grid on this path
     // (renderTabLayout doesn't touch player cards), so #players-grid kept live
     // viewer iframes on the previous campaign's players for as long as the user
     // stayed on the selection screen. With the Map empty this render clears the grid.
     renderPlayerCards();
     rollFilter.clear(); playerFilter.clear();
+    localStorage.removeItem(LAST_CAMPAIGN_KEY);   // deliberate exit — don't auto-re-enter
     currentCampaignId = null;
     currentCampaignType = 'ancient';
     gmSpotlightCharId = null;
@@ -1310,27 +1393,35 @@ function initAbly() {
         ablyDamage.subscribe('leave', msg => {
             const sessionId = msg.data?.playerId;
             if (!sessionId) return;
-            for (const [key, p] of players) {
-                if (p.playerId === sessionId) {
-                    console.log('[GM] player LEFT (Ably leave):', p.name, '| charId:', key);
-                    players.delete(key);
-                    // Drop the spotlight with the card. It is only ever cleared by
-                    // clicking ☀ again or switching campaign, so a spotlight on a
-                    // departed player stayed armed forever — invisible, since the card
-                    // carrying the ☀ state is gone, and it silently re-applied if that
-                    // player came back. Deliberately NOT done by sweepOfflinePlayers:
-                    // `leave` is an explicit departure, while a silent sweep is usually
-                    // a network blip and the spotlight should survive it. The cost is
-                    // that a player refreshing their page (beforeunload publishes
-                    // `leave` too) loses the spotlight and the GM re-clicks.
-                    if (gmSpotlightCharId === key) {
-                        gmSpotlightCharId = null;
-                        try { ablyDamage.publish('spotlight', { charId: null }); } catch (_) {}
-                    }
-                    renderPlayerCards();
-                    break;
-                }
+            const key = _charIdForSession(sessionId);
+            if (!key) return;
+            const survivor = _dropPlayerSession(key, sessionId);
+            if (survivor) {
+                // Another tab on the same character is still alive. Keep the card and
+                // its camera iframe; just retarget damage/heal/grants at the surviving
+                // session, since the departed one will never read them again.
+                const p = players.get(key);
+                if (p && p.playerId === sessionId) { p.playerId = survivor; saveKnownPlayers(); }
+                console.log('[GM] session left but character still open in another tab:', p?.name, '| charId:', key);
+                return;
             }
+            const p = players.get(key);
+            console.log('[GM] player LEFT (Ably leave):', p?.name, '| charId:', key);
+            players.delete(key);
+            // Drop the spotlight with the card. It is otherwise only cleared by
+            // clicking ☀ again or switching campaign, so a spotlight on a departed
+            // player stayed armed forever — invisible, since the card carrying the ☀
+            // state is gone — and silently re-applied if that player came back.
+            // Deliberately NOT done by sweepOfflinePlayers: `leave` is an explicit
+            // departure, while a silent sweep is usually a network blip the spotlight
+            // should survive. The cost is that a player refreshing their page
+            // (beforeunload publishes `leave` too) loses the spotlight and the GM
+            // re-clicks — but no longer when they merely close a second tab.
+            if (gmSpotlightCharId === key) {
+                gmSpotlightCharId = null;
+                try { ablyDamage.publish('spotlight', { charId: null }); } catch (_) {}
+            }
+            renderPlayerCards();
         });
         console.log('[GM] initAbly: subscribed to all channels');
     } catch (e) { console.error('[GM] initAbly error:', e); setAblyStatus(false); }
@@ -1388,7 +1479,7 @@ function startGMPresenceBroadcast() {
     gmPresenceWasOn = true;   // this session has told players about a room — an "off" is now warranted
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
-    console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmStreamId);
+    console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmAdvertisedStreamId());
 }
 // ═══════════════════════════════════════════
 //  PRESENCE — "Lire la table" + Spotlight (design frame 26)
@@ -1423,8 +1514,14 @@ function gmDerivedStreamId() {
 // receiver open a viewer iframe on a dead stream — a black box on each player's rail
 // and, worse, on the OBS output. The room stays in the payload, so this is NOT the
 // all-empty "session over" signal and players keep publishing their own cameras.
+//
+// Also empty when the claim record has gone stale, which is the only cross-tab
+// evidence available that nobody is pushing: if the claiming tab crashes (no
+// beforeunload, so no release), this stops advertising a dead stream after the TTL
+// instead of leaving receivers on a black tile until the survivor takes over. The
+// record is shared, so both tabs answer identically and the tile never flips.
 function gmAdvertisedStreamId() {
-    return gmCameraOff ? '' : gmDerivedStreamId();
+    return (gmCameraOff || !gmPushClaimLive()) ? '' : gmDerivedStreamId();
 }
 function gmCameraOffKey() { return 'aria-gm-camera-off-' + currentCampaignId; }
 // Cut / restore the GM camera. Off ⇒ push iframe to about:blank (webcam released),
@@ -1479,11 +1576,14 @@ function updateGMPushIframe() {
     // The preview follows the first, the push frame the second, exactly as on the
     // player side: a tab that isn't the pusher still views what its sibling publishes.
     const sid = gmDerivedStreamId();
-    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff;
-    const shouldPush = streamLive && gmPushClaimHeld;
+    // gmPushClaimLive(): a preview is a viewer of our own stream, so it is only worth
+    // showing while some tab is publishing it — same rule as the advertised ID.
+    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushClaimLive();
+    const shouldPush = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushClaimHeld;
     if (!shouldPush) {
-        const why = !streamLive ? (gmCameraOff ? 'camera cut by the GM' : 'no vdoRoom')
-                                : 'another GM tab holds the push claim';
+        const why = gmCameraOff ? 'camera cut by the GM'
+                  : !currentVdoRoom ? 'no vdoRoom'
+                  : 'another GM tab holds the push claim';
         console.log('[GM] updateGMPushIframe:', why, '— clearing push iframe');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the GM app inside the iframe.
@@ -1592,6 +1692,7 @@ function handlePresence(data) {
     // karma-set with ±1 and clobber the player's real karma). After seeding, the
     // GM's local value stays authoritative — the GM is the only karma writer.
     if (!(data.charId in gmKarma)) gmKarma[data.charId] = _finiteNum(data.karma) ?? 0;
+    _touchPlayerSession(data.charId, data.playerId);
     players.set(data.charId, playerData);
     saveKnownPlayers();
     syncKnownPlayer(data.charId, playerData);
