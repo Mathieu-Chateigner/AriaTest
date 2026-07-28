@@ -51,6 +51,11 @@ let gmPresenceIntervalId = null;
 let gmPresenceWasOn = false;   // true once this session broadcast a VDO room to players
 let currentVdoRoom = '';
 let currentVdoRoomPassword = '';
+// GM-side camera kill switch, the mirror of the player's `cameraOff`. The GM decides
+// the room; this decides whether the GM publishes into it. Without it the only way
+// for the GM to go camera-off was clearing the room — which cuts every player's
+// camera too. Persisted per campaign so it survives a refresh.
+let gmCameraOff = false;
 let gmClickHandlerRegistered = false;
 let renderPlayerCardsTimer = null;
 let renderMonstersTimer = null;
@@ -488,6 +493,9 @@ function loadCampaignState(id) {
     currentCampaignType = camp.ariaType || 'ancient';
     currentVdoRoom = camp.vdoRoom || '';
     currentVdoRoomPassword = camp.vdoRoomPassword || '';
+    // Read after currentCampaignId is set — gmCameraOffKey() depends on it. A GM who
+    // opted out must not be re-broadcast by the next page load.
+    gmCameraOff = localStorage.getItem(gmCameraOffKey()) === '1';
     monsters    = JSON.parse(localStorage.getItem(monstersKey())  || '[]');
     rollFeed    = JSON.parse(localStorage.getItem(rollsKey())     || '[]');
     cardHistory = JSON.parse(localStorage.getItem(cardHistKey()) || '[]');
@@ -1299,8 +1307,9 @@ function startGMPresenceBroadcast() {
         if (!currentVdoRoom) publishGMPresenceOff();
         return;
     }
-    const gmStreamId = gmDerivedStreamId();
-    const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmStreamId, vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
+    // Computed per tick, not captured once: the kill switch and the spotlight both
+    // change between heartbeats.
+    const publish = () => { ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId }); };
     gmPresenceWasOn = true;   // this session has told players about a room — an "off" is now warranted
     publish();
     gmPresenceIntervalId = setInterval(publish, 8000);
@@ -1334,6 +1343,37 @@ function toggleSpotlight(charId) {
 function gmDerivedStreamId() {
     return currentCampaignId ? 'aria-gm-' + currentCampaignId.slice(0, 8) : '';
 }
+// What gm-presence actually advertises. Empty while the camera is cut, for the same
+// reason the player sends an empty streamId then: an ID nobody is pushing makes every
+// receiver open a viewer iframe on a dead stream — a black box on each player's rail
+// and, worse, on the OBS output. The room stays in the payload, so this is NOT the
+// all-empty "session over" signal and players keep publishing their own cameras.
+function gmAdvertisedStreamId() {
+    return gmCameraOff ? '' : gmDerivedStreamId();
+}
+function gmCameraOffKey() { return 'aria-gm-camera-off-' + currentCampaignId; }
+// Cut / restore the GM camera. Off ⇒ push iframe to about:blank (webcam released),
+// preview dropped, and an immediate gm-presence so players drop the MJ tile now
+// rather than on the next 8s tick.
+function toggleGMCamera() {
+    gmCameraOff = !gmCameraOff;
+    if (currentCampaignId) localStorage.setItem(gmCameraOffKey(), gmCameraOff ? '1' : '0');
+    console.log('[GM] camera', gmCameraOff ? 'OFF (local)' : 'ON');
+    updateGMPushIframe();
+    if (ablyDamage && currentVdoRoom) {
+        ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
+    }
+}
+// Sync the topbar kill-switch button. Only meaningful while a room is active — with
+// no room nothing is published either way, so the control would be a no-op.
+function renderGMCameraToggle() {
+    const btn = document.getElementById('tb-cam-toggle');
+    if (!btn) return;
+    btn.style.display = currentVdoRoom ? '' : 'none';
+    btn.classList.toggle('off', gmCameraOff);
+    btn.textContent = gmCameraOff ? '🚫' : '📹';
+    btn.title = gmCameraOff ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
+}
 
 // Build a VDO.ninja viewer URL for a player stream; room/password only appended
 // once known (an empty `&room=` would make VDO.ninja try to join a room named "").
@@ -1358,8 +1398,9 @@ function updateGMPushIframe() {
     const wrap = document.getElementById('gm-self-view-wrap');
     const section = document.getElementById('gm-self-view-section');
     if (!pushFrame) { console.warn('[GM] updateGMPushIframe: #vdo-gm-push-frame not found'); return; }
-    if (!currentVdoRoom || !currentCampaignId) {
-        console.log('[GM] updateGMPushIframe: no vdoRoom, clearing push iframe');
+    renderGMCameraToggle();
+    if (!currentVdoRoom || !currentCampaignId || gmCameraOff) {
+        console.log('[GM] updateGMPushIframe:', gmCameraOff ? 'camera cut by the GM' : 'no vdoRoom', '— clearing push iframe');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the GM app inside the iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
@@ -1481,7 +1522,7 @@ function handlePresence(data) {
         }
         if (currentVdoRoom && ablyDamage) {
             console.log('[GM] new session detected — sending immediate gm-presence to', data.name);
-            ablyDamage.publish('gm-presence', { streamId: gmDerivedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
+            ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
         }
     }
 }

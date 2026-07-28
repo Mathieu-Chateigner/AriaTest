@@ -186,15 +186,21 @@ if (ABLY_KEY) {
     dmgCh.subscribe('gm-presence', msg => {
         const d = msg.data || {};
         const gmSid = d.streamId || '';
-        // Only non-empty broadcasts update state. An empty payload is the GM's
-        // "session over" signal, also fired from its beforeunload — so acting on it
-        // at once cleared vdoRoom and re-src'd every live PLAYER camera iframe (their
-        // URL loses &room), flickering every camera on the OBS output on a plain GM
-        // refresh. Liveness is dropped uniformly by the GM_PRESENCE_MAX_AGE expiry
-        // below, which measures from the last real broadcast.
-        if (!gmSid) return;
-        gmPresenceTs = Date.now();
         const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '';
+        // The ALL-empty payload is the GM's "session over" signal, also fired from its
+        // beforeunload — so acting on it at once cleared vdoRoom and re-src'd every
+        // live PLAYER camera iframe (their URL loses &room), flickering every camera on
+        // the OBS output on a plain GM refresh. It is ignored here; liveness is dropped
+        // uniformly by the GM_PRESENCE_MAX_AGE expiry below, measured from the last
+        // real broadcast.
+        //
+        // An empty streamId with a room still set is a different thing: the GM cut its
+        // own camera (kill switch) while the session continues. That must be acted on —
+        // waiting for the 30s expiry would leave the GM's widget as a black rectangle on
+        // stream. Only gmLiveStreamId changes, so player widgets keep their URL and are
+        // left untouched.
+        if (!gmSid && !room) return;
+        gmPresenceTs = Date.now();
         if (room !== vdoRoom || pw !== vdoRoomPassword || gmSid !== gmLiveStreamId) {
             vdoRoom = room;
             vdoRoomPassword = pw;

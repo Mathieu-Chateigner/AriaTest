@@ -193,6 +193,8 @@ The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign vi
 
 **Players own a camera kill switch.** `cameraOff` (persisted per character in `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) gates the push iframe, the advertised `streamId`, the self tile and the rail entry. The GM decides the room; the player decides whether to publish into it. The Caméras tab states the fact when it is on.
 
+**The GM owns the mirror-image kill switch.** `gmCameraOff` (persisted per campaign in `aria-gm-camera-off-{campaignId}`, toggled by `toggleGMCamera()` from the `📹` button in the topbar next to *Lire la table*) gates the push iframe, the "Votre caméra" preview, and the `streamId` advertised in `gm-presence` — via `gmAdvertisedStreamId()`, which every `gm-presence` publish site must use instead of `gmDerivedStreamId()`. Without it the GM's only way to go camera-off was clearing the room, which cuts **every** player's camera too. Cutting the GM camera is deliberately **not** a session-over signal: the payload keeps its `vdoRoom`, so players go on publishing and only the MJ tile disappears. `renderGMCameraToggle()` hides the button when no room is set (nothing is published either way, so it would be a no-op).
+
 **Viewer iframes get `allow="autoplay; fullscreen"` and nothing else.** Only the push frames (`#vdo-push-frame`, `#gm-self-view-wrap`'s iframe) need `camera; microphone; display-capture`. Don't copy the push permission list onto a viewer.
 
 **The VDO room password is a shared secret, not a credential.** It is broadcast in cleartext on `aria-damage` (every subscriber gets it — players need it to push), stored plaintext in `campaigns.vdo_room_password` and localStorage. Anyone holding the Ably key — which is pasted into OBS overlay URLs — can join the room. Treat the overlay URL as sensitive. The GM's push-URL log line redacts `password=` because those logs get pasted into bug reports.
@@ -350,7 +352,11 @@ Sent by the player on `switchCharacter()` and on `beforeunload`. **Both the GM a
 ```js
 { streamId, vdoRoom, vdoRoomPassword, spotlightCharId }
 ```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`. Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up. An **all-empty** payload is the explicit "camera session over" signal (`publishGMPresenceOff()`) — players clear the room and stop pushing.
+`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on (`gmAdvertisedStreamId()`). Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up.
+
+Two different "empty" payloads — do not conflate them:
+- **All-empty** (`streamId` *and* `vdoRoom` empty) is the explicit "camera session over" signal (`publishGMPresenceOff()`) — players clear the room and stop pushing (after `GM_OFF_GRACE_MS`), and the overlay ignores it entirely.
+- **Empty `streamId`, room still set** is the GM kill switch mid-session. Players drop the MJ tile and keep publishing; the overlay acts on it at once (`if (!gmSid && !room) return;`) so the GM's camera widget swaps to the placeholder instead of sitting black for the 30s `GM_PRESENCE_MAX_AGE`. Only `gmLiveStreamId` changes, so player widget URLs are untouched and their streams survive.
 
 ### `aria-damage` / `spotlight`
 ```js

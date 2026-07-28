@@ -219,6 +219,25 @@ body::after {
 .tb-read-table:hover { background: var(--violetsoft); }
 .tb-read-table.on { border-color: var(--violet); background: rgba(169,139,221,.18); }
 .tb-read-table.on .trt-on { display: inline; }
+/* Camera kill switch — same pill shape as "Lire la table", compact, and reading as
+   "off" at a glance rather than as another neutral toggle. */
+.tb-cam-toggle {
+    display: flex;
+    align-items: center;
+    background: transparent;
+    border: 1px solid rgba(169,139,221,.4);
+    border-radius: 20px;
+    padding: 6px 11px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--violet2);
+    flex-shrink: 0;
+    transition: background .15s, border-color .15s;
+}
+.tb-cam-toggle:hover { background: var(--violetsoft); }
+.tb-cam-toggle.off { border-color: var(--bad); background: rgba(226,90,79,.12); }
+.tb-cam-toggle.off:hover { border-color: var(--bad); background: rgba(226,90,79,.18); }
 /* Music mini chip — now-playing track in the command bar (design frame 12) */
 .tb-music-chip {
     display: flex;

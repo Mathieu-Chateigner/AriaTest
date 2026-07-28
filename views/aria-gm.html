@@ -91,6 +91,9 @@
         <button class="tb-read-table" id="tb-read-table" onclick="toggleReadTable()" title="Agrandir les visages des joueurs">
             <span class="trt-icon">⌗</span> Lire la table<span class="trt-on">· on</span>
         </button>
+        <!-- camera kill switch — the GM decides the room, this decides whether the GM
+             publishes into it. Shown only while a room is active (renderGMCameraToggle). -->
+        <button class="tb-cam-toggle" id="tb-cam-toggle" onclick="toggleGMCamera()" style="display:none;" title="Couper ma caméra">📹</button>
         <!-- music mini chip (design frame 12) — shows the now-playing track -->
         <div class="tb-music-chip" id="tb-music-chip" style="visibility:hidden;" title="Piste en cours">
             <span class="tb-music-note">♪</span>
