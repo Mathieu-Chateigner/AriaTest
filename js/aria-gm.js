@@ -510,7 +510,11 @@ function loadCampaignState(id) {
     players.clear();
     const knownRaw = JSON.parse(localStorage.getItem(knownPlayersKey()) || '{}');
     Object.entries(knownRaw).forEach(([, p]) => {
-        if (!p.charId) return;
+        // Same id check as handlePresence. This snapshot is written from presence
+        // payloads, but entries persisted before that validation existed can hold
+        // anything — and they land in the same element ids and inline handlers, so
+        // the guard has to cover this path too, not just the live one.
+        if (!p.charId || !_isIdToken(p.charId) || (p.playerId && !_isIdToken(p.playerId))) return;
         players.set(p.charId, { ...p, online: false });
     });
     console.log('[GM] loadCampaignState:', camp.name, '| joinCode:', currentJoinCode, '| type:', currentCampaignType, '| vdoRoom:', currentVdoRoom || '(none)', '| monsters:', monsters.length, '| knownPlayers:', players.size, '| playlists:', gmPlaylists.length, '| music tracks:', _allTracks().length, '| files:', gmFiles.length);
@@ -1486,9 +1490,7 @@ function publishMusicResume() {
 // Process a player presence heartbeat: update the players Map and trigger card/music/file grants.
 function handlePresence(data) {
     if (!data?.playerId || !data?.charId) { console.warn('[GM] handlePresence: missing playerId or charId', data); return; }
-    // charId/playerId are interpolated into element ids and inline handlers — only
-    // accept UUID-shaped tokens so a crafted presence message can't inject markup.
-    if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(data.charId)) || !/^[A-Za-z0-9_-]{1,64}$/.test(String(data.playerId))) {
+    if (!_isIdToken(data.charId) || !_isIdToken(data.playerId)) {
         console.warn('[GM] handlePresence: IGNORED (malformed charId/playerId)', data.charId, data.playerId);
         return;
     }
@@ -1587,7 +1589,10 @@ function renderPlayerCards() {
         const stateCls = dead ? ' is-dead' : (critical ? ' hp-critical' : '');
         const stats = p.stats || {};
         const k = gmKarma[charId] ?? 0;
-        let card = grid.querySelector(`[data-char-id="${charId}"]`);
+        // CSS.escape like playerCardEl() does: an unescaped quote here throws, and the
+        // exception propagates out of players.forEach — killing the whole render, and
+        // the next one, so the Joueurs tab would freeze and camera iframes with it.
+        let card = grid.querySelector(`[data-char-id="${CSS.escape(charId)}"]`);
         if (!card) {
             // First render: build full card structure
             card = document.createElement('div');
@@ -1640,7 +1645,11 @@ function renderPlayerCards() {
                 const wrap = document.createElement('div');
                 wrap.className = 'pc-camera-wrap';
                 const iframe = document.createElement('iframe');
-                iframe.src = gmVdoViewSrc(p.streamId);
+                // Explicitly unmuted, like the player's peer tiles: the rule is "mute
+                // your own stream, never anyone else's". Only the GM's own preview
+                // passes muted:true. Moot while every push URL carries &noaudio, but
+                // muting the table here is what you'd get wrong when enabling audio.
+                iframe.src = gmVdoViewSrc(p.streamId, false);
                 iframe.allow = 'autoplay; fullscreen';   // viewer-only — see the update branch
                 iframe.allowFullscreen = true;
                 iframe.className = 'pc-camera-frame';
@@ -1689,7 +1698,7 @@ function renderPlayerCards() {
             const existingWrap = card.querySelector('.pc-camera-wrap');
             const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
             if (p.streamId && isOnline) {
-                const expectedSrc = gmVdoViewSrc(p.streamId);
+                const expectedSrc = gmVdoViewSrc(p.streamId, false);   // unmuted — see the create branch
                 if (!existingWrap) {
                     const wrap = document.createElement('div');
                     wrap.className = 'pc-camera-wrap';
@@ -3215,6 +3224,11 @@ function _safeUrl(u) { const s = String(u ?? '').trim(); return /^https?:\/\//i.
 // attacker-controllable (anyone with the Ably key) — numbers interpolated into
 // innerHTML must never pass through as strings.
 function _finiteNum(v) { if (v === null || v === undefined || v === '') return null; const n = +v; return Number.isFinite(n) ? n : null; }
+// charId / playerId end up in element ids, CSS selectors and single-quoted inline
+// handlers, so only UUID-shaped tokens are ever accepted. Shared by handlePresence
+// (live payloads) and loadCampaignState (the persisted known-players snapshot) —
+// both feed the same `players` Map and the same renders.
+function _isIdToken(v) { return /^[A-Za-z0-9_-]{1,64}$/.test(String(v)); }
 // Render a skill/special percentage for the player-details modal, folding in the
 // player's per-skill permanent modifier (s.bonus) and annotating it when non-zero.
 function _pdmSkillPct(s) {
