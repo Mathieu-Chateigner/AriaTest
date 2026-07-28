@@ -162,11 +162,55 @@ function toggleCamera() {
 function derivedStreamId() {
     return 'aria-' + currentCharId.slice(0, 8);
 }
+
+// ── Single-pusher claim ────────────────────────────────────────────────────────
+// The push stream ID is a pure function of charId, so two tabs open on the same
+// character would publish into the same VDO.ninja room under the same ID — undefined
+// behaviour there — while their two presence heartbeats (same charId, different
+// playerId) fight over the GM's single player card: whichever tab closes first
+// publishes `leave`, and if its playerId is the one currently stored the GM drops the
+// card and kills its camera iframe, rebuilt only on the next heartbeat.
+//
+// So pushing is claimed. One tab holds a timestamped claim in localStorage and
+// refreshes it on the existing 5s presence tick; the others view normally but never
+// push and never advertise a streamId. The claim expires so a crashed tab cannot lock
+// the camera out permanently, and it is released on character switch and tab close so
+// the survivor takes over on its next tick rather than waiting out the TTL.
+const PUSH_CLAIM_TTL = 12000;   // > 2 presence ticks, so a live holder never lapses
+let pushClaimHeld = false;
+function pushClaimKey() { return 'aria-push-claim-' + currentCharId; }
+// Claim (or renew) the right to push for this character. Returns whether we hold it.
+function refreshPushClaim() {
+    if (!currentCharId) return false;
+    let cur = null;
+    try { cur = JSON.parse(localStorage.getItem(pushClaimKey()) || 'null'); } catch (_) {}
+    const heldByOther = cur && cur.playerId && cur.playerId !== playerId
+        && (Date.now() - (cur.ts || 0) < PUSH_CLAIM_TTL);
+    if (heldByOther) return false;
+    try { localStorage.setItem(pushClaimKey(), JSON.stringify({ playerId, ts: Date.now() })); } catch (_) {}
+    return true;
+}
+// True when this character's stream is being published — the precondition for a self
+// tile, which is just a muted viewer of it. Not gated on the claim: a tab that isn't
+// the pusher still views the stream its sibling tab publishes, so its self tile works
+// exactly like any other viewer.
+function selfStreamLive() {
+    return !!vdoRoom && !!currentCharId && !cameraOff;
+}
+// Give up the claim if it is ours, so another tab can push immediately.
+function releasePushClaim() {
+    if (!currentCharId) return;
+    try {
+        const cur = JSON.parse(localStorage.getItem(pushClaimKey()) || 'null');
+        if (cur && cur.playerId === playerId) localStorage.removeItem(pushClaimKey());
+    } catch (_) {}
+    pushClaimHeld = false;
+}
 // Set the VDO.ninja push iframe src — iframe is full-viewport before #app-wrapper in DOM so browser grants camera access.
 function updatePushIframe() {
     const pushFrame = document.getElementById('vdo-push-frame');
     if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
-    if (!vdoRoom || !currentCharId || cameraOff) {
+    if (!vdoRoom || !currentCharId || cameraOff || !pushClaimHeld) {
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the whole app inside the hidden iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
@@ -719,6 +763,7 @@ function switchCharacter() {
     } else {
         doCloseAbly();
     }
+    releasePushClaim();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     showSelectionScreen();
 }
@@ -758,6 +803,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 // before the publish reaches the wire, which is exactly what the sweep still covers.
 window.addEventListener('beforeunload', () => {
     if (ablyDamage) { try { ablyDamage.publish('leave', { playerId }); } catch (_) {} }
+    // Hand the push claim over now rather than making another tab wait out the TTL.
+    releasePushClaim();
 });
 
 // Initialize the full player app after a character is selected.
@@ -765,6 +812,8 @@ function initApp() {
     console.log('[PLAYER] initApp: char:', character.name, '| charId:', currentCharId, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     currentHP = null;
     cameraOff = localStorage.getItem(cameraOffKey()) === '1';
+    // Before the first updatePushIframe() below — it is gated on the claim.
+    pushClaimHeld = refreshPushClaim();
     playerTabs = JSON.parse(localStorage.getItem('aria-player-tabs-' + currentCharId) || '{"cards":false,"alchemy":false}');
     playerFiles = JSON.parse(localStorage.getItem('aria-player-files-' + currentCharId) || '[]');
     initCurrentHP();
@@ -781,7 +830,18 @@ function initApp() {
     document.getElementById('tab-alchemy').addEventListener('input', scheduleAutoSave);
     loadNotes();
     if (presenceIntervalId) clearInterval(presenceIntervalId);
-    presenceIntervalId = setInterval(() => { sendPresence(); prunePeers(); }, 5000);
+    presenceIntervalId = setInterval(() => {
+        // Renew (or pick up) the push claim first: sendPresence advertises a streamId
+        // only while we hold it, and a change means the push iframe must start/stop.
+        const had = pushClaimHeld;
+        pushClaimHeld = refreshPushClaim();
+        if (pushClaimHeld !== had) {
+            console.log('[VDO] push claim', pushClaimHeld ? 'acquired' : 'lost to another tab');
+            updatePushIframe();
+        }
+        sendPresence();
+        prunePeers();
+    }, 5000);
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     updateOverlayEditorBtn();
     const volSlider = document.getElementById('music-bar-volume');
@@ -1344,7 +1404,7 @@ function setPresenceMode(m) {
 // The stream ID currently spotlighted by the GM ('' if none / unknown).
 function spotlightSid() {
     if (!spotlightCharId) return '';
-    if (spotlightCharId === currentCharId) return (currentCharId && !cameraOff) ? derivedStreamId() : '';
+    if (spotlightCharId === currentCharId) return selfStreamLive() ? derivedStreamId() : '';
     return peerCameras.get(spotlightCharId)?.streamId || '';
 }
 
@@ -1436,7 +1496,7 @@ function renderPresenceRail() {
     // Every tile needs the room in its URL — see camerasAvailable(). The self tile
     // already required it; the GM and peer tiles did not, so a stale streamId
     // outlived the room and rendered as a black rectangle.
-    if (vdoRoom && currentCharId && !cameraOff) expected.set(derivedStreamId(), (character.name || 'Vous'));
+    if (selfStreamLive()) expected.set(derivedStreamId(), (character.name || 'Vous'));
     if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
     if (vdoRoom) peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
     [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
@@ -1514,14 +1574,20 @@ function renderCamerasTab() {
             msg = '⚠ Caméra indisponible : la page doit être servie en HTTPS (page GitHub Pages) — depuis un fichier local le navigateur refuse l’accès webcam. Vous voyez les autres, ils ne vous voient pas.';
         } else if (vdoRoom && cameraOff) {
             msg = '📹 Votre caméra est coupée — les autres ne vous voient pas. Bouton 🚫 dans la barre du haut pour rétablir.';
+        } else if (vdoRoom && !pushClaimHeld) {
+            // Informational, not a failure: the stream is live, this tab just isn't
+            // the one publishing it. Stated because the webcam LED belongs to the
+            // other tab and that is otherwise puzzling.
+            msg = 'ℹ Ce personnage est aussi ouvert dans un autre onglet, qui diffuse la caméra. Celui-ci se contente de la regarder — une seule webcam par personnage.';
         }
         warn.textContent = msg;
         warn.style.display = msg ? '' : 'none';
     }
     // Self tile: a muted viewer of our own pushed stream. The camera itself belongs to
-    // #vdo-push-frame; there is no native <video> path. No room, or camera cut ⇒ no self tile.
+    // #vdo-push-frame; there is no native <video> path. No room, camera cut, or another
+    // tab holding the push claim ⇒ nothing is being published, so no self tile.
     let selfCell = grid.querySelector('.camera-cell[data-self]');
-    if (vdoRoom && currentCharId && !cameraOff) {
+    if (selfStreamLive()) {
         const sid = derivedStreamId();
         const viewSrc = vdoViewSrc(sid, true);
         if (!selfCell) {
@@ -3281,6 +3347,11 @@ function sendPresence() {
     // Only advertise a stream ID while the push iframe is actually publishing. Sending
     // it unconditionally made the GM (and every peer) open a viewer iframe on a stream
     // nobody was pushing — a permanent black box per player.
+    // Deliberately NOT gated on pushClaimHeld: the claim decides which tab owns the
+    // webcam, not whether the character's stream exists. A non-claiming tab that
+    // advertised '' would fight the claiming tab over the GM's single card — both
+    // heartbeat under the same charId — adding and removing its camera iframe every
+    // 5s. The stream is live as long as some tab is pushing it.
     const sid = (vdoRoom && !cameraOff) ? derivedStreamId() : '';
     ablyDamage.publish('presence', {
         playerId, charId: currentCharId, name: character.name, charClass: character.class,

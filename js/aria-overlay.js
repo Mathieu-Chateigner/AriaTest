@@ -15,6 +15,12 @@ function campaignChannel(base) { return CAMPAIGN ? `${base}-${CAMPAIGN}` : base;
 function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 let overlayConfig = { widgets: [] };
+// Set once a layout-update has been applied. loadOverlayConfig() runs at startup and
+// awaits Supabase; the editor publishes over Ably and writes to the DB concurrently,
+// so a layout-update arriving during that round-trip is newer than anything the read
+// can return — and letting the stale row land would drop the OBS output back to the
+// previous layout until the next edit.
+let layoutFromAbly = false;
 const presenceCache = new Map();
 const PRESENCE_MAX_AGE = 60000; // heartbeats arrive every 5s; prune players gone for 60s
 const rollHistory = [];
@@ -222,6 +228,7 @@ if (ABLY_KEY) {
         const cfgCh = ably.channels.get('aria-overlay-config');
         cfgCh.subscribe('layout-update', msg => {
             if (msg.data.overlayId !== OVERLAY_ID) return;
+            layoutFromAbly = true;
             overlayConfig = msg.data.config;
             renderWidgetLayer();
         });
@@ -866,6 +873,8 @@ function updateWidgetData() {
 async function loadOverlayConfig() {
     if (!OVERLAY_ID) return;
     const rows = await sbSelect('overlay_configs', 'id=eq.' + encodeURIComponent(OVERLAY_ID));
+    // A live layout beat the round-trip — it wins, this read may predate the write.
+    if (layoutFromAbly) return;
     if (rows.length && rows[0].config) {
         overlayConfig = rows[0].config;
         renderWidgetLayer();

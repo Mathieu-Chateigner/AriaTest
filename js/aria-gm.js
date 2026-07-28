@@ -1268,7 +1268,25 @@ function initAbly() {
             const sessionId = msg.data?.playerId;
             if (!sessionId) return;
             for (const [key, p] of players) {
-                if (p.playerId === sessionId) { console.log('[GM] player LEFT (Ably leave):', p.name, '| charId:', key); players.delete(key); renderPlayerCards(); break; }
+                if (p.playerId === sessionId) {
+                    console.log('[GM] player LEFT (Ably leave):', p.name, '| charId:', key);
+                    players.delete(key);
+                    // Drop the spotlight with the card. It is only ever cleared by
+                    // clicking ☀ again or switching campaign, so a spotlight on a
+                    // departed player stayed armed forever — invisible, since the card
+                    // carrying the ☀ state is gone, and it silently re-applied if that
+                    // player came back. Deliberately NOT done by sweepOfflinePlayers:
+                    // `leave` is an explicit departure, while a silent sweep is usually
+                    // a network blip and the spotlight should survive it. The cost is
+                    // that a player refreshing their page (beforeunload publishes
+                    // `leave` too) loses the spotlight and the GM re-clicks.
+                    if (gmSpotlightCharId === key) {
+                        gmSpotlightCharId = null;
+                        try { ablyDamage.publish('spotlight', { charId: null }); } catch (_) {}
+                    }
+                    renderPlayerCards();
+                    break;
+                }
             }
         });
         console.log('[GM] initAbly: subscribed to all channels');
