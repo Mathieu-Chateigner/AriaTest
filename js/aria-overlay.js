@@ -49,26 +49,35 @@ function liveStreamIds() {
     presenceCache.forEach(p => { if (p.streamId) live.add(p.streamId); });
     return live;
 }
+// Bring one camera widget's element in line with the current room/liveness, doing
+// the least possible to the DOM: a live iframe whose src is already right is left
+// completely alone. Anything else (re-creating it, or even re-assigning the same
+// src) tears down the WebRTC connection and blacks the tile out on stream for a
+// second or two. `live` is a liveStreamIds() set, passed in so a caller looping
+// over many widgets computes it once.
+function syncCameraWidget(el, widget, live) {
+    const sid = widget.config?.streamId || '';
+    const iframe = el.querySelector('iframe');
+    if (!sid || !live.has(sid)) {
+        // Nobody is pushing this stream — show the (invisible) placeholder rather
+        // than a black rectangle. Already a placeholder ⇒ nothing to do.
+        if (iframe || !el.firstChild) el.innerHTML = '<div class="ow-camera-empty">—</div>';
+        return;
+    }
+    const src = vdoCamSrc(sid);
+    if (iframe) { if (iframe.src !== src) iframe.src = src; }
+    else el.innerHTML = renderWidgetContent(widget);
+}
 // Re-src camera widget iframes after the room/password arrive, and swap them for a
 // placeholder when their stream stops. Camera widgets are skipped by
 // updateWidgetData to avoid iframe reloads on every presence tick, so without this
 // a disconnected player left a black rectangle on stream forever.
-// Never touches a live iframe whose src is already right — that would kill the WebRTC
-// connection and make the picture flicker on every heartbeat.
 function refreshCameraWidgets() {
     const live = liveStreamIds();
     document.querySelectorAll('.overlay-widget').forEach(el => {
         const widget = overlayConfig.widgets.find(w => w.id === el.dataset.widgetId);
         if (!widget || widget.type !== 'camera') return;
-        const sid = widget.config?.streamId || '';
-        const iframe = el.querySelector('iframe');
-        if (!sid || !live.has(sid)) {
-            if (iframe) el.innerHTML = '<div class="ow-camera-empty">—</div>';
-            return;
-        }
-        const src = vdoCamSrc(sid);
-        if (iframe) { if (iframe.src !== src) iframe.src = src; }
-        else el.innerHTML = renderWidgetContent(widget);
+        syncCameraWidget(el, widget, live);
     });
 }
 
@@ -788,24 +797,46 @@ function renderWidgetContent(widget) {
     }
 }
 
-// Rebuild all persistent overlay widget DOM elements and apply event widget positions.
+// Reconcile the persistent overlay widgets in place, then apply the event widget
+// positions. This used to start with
+// `container.innerHTML = ''` and rebuild everything, which detached every camera
+// iframe and killed its WebRTC stream. It runs on every `layout-update`, and the
+// editor publishes one 1.5s after any drag/resize/property edit — so nudging a
+// single widget blacked out every camera on the OBS output, live. updateWidgetData
+// already skips camera widgets for exactly this reason; the layout path bypassed it.
+//
+// Existing elements are never re-appended: appendChild/insertBefore on a node that
+// is already in the tree moves it, and moving an iframe reloads it — the very thing
+// this avoids. New elements go on the end, which keeps DOM order matching
+// overlayConfig.widgets because the editor only ever appends widgets, never reorders.
 function renderWidgetLayer() {
     const container = document.getElementById('overlay-widgets');
-    container.innerHTML = '';
-    for (const widget of overlayConfig.widgets) {
-        if (!widget.visible) continue;
-        if (widget.category === 'event') continue;
-        const el = document.createElement('div');
-        el.className = 'overlay-widget';
-        el.dataset.widgetId = widget.id;
+    const wanted = overlayConfig.widgets.filter(w => w.visible && w.category !== 'event');
+    const wantedIds = new Set(wanted.map(w => String(w.id)));
+    // Drop widgets that were deleted or hidden. Their iframes die with them, which
+    // is correct — the widget is gone.
+    [...container.children].forEach(el => { if (!wantedIds.has(el.dataset.widgetId)) el.remove(); });
+    const live = liveStreamIds();
+    for (const widget of wanted) {
+        // CSS.escape: widget ids arrive over Ably, and a quote would throw here.
+        let el = container.querySelector(`.overlay-widget[data-widget-id="${CSS.escape(String(widget.id))}"]`);
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'overlay-widget';
+            el.dataset.widgetId = widget.id;
+            container.appendChild(el);
+        }
+        // Geometry and style are safe to re-assign — they don't reload a child iframe.
         el.style.left    = widget.x + '%';
         el.style.top     = widget.y + '%';
         el.style.width   = widget.w + '%';
         el.style.height  = widget.h + '%';
         el.style.opacity = widget.config?.opacity ?? 1;
         el.style.fontSize = (widget.config?.fontSize ?? 14) + 'px';
-        el.innerHTML = renderWidgetContent(widget);
-        container.appendChild(el);
+        // Cameras go through the shared sync so a live, correctly-pointed iframe is
+        // left untouched; everything else is cheap to re-render wholesale.
+        if (widget.type === 'camera') syncCameraWidget(el, widget, live);
+        else el.innerHTML = renderWidgetContent(widget);
     }
     applyEventWidgetPosition('roll-card', 'roll_card');
     applyEventWidgetPosition('drawn-card-overlay', 'card_draw');

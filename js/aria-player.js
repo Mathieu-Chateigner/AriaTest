@@ -1375,14 +1375,27 @@ function renderPresenceUI() {
     // pane is open: the rail and the grid would each open a viewer iframe on the
     // same streams, doubling the WebRTC connections (and the bandwidth) per peer.
     const rail = document.getElementById('presence-rail');
+    const camsOpen = openPanes.includes('tab-cameras');
     if (rail) {
-        const show = hasAny && presenceMode === 'bandeau' && !openPanes.includes('tab-cameras');
+        const show = hasAny && presenceMode === 'bandeau' && !camsOpen;
         rail.style.display = show ? '' : 'none';
         if (show) renderPresenceRail();
         else { const g = document.getElementById('presence-rail-grid'); if (g) g.innerHTML = ''; } // viewer iframes only — safe to drop
     }
+    // The other half of that rule. Nothing else prunes the Caméras grid:
+    // renderCamerasTab() is the only function that removes cells, and it is
+    // unreachable once the pane closes — renderTabLayout just drops the .active
+    // class, and .tab-content{display:none} hides the iframes while leaving their
+    // WebRTC connections up. So closing the pane in Bandeau mode gave *two* live
+    // viewer iframes per stream (the rail rebuilds its own set), and a session that
+    // ended left iframes loaded on dead streams for good. Every path that closes the
+    // pane goes through renderTabLayout() → renderPresenceUI(), so this is the one
+    // place that needs it. Per-cell widths from the resize handle are lost on
+    // reopen — they already were whenever a peer reconnected.
+    const camGrid = document.getElementById('cameras-grid');
+    if (camGrid && !camsOpen && camGrid.childElementCount) camGrid.innerHTML = '';
     // Tablée — the cameras grid renders as a stage
-    document.getElementById('cameras-grid')?.classList.toggle('stage-mode', presenceMode === 'tablee');
+    camGrid?.classList.toggle('stage-mode', presenceMode === 'tablee');
     if (presenceMode === 'tablee') applyStageMain();
 }
 
