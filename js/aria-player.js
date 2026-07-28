@@ -719,23 +719,30 @@ function switchCharacter() {
     } else {
         doCloseAbly();
     }
+    resetCameraState();
+    showSelectionScreen();
+}
+
+// Forget everything about the current camera session: room, peers, GM stream,
+// spotlight — then blank the push iframe (releasing the webcam) and re-render so the
+// rail and Caméras viewer iframes are dropped. Clearing the state alone is not
+// enough: their containers only go display:none, which hides the iframes while their
+// WebRTC connections stay up.
+//
+// Shared by switchCharacter() and by saveConfig() when the join code changes, since
+// both leave the current campaign. Callers are responsible for publishing `leave` on
+// the OLD channel first — this function does not touch Ably.
+function resetCameraState() {
     clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
     vdoRoom = '';
     vdoRoomPassword = '';
-    updatePushIframe();
+    updatePushIframe();       // → about:blank, camera released
     peerCameras.clear();
     gmStreamId = '';
     gmPresenceTs = 0;
     spotlightCharId = null;
     localStageSid = '';
-    // Drop the rail and Caméras viewer iframes. Clearing the state above is not
-    // enough: #app-wrapper only goes display:none, which hides them while their
-    // WebRTC connections stay up, so switching character left every peer's stream
-    // being downloaded for as long as the user sat on the selection screen. With the
-    // state already cleared (and resetSplitState having closed the Caméras pane),
-    // this render hides and empties both containers.
     renderPresenceUI();
-    showSelectionScreen();
 }
 
 // ═══════════════════════════════════════════
@@ -1286,10 +1293,15 @@ function applyTabVisibility() {
     renderTabLayout(); // re-assert layout / prune panes whose tab was just hidden
 }
 
-// Show/hide the Cameras tab based on whether any active stream IDs are known.
+// Show/hide the Cameras tab. Everything it can display needs a room: a viewer URL
+// without &room cannot decrypt a stream pushed into one, so with no room every tile
+// would be a black rectangle. gmStreamId and peer streamIds only ever arrive
+// alongside a room, so requiring it here is making the implicit precondition
+// explicit — and it drops the tab the moment the session ends instead of waiting out
+// the 30s peerCameras prune, which is what left black tiles on screen.
+function camerasAvailable() { return !!vdoRoom; }
 function updateCamerasTabVisibility() {
-    const peers = [...peerCameras.values()];
-    const hasAny = !!gmStreamId || !!vdoRoom || peers.some(p => p.streamId);
+    const hasAny = camerasAvailable();
     const btn = document.getElementById('tab-btn-cameras');
     if (!btn) return;
     btn.style.display = hasAny ? '' : 'none';
@@ -1304,8 +1316,8 @@ function updateCamerasTabVisibility() {
 }
 
 // There is no native getUserMedia self-view. It used to exist as a fallback for
-// "no VDO room", but the Caméras tab only appears when a room or a peer stream is
-// known, so the fallback could never bootstrap — dead code that implied the app
+// "no VDO room", but the Caméras tab only appears once a room is known
+// (camerasAvailable), so the fallback could never bootstrap — dead code that implied the app
 // grabbed the webcam in cases where it never did. The self tile is a muted viewer
 // of our own pushed stream; the push iframe owns the camera.
 
@@ -1348,8 +1360,7 @@ railNarrowMQ.addEventListener('change', () => renderPresenceUI());
 
 // Sync the density pills, command-bar dots, and rail with the current mode.
 function renderPresenceUI() {
-    const peers = [...peerCameras.values()];
-    const hasAny = !!gmStreamId || !!vdoRoom || peers.some(p => p.streamId);
+    const hasAny = camerasAvailable();
     const ctl = document.getElementById('presence-ctl');
     if (ctl) ctl.style.display = hasAny ? '' : 'none';
     ['reduit', 'bandeau', 'tablee'].forEach(m =>
@@ -1422,9 +1433,12 @@ function renderPresenceRail() {
     const grid = document.getElementById('presence-rail-grid');
     if (!grid) return;
     const expected = new Map(); // sid → label
+    // Every tile needs the room in its URL — see camerasAvailable(). The self tile
+    // already required it; the GM and peer tiles did not, so a stale streamId
+    // outlived the room and rendered as a black rectangle.
     if (vdoRoom && currentCharId && !cameraOff) expected.set(derivedStreamId(), (character.name || 'Vous'));
-    if (gmStreamId) expected.set(gmStreamId, 'MJ');
-    peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
+    if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
+    if (vdoRoom) peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
     [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
     const spot = spotlightSid();
     expected.forEach((label, sid) => {
@@ -1547,10 +1561,12 @@ function renderCamerasTab() {
     } else if (selfCell) {
         selfCell.remove();
     }
-    // Build expected map: streamId → display label
+    // Build expected map: streamId → display label. Gated on the room like the self
+    // tile above — a viewer URL without &room can't decrypt a stream pushed into one,
+    // so a streamId that outlived the room only ever renders black.
     const expected = new Map();
-    if (gmStreamId) expected.set(gmStreamId, 'MJ');
-    peerCameras.forEach((p, charId) => {
+    if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
+    if (vdoRoom) peerCameras.forEach((p, charId) => {
         if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name);
     });
     // Remove cells whose stream ID is no longer needed (self-view cell is excluded)
@@ -3315,7 +3331,16 @@ function loadConfigInputs() {
 }
 // Save config modal changes to localStorage and reinitialize Ably and dddice.
 function saveConfig() {
-    character.campaignKey = document.getElementById('cfg-campaign-key').value.trim().toUpperCase();
+    const newCampaignKey = document.getElementById('cfg-campaign-key').value.trim().toUpperCase();
+    // Editing the join code re-subscribes every channel onto another campaign's
+    // suffix (campaignChannel() reads character.campaignKey), so it is a campaign
+    // switch and needs the same teardown switchCharacter does. Without it the push
+    // iframe went on broadcasting the webcam into the room of the campaign just left
+    // — until the 30s gm-presence expiry — the old table's peer tiles stayed live,
+    // and the old GM kept showing this player's card and camera iframe because no
+    // `leave` was ever published.
+    const campaignChanged = newCampaignKey !== (character.campaignKey || '');
+    character.campaignKey = newCampaignKey;
     saveCurrentCharacter();
     config = {
         ...config,
@@ -3327,9 +3352,26 @@ function saveConfig() {
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null;
     // Close the old Ably connection before reinit — nulling the refs without closing
-    // leaves the old WebSocket subscribed, duplicating every incoming message.
-    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
+    // leaves the old WebSocket subscribed, duplicating every incoming message. When
+    // leaving a campaign the close waits for the `leave` ack first: closing right
+    // after a fire-and-forget publish drops the message. The instance is captured in
+    // a local because initAbly() below assigns a new one before that ack lands —
+    // closing `ablyInstance` from the callback would kill the fresh connection.
+    const oldInstance = ablyInstance;
+    const oldDamage = campaignChanged ? ablyDamage : null;
+    const doCloseAbly = () => { if (oldInstance) { try { oldInstance.close(); } catch (_) {} } };
+    if (oldDamage) {
+        try { oldDamage.publish('leave', { playerId }).then(doCloseAbly, doCloseAbly); } catch (_) { doCloseAbly(); }
+    } else {
+        doCloseAbly();
+    }
     dddiceAPI = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
+    if (campaignChanged) {
+        resetCameraState();
+        // Soigner targets are campaign-scoped too — the old table's players would
+        // otherwise stay in the picker until their 60s expiry.
+        Object.keys(knownPlayers).forEach(k => delete knownPlayers[k]);
+    }
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
 }

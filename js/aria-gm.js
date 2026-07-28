@@ -1640,8 +1640,10 @@ function renderPlayerCards() {
             grid.appendChild(card);
             // Camera iframe for new card (wrapped for resize). Online only: the
             // known-players snapshot keeps the last streamId, so offline entries
-            // would otherwise restore dead iframes on campaign load.
-            if (p.streamId && isOnline) {
+            // would otherwise restore dead iframes on campaign load. A room is
+            // required too — gmVdoViewSrc without &room can't decrypt a stream pushed
+            // into one, so once the room is cleared these are guaranteed black.
+            if (p.streamId && isOnline && currentVdoRoom) {
                 const wrap = document.createElement('div');
                 wrap.className = 'pc-camera-wrap';
                 const iframe = document.createElement('iframe');
@@ -1697,7 +1699,7 @@ function renderPlayerCards() {
             // Camera: only create/update when streamId changes, never destroy existing iframe
             const existingWrap = card.querySelector('.pc-camera-wrap');
             const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
-            if (p.streamId && isOnline) {
+            if (p.streamId && isOnline && currentVdoRoom) {   // room required — see the create branch
                 const expectedSrc = gmVdoViewSrc(p.streamId, false);   // unmuted — see the create branch
                 if (!existingWrap) {
                     const wrap = document.createElement('div');
@@ -2728,6 +2730,10 @@ function saveConfig() {
     if (config.ablyKey) initAbly();
     startGMPresenceBroadcast();
     updateGMPushIframe();
+    // Setting or clearing the room changes whether player cards may carry a camera at
+    // all. Without this the grid waited for the next presence heartbeat (up to 5s) —
+    // 5s of black boxes after a clear, 5s of nothing after a set.
+    renderPlayerCards();
     toggleConfig();
 }
 // Toggle the config modal and scrim visibility.

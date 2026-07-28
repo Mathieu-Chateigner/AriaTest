@@ -189,7 +189,11 @@ The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign vi
 
 **Nothing calls `getUserMedia` — in either app.** The push iframes own the camera; every in-app tile is a VDO.ninja **viewer**, the self tiles being viewers of one's own stream with `&muted`. A native self-view fallback used to exist for the "no VDO room" case on both sides; it was unreachable (the Caméras tab only appears once a room or a peer stream is known, so the fallback could never bootstrap) and is gone. Don't reintroduce it: it lights the camera LED for a preview nobody is watching.
 
-**Players advertise `streamId` only while pushing** (`sendPresence()` sends `''` when `vdoRoom` is empty), and `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline`. Sending it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
+**Players advertise `streamId` only while pushing** (`sendPresence()` sends `''` when `vdoRoom` is empty), and `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline && currentVdoRoom`. Sending it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
+
+**A viewer tile requires a room.** A viewer URL without `&room` cannot decrypt a stream pushed into a password-protected room, so a tile built from a `streamId` that outlived the room is a guaranteed black rectangle. Every tile builder gates on the room: `camerasAvailable()` (`= !!vdoRoom`) drives the player's Caméras tab and presence control, the GM/peer entries in `renderCamerasTab()` and `renderPresenceRail()` are gated on `vdoRoom` like the self tile always was, and the GM's player cards require `currentVdoRoom`. A `streamId` only ever arrives alongside a room, so this is the implicit precondition made explicit — and it drops the tiles the instant the session ends, instead of waiting out the 30s `peerCameras` prune (player) or the next presence heartbeat (GM). The GM's `saveConfig()` calls `renderPlayerCards()` so setting/clearing the room applies at once.
+
+**Leaving a campaign requires a camera teardown, not just an Ably re-subscribe.** `resetCameraState()` (player) clears the room/peers/GM stream/spotlight, blanks the push iframe and re-renders. It is called by `switchCharacter()` **and** by `saveConfig()` when the join code changed — editing the join code in the ⚙ modal re-subscribes every channel onto another campaign and is a campaign switch. Without it the push iframe kept broadcasting the webcam into the room of the campaign just left (until the 30s expiry), and `saveConfig()` must also publish `leave` on the **old** `ablyDamage` (awaited before closing, and closing the *captured* old instance — `initAbly()` assigns a new one before the ack lands) or the old GM keeps the player's card and camera iframe.
 
 **Players own a camera kill switch.** `cameraOff` (persisted per character in `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) gates the push iframe, the advertised `streamId`, the self tile and the rail entry. The GM decides the room; the player decides whether to publish into it. The Caméras tab states the fact when it is on.
 
@@ -427,7 +431,7 @@ Lists all campaigns, each showing its join code (click to copy). `selectCampaign
 ### Player panel tabs
 `Compétences` | `Caractéristiques` | `Jet libre` | `Inventaire` | `Notes` | `Cartes` | `⚗ Alchimie` | `Fichiers` | `📹 Caméras` | `Personnage`
 
-`Cartes` and `⚗ Alchimie` are hidden by default — shown only when GM enables them via `tab-config`. `Fichiers` auto-shows when the GM grants at least one file (`playerFiles.length > 0`). `Caméras` auto-shows when `gmStreamId` or any `peerCameras` entry has a stream ID (i.e. when cameras are active in the session).
+`Cartes` and `⚗ Alchimie` are hidden by default — shown only when GM enables them via `tab-config`. `Fichiers` auto-shows when the GM grants at least one file (`playerFiles.length > 0`). `Caméras` auto-shows while a `vdoRoom` is known (`camerasAvailable()`) — see *A viewer tile requires a room* below.
 
 ### GM panel tabs
 `Joueurs` | `Monstres` | `Jets` | `Jet MJ` | `Cartes` | `⚗ Alchimie` | `Fichiers` | `♪ Musique`
