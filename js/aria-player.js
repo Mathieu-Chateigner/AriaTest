@@ -728,6 +728,13 @@ function switchCharacter() {
     gmPresenceTs = 0;
     spotlightCharId = null;
     localStageSid = '';
+    // Drop the rail and Caméras viewer iframes. Clearing the state above is not
+    // enough: #app-wrapper only goes display:none, which hides them while their
+    // WebRTC connections stay up, so switching character left every peer's stream
+    // being downloaded for as long as the user sat on the selection screen. With the
+    // state already cleared (and resetSplitState having closed the Caméras pane),
+    // this render hides and empties both containers.
+    renderPresenceUI();
     showSelectionScreen();
 }
 
@@ -1329,6 +1336,16 @@ function spotlightSid() {
     return peerCameras.get(spotlightCharId)?.streamId || '';
 }
 
+// Below 900px the rail folds away — but that is a CSS rule
+// (#presence-rail { display:none !important }), and renderPresenceUI() decided
+// `show` from JS state alone, so its inline style.display lost to the !important
+// while renderPresenceRail() went on opening a viewer iframe per peer into a rail
+// nobody could see: invisible WebRTC connections and bandwidth, on top of the
+// Caméras grid if that pane was open. matchMedia rather than a resize listener so
+// it fires exactly on the breakpoint the stylesheet uses, and only on crossings.
+const railNarrowMQ = window.matchMedia('(max-width: 900px)');
+railNarrowMQ.addEventListener('change', () => renderPresenceUI());
+
 // Sync the density pills, command-bar dots, and rail with the current mode.
 function renderPresenceUI() {
     const peers = [...peerCameras.values()];
@@ -1377,7 +1394,7 @@ function renderPresenceUI() {
     const rail = document.getElementById('presence-rail');
     const camsOpen = openPanes.includes('tab-cameras');
     if (rail) {
-        const show = hasAny && presenceMode === 'bandeau' && !camsOpen;
+        const show = hasAny && presenceMode === 'bandeau' && !camsOpen && !railNarrowMQ.matches;
         rail.style.display = show ? '' : 'none';
         if (show) renderPresenceRail();
         else { const g = document.getElementById('presence-rail-grid'); if (g) g.innerHTML = ''; } // viewer iframes only — safe to drop

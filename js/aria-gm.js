@@ -675,6 +675,11 @@ function switchCampaign() {
     ablyInstance = null;
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     players.clear();
+    // Emptying the Map is not enough — nothing re-renders the grid on this path
+    // (renderTabLayout doesn't touch player cards), so #players-grid kept live
+    // viewer iframes on the previous campaign's players for as long as the user
+    // stayed on the selection screen. With the Map empty this render clears the grid.
+    renderPlayerCards();
     rollFilter.clear(); playerFilter.clear();
     currentCampaignId = null;
     currentCampaignType = 'ancient';
