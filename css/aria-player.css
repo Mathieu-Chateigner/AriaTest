@@ -2793,6 +2793,11 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     border: none;
     display: block;
 }
+/* GM spotlight in the Caméras grid — same violet cue as .pr-tile.spotlit on the rail
+   and .pres-dot.spotlit in Réduit. The outline goes on the wrap, not the cell: the
+   cell is a bare flex column with no box of its own. */
+.camera-cell.spotlit .camera-iframe-wrap { border-color: var(--violet); box-shadow: 0 0 0 2px var(--violetsoft); }
+.camera-cell.spotlit .camera-label { color: var(--violet2); }
 .camera-resize-handle {
     position: absolute;
     bottom: 0;

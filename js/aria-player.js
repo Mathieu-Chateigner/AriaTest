@@ -186,7 +186,7 @@ function toggleCamera() {
     cameraOff = !cameraOff;
     if (currentCharId) localStorage.setItem(cameraOffKey(), cameraOff ? '1' : '0');
     console.log('[VDO] camera', cameraOff ? 'OFF (local)' : 'ON');
-    updatePushIframe();
+    applyPushClaim();   // cutting the camera hands the slot back to a sibling tab
     sendPresence();
     updateCamerasTabVisibility();
 }
@@ -226,9 +226,16 @@ function pushClaimLive() {
     const cur = _readPushClaim();
     return !!cur && !!cur.playerId && (Date.now() - (cur.ts || 0) < PUSH_CLAIM_TTL);
 }
+// Could this tab publish at all? Only tabs that would actually push may take the
+// claim: the record is the one piece of cross-tab evidence that somebody IS pushing,
+// and a tab that claimed the slot while it had no room made pushClaimLive() answer
+// "yes" for a stream nobody was publishing. See selfStreamLive().
+function canPush() { return !!currentCharId && !!vdoRoom && !cameraOff; }
 // Claim (or renew) the right to push for this character. Returns whether we hold it.
+// A tab that can no longer push hands the slot back instead of sitting on it until
+// the TTL — a sibling that can push should not have to wait 12s for it.
 function refreshPushClaim() {
-    if (!currentCharId) return false;
+    if (!canPush()) { releasePushClaim(); return false; }
     const cur = _readPushClaim();
     const heldByOther = cur && cur.playerId && cur.playerId !== playerId
         && (Date.now() - (cur.ts || 0) < PUSH_CLAIM_TTL);
@@ -249,8 +256,19 @@ function refreshPushClaim() {
 // the only cross-tab evidence that anybody is pushing at all: if the claiming tab
 // crashes (no beforeunload, so no release), this drops the tile after the TTL instead
 // of showing a black rectangle until the survivor takes over.
+//
+// Deliberately NOT gated on this tab's own `vdoRoom` — canPush() carries the room
+// into the claim record instead. vdoRoom is per-tab, in-memory, and learned only from
+// gm-presence, so a reloaded second tab has none for up to 8s: the GM sends its
+// immediate reply only to playerIds it has never seen, and playerId lives in
+// sessionStorage, which survives a reload. That tab published streamId:'' while its
+// sibling published the real one, and since the GM, the overlay and every peer key
+// the entity by charId, the last heartbeat won — one to two WebRTC teardowns of a
+// live camera per reload. cameraOff is safe to read locally by contrast: it is
+// persisted, so a fresh tab knows it before its first heartbeat, and the `storage`
+// handler syncs later changes at once.
 function selfStreamLive() {
-    return !!vdoRoom && !!currentCharId && !cameraOff && pushClaimLive();
+    return !!currentCharId && !cameraOff && pushClaimLive();
 }
 // Give up the claim if it is ours, so another tab can push immediately.
 function releasePushClaim() {
@@ -260,6 +278,18 @@ function releasePushClaim() {
         if (cur && cur.playerId === playerId) localStorage.removeItem(pushClaimKey());
     } catch (_) {}
     pushClaimHeld = false;
+}
+// Re-evaluate the claim and apply it to the push iframe. Call after anything that
+// changes canPush(): the room arriving or being cleared, the kill switch flipping,
+// leaving a campaign. Without it the claim only moved on the 5s presence tick, so the
+// stream ID this tab advertises (derived from the claim record) lagged the room by up
+// to a full tick. Returns true when the claim changed hands, so callers that should
+// re-announce themselves can do it immediately instead of waiting for the tick.
+function applyPushClaim() {
+    const had = pushClaimHeld;
+    pushClaimHeld = refreshPushClaim();
+    updatePushIframe();
+    return pushClaimHeld !== had;
 }
 // Set the VDO.ninja push iframe src — iframe is full-viewport before #app-wrapper in DOM so browser grants camera access.
 function updatePushIframe() {
@@ -860,7 +890,7 @@ function resetCameraState() {
     clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
     vdoRoom = '';
     vdoRoomPassword = '';
-    updatePushIframe();       // → about:blank, camera released
+    applyPushClaim();         // → claim released, about:blank, camera released
     peerCameras.clear();
     peerSessions.clear();
     gmStreamId = '';
@@ -1484,7 +1514,11 @@ function setPresenceMode(m) {
 // The stream ID currently spotlighted by the GM ('' if none / unknown).
 function spotlightSid() {
     if (!spotlightCharId) return '';
-    if (spotlightCharId === currentCharId) return selfStreamLive() ? derivedStreamId() : '';
+    // selfStreamLive() answers "is the stream published"; a *tile* additionally needs
+    // the room, because a viewer URL without &room can't decrypt a stream pushed into
+    // a password-protected one. The two used to be one test — they are separate now
+    // that selfStreamLive() is claim-only (see its comment).
+    if (spotlightCharId === currentCharId) return (vdoRoom && selfStreamLive()) ? derivedStreamId() : '';
     return peerCameras.get(spotlightCharId)?.streamId || '';
 }
 
@@ -1576,7 +1610,7 @@ function renderPresenceRail() {
     // Every tile needs the room in its URL — see camerasAvailable(). The self tile
     // already required it; the GM and peer tiles did not, so a stale streamId
     // outlived the room and rendered as a black rectangle.
-    if (selfStreamLive()) expected.set(derivedStreamId(), (character.name || 'Vous'));
+    if (vdoRoom && selfStreamLive()) expected.set(derivedStreamId(), (character.name || 'Vous'));
     if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
     if (vdoRoom) peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
     [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
@@ -1608,6 +1642,13 @@ function renderPresenceRail() {
     });
 }
 
+// The stream ID a rendered camera cell is showing, read back off its iframe URL.
+// '' when the cell has no iframe (placeholder) or the URL is unparseable.
+function cellSid(cell) {
+    const ifr = cell?.querySelector('iframe');
+    try { return ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { return ''; }
+}
+
 // Tablée stage: pick the big tile — GM spotlight wins, then the locally clicked
 // face, then the GM stream, then the first tile.
 function applyStageMain() {
@@ -1615,15 +1656,11 @@ function applyStageMain() {
     if (!grid) return;
     const cells = [...grid.querySelectorAll('.camera-cell')];
     if (!cells.length) return;
-    const sidOf = cell => {
-        const ifr = cell.querySelector('iframe');
-        try { return ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { return ''; }
-    };
     // Forget a locally-promoted tile once its stream is gone, otherwise the stale
     // choice silently wins again if that peer reconnects later.
-    if (localStageSid && !cells.some(c => sidOf(c) === localStageSid)) localStageSid = '';
+    if (localStageSid && !cells.some(c => cellSid(c) === localStageSid)) localStageSid = '';
     const want = spotlightSid() || localStageSid || gmStreamId || '';
-    let main = want ? cells.find(c => sidOf(c) === want) : null;
+    let main = want ? cells.find(c => cellSid(c) === want) : null;
     if (!main) main = cells[0];
     cells.forEach(c => c.classList.toggle('stage-main', c === main));
 }
@@ -1672,7 +1709,7 @@ function renderCamerasTab() {
     // #vdo-push-frame; there is no native <video> path. No room, camera cut, or another
     // tab holding the push claim ⇒ nothing is being published, so no self tile.
     let selfCell = grid.querySelector('.camera-cell[data-self]');
-    if (selfStreamLive()) {
+    if (vdoRoom && selfStreamLive()) {   // room required — see spotlightSid()
         const sid = derivedStreamId();
         const viewSrc = vdoViewSrc(sid, true);
         if (!selfCell) {
@@ -1784,6 +1821,13 @@ function renderCamerasTab() {
             grid.appendChild(cell);
         }
     });
+    // GM spotlight in the grid. It already showed on the Réduit dots and the Bandeau
+    // rail, and Tablée promotes it to the big tile — but the plain grid had no cue at
+    // all, and renderPresenceUI() suppresses the rail while this pane is open, so a
+    // player in Bandeau with Caméras docked saw the spotlight nowhere.
+    const spot = spotlightSid();
+    grid.querySelectorAll('.camera-cell').forEach(cell =>
+        cell.classList.toggle('spotlit', !!spot && cellSid(cell) === spot));
     if (presenceMode === 'tablee') applyStageMain();
 }
 
@@ -1793,8 +1837,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (presenceMode !== 'tablee') return;
         const cell = e.target.closest('.camera-cell');
         if (!cell || cell.classList.contains('stage-main')) return;
-        const ifr = cell.querySelector('iframe');
-        try { localStageSid = ifr ? new URL(ifr.src).searchParams.get('view') || '' : ''; } catch { localStageSid = ''; }
+        localStageSid = cellSid(cell);
         applyStageMain();
     });
 });
@@ -3316,7 +3359,9 @@ function initAbly() {
                 console.log('[VDO] spotlight received:', d.charId || '(cleared)');
                 spotlightCharId = d.charId || null;
                 renderPresenceUI();
-                if (document.getElementById('tab-cameras')?.classList.contains('active')) applyStageMain();
+                // Full render, not just applyStageMain: the grid carries the .spotlit
+                // marker in every density now, not only the Tablée stage promotion.
+                if (document.getElementById('tab-cameras')?.classList.contains('active')) renderCamerasTab();
                 return;
             }
             if (msg.name === 'gm-presence') {
@@ -3349,7 +3394,10 @@ function initAbly() {
                 if (d.vdoRoom !== undefined) {
                     vdoRoom = newRoom;
                     vdoRoomPassword = d.vdoRoomPassword || '';
-                    updatePushIframe();
+                    // The room is what makes this tab eligible to push, so re-run the
+                    // claim now. Taking it changes the stream ID we advertise, so say
+                    // so at once rather than on the next 5s heartbeat.
+                    if (applyPushClaim()) sendPresence();
                 }
                 updateCamerasTabVisibility();
                 return;
@@ -3410,7 +3458,11 @@ function stopGMSession(reason) {
     vdoRoom = '';
     vdoRoomPassword = '';
     spotlightCharId = null;
-    updatePushIframe();   // → about:blank, camera released
+    // applyPushClaim, not updatePushIframe: the advertised stream ID is now derived
+    // from the claim record alone (see selfStreamLive), so leaving a fresh claim
+    // behind would keep every receiver opening a viewer on a stream we just stopped
+    // pushing, for the whole 12s TTL.
+    applyPushClaim();     // → claim released, about:blank, camera released
 }
 // Drop peers whose heartbeats stopped (tab closed without a leave message) so
 // stale camera tiles don't linger and the Caméras tab can auto-hide. Runs on the
@@ -3505,7 +3557,7 @@ window.addEventListener('storage', e => {
         if (off === cameraOff) return;
         cameraOff = off;
         console.log('[VDO] camera', cameraOff ? 'OFF' : 'ON', '(synced from another tab)');
-        updatePushIframe();
+        applyPushClaim();
         sendPresence();
         updateCamerasTabVisibility();
     }

@@ -384,7 +384,14 @@ async function loadFromSupabase() {
         if (!camps.length) return true;
         const campaigns = camps.map(c => ({ id: c.id, name: c.name, joinCode: c.join_code, vdoRoom: c.vdo_room || '', vdoRoomPassword: c.vdo_room_password || '', ariaType: c.aria_type || 'ancient' }));
         localStorage.setItem('aria-gm-campaigns', JSON.stringify(campaigns));
-        for (const c of campaigns) {
+        // Campaigns load concurrently, not one after another. This runs before
+        // restoreLastCampaign(), and the players' camera grace period (GM_OFF_GRACE_MS,
+        // 12s) starts the moment our beforeunload publishes "session over" — a
+        // sequential loop made startup cost one round-trip PER CAMPAIGN, so a GM with
+        // several campaigns on a slow link could blow through the grace and restart
+        // every player's camera on a plain refresh. Each iteration writes only its own
+        // campaign-scoped keys, so there is nothing to serialize.
+        await Promise.all(campaigns.map(async c => {
             const [mons, pots, files, kp, notes, music] = await Promise.all([
                 sbSelect('monsters', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
                 sbSelect('campaign_potions', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
@@ -402,7 +409,7 @@ async function loadFromSupabase() {
             localStorage.setItem('aria-gm-notes-' + c.id, JSON.stringify(notes.map(n => ({ id: n.id, name: n.name, content: n.content }))));
             const dbTracks = music.map(t => ({ id: t.id, name: t.name, type: t.type, url: t.url, youtubeId: t.youtube_id, path: t.path }));
             localStorage.setItem('aria-gm-music-' + c.id, JSON.stringify(_mergeMusicGrouping('aria-gm-music-' + c.id, dbTracks)));
-        }
+        }));
         return true;
     } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
 }
@@ -615,6 +622,26 @@ function loadCampaignState(id) {
         // the guard has to cover this path too, not just the live one.
         if (!p.charId || !_isIdToken(p.charId) || (p.playerId && !_isIdToken(p.playerId))) return;
         players.set(p.charId, { ...p, online: false });
+        // Seed the session map from the snapshot too, so the _charIdForSession
+        // fallback and _dropPlayerSession agree. Without it the fallback could return
+        // a charId whose session map did not exist, and _dropPlayerSession answered
+        // "no survivor" because the map was missing rather than because the character
+        // had gone — so a `leave` either dropped a card it should have kept, or (once
+        // a sibling's heartbeat had overwritten the stored playerId) found nothing at
+        // all and left the targeted playerId pointing at the departed tab. The stored
+        // ts comes with it, so a genuinely stale session is still pruned on the way
+        // through, and sweepOfflinePlayers clears the rest within 10s.
+        //
+        // This does NOT close the whole window: a `leave` arriving before ANY live
+        // heartbeat still drops the card, because nothing anywhere is evidence that
+        // another tab exists. That case self-heals on the sibling's next heartbeat
+        // (<=5s) and has no cheap fix — not deleting would leave genuinely departed
+        // single-tab players on the grid instead.
+        if (p.playerId) {
+            let s = playerSessions.get(p.charId);
+            if (!s) { s = new Map(); playerSessions.set(p.charId, s); }
+            s.set(p.playerId, _finiteNum(p.ts) ?? 0);
+        }
     });
     console.log('[GM] loadCampaignState:', camp.name, '| joinCode:', currentJoinCode, '| type:', currentCampaignType, '| vdoRoom:', currentVdoRoom || '(none)', '| monsters:', monsters.length, '| knownPlayers:', players.size, '| playlists:', gmPlaylists.length, '| music tracks:', _allTracks().length, '| files:', gmFiles.length);
     return true;
@@ -1024,6 +1051,12 @@ function renderTabLayout() {
         else { t.style.gridColumn = ''; t.style.gridRow = ''; }
     });
     if (openPanes.includes('tab-gm-roll')) refreshMonsterSelect();
+    // Both of these hold camera iframes, which survive .tab-content{display:none} with
+    // their WebRTC connections intact. Each function drops its iframes when the
+    // Joueurs pane is closed and rebuilds them when it opens, so this is the one place
+    // that has to run on every layout change.
+    renderPlayerCards();
+    updateGMPushIframe();
     updateSplitChrome();
     _persistSplit();
 }
@@ -1393,6 +1426,13 @@ function initAbly() {
         ablyDamage.subscribe('leave', msg => {
             const sessionId = msg.data?.playerId;
             if (!sessionId) return;
+            // Forget the session's "already bootstrapped" mark. playerId lives in the
+            // player's sessionStorage and survives a reload, so without this a
+            // refreshed tab was still in the set and skipped the immediate
+            // gm-presence reply below — it then had no vdoRoom for up to 8s and
+            // published streamId:'' over its sibling's real one, tearing down a live
+            // camera iframe. (The set also grew one entry per refresh, forever.)
+            filesGrantedSessions.delete(sessionId);
             const key = _charIdForSession(sessionId);
             if (!key) return;
             const survivor = _dropPlayerSession(key, sessionId);
@@ -1598,9 +1638,11 @@ function updateGMPushIframe() {
         console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
         if (pushFrame.src !== src) pushFrame.src = src;
     }
-    // Preview: a muted viewer of our own stream, safe to hide with the tab.
+    // Preview: a muted viewer of our own stream, safe to hide with the tab — but not
+    // safe to *leave loaded* behind a display:none pane, which keeps its WebRTC
+    // connection up. Dropped with the pane; renderTabLayout() rebuilds it on reopen.
     if (wrap && section) {
-        if (!streamLive) {
+        if (!streamLive || !openPanes.includes('tab-players')) {
             if (wrap.innerHTML) wrap.innerHTML = '';
             section.style.display = 'none';   // nothing published ⇒ no empty preview box
             return;
@@ -1729,6 +1771,13 @@ function sweepOfflinePlayers() {
         }
         else if (p.online === undefined) { p.online = isOnline; changed = true; }
     });
+    // Sessions were only ever pruned inside _dropPlayerSession, i.e. when a `leave`
+    // happened to arrive for that character — so tabs that crashed silently left
+    // entries behind indefinitely. The player and overlay already sweep theirs.
+    playerSessions.forEach((s, cid) => {
+        s.forEach((ts, pid) => { if (now - ts > PRESENCE_TIMEOUT) s.delete(pid); });
+        if (!s.size) playerSessions.delete(cid);
+    });
     if (changed) { saveKnownPlayers(); renderPlayerCards(); }
 }
 // Render/update all player cards with in-place DOM updates to preserve camera iframes.
@@ -1748,6 +1797,16 @@ function monsterCardEl(id) { try { return document.querySelector(`#monsters-grid
 function renderPlayerCards() {
     const grid = document.getElementById('players-grid');
     const noP = document.getElementById('no-players');
+    if (!grid || !noP) return;
+    // Joueurs pane closed. .tab-content{display:none} hides the camera iframes but
+    // leaves their WebRTC connections up, so every player's stream kept being decoded
+    // for a tab nobody was looking at — and the sweep/heartbeat renders below happily
+    // kept them current. Drop them; renderTabLayout() rebuilds the grid on reopen.
+    // (The player app does the same for its own grid and rail in renderPresenceUI.)
+    if (!openPanes.includes('tab-players')) {
+        if (grid.childElementCount) grid.innerHTML = '';
+        return;
+    }
     if (players.size === 0) {
         noP.style.display = '';
         grid.innerHTML = '';
