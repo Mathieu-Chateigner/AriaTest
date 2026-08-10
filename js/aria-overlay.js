@@ -21,42 +21,16 @@ let overlayConfig = { widgets: [] };
 // can return — and letting the stale row land would drop the OBS output back to the
 // previous layout until the next edit.
 let layoutFromAbly = false;
+// Live participants, keyed by charId — a projection of the `aria-presence` channel's
+// presence set, re-read whole on every change. The overlay only observes: it never
+// enters the set, so it needs no clientId.
+//
+// What this replaces: a 60s last-seen cache, a per-character session registry, a 10s
+// prune sweep and a `leave` subscription, all of which existed to answer "is this
+// player still here" from a stream of heartbeats. Ably answers it. In particular a
+// player closing one of two tabs no longer removes their face from the OBS output,
+// because the other tab is still a member of the set.
 const presenceCache = new Map();
-const PRESENCE_MAX_AGE = 60000; // heartbeats arrive every 5s; prune players gone for 60s
-
-// One character can be open in several tabs: same charId, one playerId per tab. The
-// cache is keyed by charId and holds a single playerId, so matching `leave` against it
-// dropped the face and its camera widget off the OBS output when a player merely
-// closed a second tab — restored on their next heartbeat, up to 5s of hole on stream.
-// Track sessions and only drop the entry when the last one goes.
-const presenceSessions = new Map();   // charId → Map(playerId → lastSeen ts)
-function _touchPresenceSession(charId, playerId) {
-    let s = presenceSessions.get(charId);
-    if (!s) { s = new Map(); presenceSessions.set(charId, s); }
-    s.set(playerId, Date.now());
-}
-// Which character does this session belong to? '' when unknown.
-function _charForPresenceSession(playerId) {
-    for (const [cid, s] of presenceSessions) if (s.has(playerId)) return cid;
-    for (const [cid, p] of presenceCache) if (p.playerId === playerId) return cid;
-    return '';
-}
-// Drop one session; returns a surviving live playerId, or '' when it was the last.
-// Stale sessions are pruned here too, so a tab that died without publishing `leave`
-// cannot keep a departed player on stream.
-function _dropPresenceSession(charId, playerId) {
-    const s = presenceSessions.get(charId);
-    if (!s) return '';
-    s.delete(playerId);
-    const now = Date.now();
-    let survivor = '';
-    for (const [pid, ts] of s) {
-        if (now - ts > PRESENCE_MAX_AGE) s.delete(pid);
-        else if (!survivor) survivor = pid;
-    }
-    if (!s.size) presenceSessions.delete(charId);
-    return survivor;
-}
 const rollHistory = [];
 const ROLL_HISTORY_MAX = 20;
 
@@ -72,17 +46,14 @@ function vdoCamSrc(sid) {
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     return src;
 }
-// The GM's own stream, from gm-presence. Needed to decide whether a camera widget
-// pointed at the GM is live, since the GM never appears in presenceCache. Expired on
-// silence like any player: the explicit "session over" broadcast never arrives if the
-// GM loses the network or crashes, and a GM camera widget would then sit black on
-// stream forever. Players are covered by the presenceCache prune.
+// The GM's own stream, taken from its presence member. Needed to decide whether a
+// camera widget pointed at the GM is live, since the GM is kept out of presenceCache
+// (that map is players). It goes when the GM leaves the set — a crash or a lost
+// network is reported by Ably like any other departure, so no silence timer is
+// needed to catch the case where a "session over" message would never have arrived.
 let gmLiveStreamId = '';
-let gmPresenceTs = 0;
-const GM_PRESENCE_MAX_AGE = 30000;   // gm-presence arrives every 8s
-// Stream IDs currently being pushed: live players (presenceCache is pruned at
-// PRESENCE_MAX_AGE) plus the GM. A widget pointing anywhere else is showing a
-// stream nobody publishes.
+// Stream IDs currently being pushed: the live players in the presence set, plus the
+// GM. A widget pointing anywhere else is showing a stream nobody publishes.
 function liveStreamIds() {
     const live = new Set();
     if (gmLiveStreamId) live.add(gmLiveStreamId);
@@ -178,89 +149,57 @@ if (ABLY_KEY) {
     // The target's own presence heartbeat updates the HP widgets instead.
     dmgCh.subscribe('damage', msg => { if (msg.data?.source === 'player') return; showDamage(msg.data); });
     dmgCh.subscribe('heal', msg => { if (msg.data?.source === 'player') return; showHeal(msg.data); });
-    dmgCh.subscribe('presence', msg => {
-        const d = msg.data;
-        if (d?.charId) {
-            const knownSid = presenceCache.get(d.charId)?.streamId || '';
-            if (d.playerId) _touchPresenceSession(d.charId, d.playerId);
-            presenceCache.set(d.charId, { ...d, _ts: Date.now() });
-            updateWidgetData();
-            // A player switching their camera on/off changes widget liveness
-            if ((d.streamId || '') !== knownSid) refreshCameraWidgets();
-        }
-    });
-    // A player announcing its departure (character switch or tab close). The GM drops
-    // its card immediately on this message; without it here the overlay kept the face
-    // and its camera widget on stream for the full PRESENCE_MAX_AGE — 60s of black
-    // rectangle in front of the audience.
-    dmgCh.subscribe('leave', msg => {
-        const sessionId = msg.data?.playerId;
-        if (!sessionId) return;
-        const charId = _charForPresenceSession(sessionId);
-        if (!charId) return;
-        const survivor = _dropPresenceSession(charId, sessionId);
-        if (survivor) {
-            // Still open in another tab — that tab keeps feeding this character, so
-            // the face and its camera stay. Only the departed session is forgotten.
-            const p = presenceCache.get(charId);
-            if (p && p.playerId === sessionId) p.playerId = survivor;
-            return;
-        }
-        presenceCache.delete(charId);
+    // The roster. Re-read whole on any change to the set — a player entering,
+    // updating their sheet, or disconnecting. There is no local liveness bookkeeping
+    // left to drift, no sweep, and no departure message to interpret.
+    const presCh = ably.channels.get(campaignChannel('aria-presence'));
+    presCh.presence.subscribe(() => refreshPresenceSet());
+    async function refreshPresenceSet() {
+        try { applyPresenceSet(await presCh.presence.get()); }
+        catch (err) { console.error('[OVERLAY] presence get:', err); }
+    }
+    function applyPresenceSet(members) {
+        // Collapse members to participants: several tabs of one character share a
+        // clientId and differ by connectionId, as does the ghost of a tab that
+        // refreshed until Ably reaps it. Newest ts wins, which is always a live tab.
+        const byId = new Map();
+        (members || []).forEach(m => {
+            const d = m.data || {};
+            if (!m.clientId) return;
+            const prev = byId.get(m.clientId);
+            if (!prev || (d.ts || 0) >= (prev.ts || 0)) byId.set(m.clientId, d);
+        });
+        const gm = [...byId.values()].find(d => d.role === 'gm');
+        // Only the GM's liveness is dropped when it leaves, never vdoRoom: clearing
+        // the room changes every player's viewer URL (theirs lose &room) and would
+        // re-src live iframes, flickering every camera on the OBS output. Their
+        // streams stop being live on their own once they stop publishing.
+        const gmSid = gm ? (gm.streamId || '') : '';
+        const room = gm ? (gm.vdoRoom || '') : vdoRoom;
+        const pw = gm ? (gm.vdoRoomPassword || '') : vdoRoomPassword;
+        // Players only. The GM has no charId and must not become a face on stream.
+        const before = new Map([...presenceCache].map(([id, p]) => [id, p.streamId || '']));
+        presenceCache.clear();
+        byId.forEach((d, charId) => {
+            if (d.role === 'gm' || !d.charId) return;
+            presenceCache.set(charId, d);
+        });
         updateWidgetData();
-        refreshCameraWidgets();
-    });
-    // Drop players whose heartbeats stopped — the cache would otherwise show
-    // disconnected players on stream forever.
-    setInterval(() => {
-        const now = Date.now();
-        let changed = false;
-        presenceCache.forEach((p, id) => {
-            if (now - (p._ts || 0) > PRESENCE_MAX_AGE) { presenceCache.delete(id); changed = true; }
-        });
-        // Same sweep for the session map, or a player who vanished without a `leave`
-        // would leave entries behind that make a later `leave` look like it has a
-        // survivor and keep a dead face on stream.
-        presenceSessions.forEach((s, id) => {
-            s.forEach((ts, pid) => { if (now - ts > PRESENCE_MAX_AGE) s.delete(pid); });
-            if (!s.size) presenceSessions.delete(id);
-        });
-        if (changed) updateWidgetData();
-        // Same treatment for the GM's own stream — only the widget liveness is dropped,
-        // not vdoRoom: clearing the room would change every viewer URL and re-src live
-        // player iframes for nothing.
-        if (gmLiveStreamId && gmPresenceTs && now - gmPresenceTs > GM_PRESENCE_MAX_AGE) {
-            gmLiveStreamId = '';
-            changed = true;
+        // Only touch the camera iframes when liveness or the room actually moved —
+        // re-srcing an iframe that is already correct tears down its WebRTC
+        // connection and blacks the tile out on stream for a second or two.
+        let camsChanged = gmSid !== gmLiveStreamId || room !== vdoRoom || pw !== vdoRoomPassword
+            || before.size !== presenceCache.size;
+        if (!camsChanged) {
+            for (const [id, p] of presenceCache) {
+                if (before.get(id) !== (p.streamId || '')) { camsChanged = true; break; }
+            }
         }
-        if (changed) refreshCameraWidgets();
-    }, 10000);
-    // The GM broadcasts the VDO room (+ password) every 8s — camera widgets need it.
-    dmgCh.subscribe('gm-presence', msg => {
-        const d = msg.data || {};
-        const gmSid = d.streamId || '';
-        const room = d.vdoRoom || '', pw = d.vdoRoomPassword || '';
-        // The ALL-empty payload is the GM's "session over" signal, also fired from its
-        // beforeunload — so acting on it at once cleared vdoRoom and re-src'd every
-        // live PLAYER camera iframe (their URL loses &room), flickering every camera on
-        // the OBS output on a plain GM refresh. It is ignored here; liveness is dropped
-        // uniformly by the GM_PRESENCE_MAX_AGE expiry below, measured from the last
-        // real broadcast.
-        //
-        // An empty streamId with a room still set is a different thing: the GM cut its
-        // own camera (kill switch) while the session continues. That must be acted on —
-        // waiting for the 30s expiry would leave the GM's widget as a black rectangle on
-        // stream. Only gmLiveStreamId changes, so player widgets keep their URL and are
-        // left untouched.
-        if (!gmSid && !room) return;
-        gmPresenceTs = Date.now();
-        if (room !== vdoRoom || pw !== vdoRoomPassword || gmSid !== gmLiveStreamId) {
-            vdoRoom = room;
-            vdoRoomPassword = pw;
-            gmLiveStreamId = gmSid;
-            refreshCameraWidgets();
-        }
-    });
+        gmLiveStreamId = gmSid;
+        vdoRoom = room;
+        vdoRoomPassword = pw;
+        if (camsChanged) refreshCameraWidgets();
+    }
     // Live monster HP — the GM publishes monster-state on the (campaign-scoped) damage
     // channel, so it must be received here, not on aria-overlay-config.
     dmgCh.subscribe('monster-state', msg => {

@@ -129,46 +129,30 @@ let pendingDddiceRoll = null;    // { skillName, threshold } waiting for RollFin
 let pendingSecondaryRoll = null; // { callback, mapFn } for non-d100 dice (d6, d3, weapon formula…)
 let dddiceRollSafetyTimer = null; // fallback timer in case RollFinished never fires
 let ablyRolls = null, ablyCards = null, ablyDamage = null, ablyMusic = null, ablyRollsHidden = null;
+let ablyPresence = null;     // the aria-presence channel — its presence set IS the roster
+
+// ── PRESENCE ──────────────────────────────────────────────────────────────────
+// Who is here is not something this app computes. Every participant enters the
+// presence set of the campaign's `aria-presence` channel with their character
+// payload as member data; Ably maintains the membership server-side and pushes
+// enter/update/leave to everyone. `presence.get()` is the roster.
+//
+// Two properties of that set do the work three hand-rolled session registries,
+// two grace periods and a heartbeat used to do:
+//
+//  · One character open in several tabs is several members sharing a clientId
+//    (= charId) and differing by connectionId. There is nothing to reconcile, and
+//    closing one tab cannot drop the character — the other member is still there.
+//  · A refresh opens a NEW connection that enters before the old one is reaped
+//    (Ably waits 15s after an abrupt disconnect), so the set is never empty across
+//    a reload. Nothing has to be announced on unload, so nothing has to be undone
+//    afterwards: no teardown message, no grace period to ignore it, and no
+//    auto-re-entry to make that grace period reachable.
+//
+// Members are merged by clientId below — several tabs, plus the ghost of a tab
+// that refreshed, are one participant; the newest `ts` wins.
 let peerCameras = new Map(); // charId → { name, streamId }
-// A peer can be open in several tabs: same charId, one playerId per tab. peerCameras
-// is keyed by charId and stores a single playerId, so matching `leave` against it
-// dropped that peer's tile when they merely closed a second tab — rebuilt on their
-// next heartbeat up to 5s later. Track sessions and only drop on the last one.
-let peerSessions = new Map();   // charId → Map(playerId → lastSeen ts)
-function _touchPeerSession(charId, playerId) {
-    let s = peerSessions.get(charId);
-    if (!s) { s = new Map(); peerSessions.set(charId, s); }
-    s.set(playerId, Date.now());
-}
-// Which peer character does this session belong to? '' when unknown.
-function _peerCharForSession(playerId) {
-    for (const [cid, s] of peerSessions) if (s.has(playerId)) return cid;
-    for (const [cid, pc] of peerCameras) if (pc.playerId === playerId) return cid;
-    return '';
-}
-// Drop one session; returns a surviving live playerId, or '' when it was the last.
-// Stale sessions are pruned on the way through so a peer tab that crashed without
-// publishing `leave` cannot keep a dead tile alive.
-function _dropPeerSession(charId, playerId) {
-    const s = peerSessions.get(charId);
-    if (!s) return '';
-    s.delete(playerId);
-    const now = Date.now();
-    let survivor = '';
-    for (const [pid, ts] of s) {
-        if (now - ts > 30000) s.delete(pid);
-        else if (!survivor) survivor = pid;
-    }
-    if (!s.size) peerSessions.delete(charId);
-    return survivor;
-}
 let gmStreamId = '';
-let gmPresenceTs = 0;         // last gm-presence heartbeat — the GM broadcast is expired like a peer
-// Grace period before acting on the GM's explicit "session over" broadcast. Must stay
-// above the 8s gm-presence interval so a GM page refresh (which fires the same signal
-// from beforeunload) doesn't restart every player's camera.
-const GM_OFF_GRACE_MS = 12000;
-let gmOffGraceTimer = null;
 let vdoRoom = '';
 let vdoRoomPassword = '';
 // Presence density (design frame 25): 'reduit' (dots) | 'bandeau' (rail) | 'tablee' (stage)
@@ -186,7 +170,7 @@ function toggleCamera() {
     cameraOff = !cameraOff;
     if (currentCharId) localStorage.setItem(cameraOffKey(), cameraOff ? '1' : '0');
     console.log('[VDO] camera', cameraOff ? 'OFF (local)' : 'ON');
-    applyPushClaim();   // cutting the camera hands the slot back to a sibling tab
+    updatePushIframe();   // the lock stays ours; we just stop publishing into it
     sendPresence();
     updateCamerasTabVisibility();
 }
@@ -195,107 +179,62 @@ function derivedStreamId() {
     return 'aria-' + currentCharId.slice(0, 8);
 }
 
-// ── Single-pusher claim ────────────────────────────────────────────────────────
-// The push stream ID is a pure function of charId, so two tabs open on the same
-// character would publish into the same VDO.ninja room under the same ID — undefined
-// behaviour there — while their two presence heartbeats (same charId, different
-// playerId) fight over the GM's single player card: whichever tab closes first
-// publishes `leave`, and if its playerId is the one currently stored the GM drops the
-// card and kills its camera iframe, rebuilt only on the next heartbeat.
+// ── Single-pusher lock ─────────────────────────────────────────────────────────
+// The push stream ID is a pure function of charId, so two tabs on one character
+// would publish into the same VDO.ninja room under the same ID. Exactly one tab may
+// own the webcam — which is precisely what an exclusive Web Lock is. The browser
+// grants it to one holder, queues the others, and releases it when the holder's tab
+// goes away, *including a crash*: there is no unload handler to miss and no TTL to
+// wait out, and the next tab in the queue starts pushing the instant the holder dies.
 //
-// So pushing is claimed. One tab holds a timestamped claim in localStorage and
-// refreshes it on the existing 5s presence tick; the others view normally but never
-// push. They DO keep advertising the streamId — see the note in sendPresence: the
-// claim decides which tab owns the webcam, not whether the stream exists. The claim
-// expires so a crashed tab cannot lock the camera out permanently, and it is released
-// on character switch and tab close so the survivor takes over on its next tick
-// rather than waiting out the TTL.
-const PUSH_CLAIM_TTL = 12000;   // > 2 presence ticks, so a live holder never lapses
-let pushClaimHeld = false;
-function pushClaimKey() { return 'aria-push-claim-' + currentCharId; }
-function _readPushClaim() {
-    if (!currentCharId) return null;
-    try { return JSON.parse(localStorage.getItem(pushClaimKey()) || 'null'); } catch (_) { return null; }
-}
-// Is SOME tab pushing this character's stream right now? Answered from the shared
-// claim record, so every tab on this character gets the same answer — which is what
-// makes it safe to gate the advertised stream ID and the self tile on it. Gating on
-// pushClaimHeld instead would have the non-pushing tab advertise '' while its sibling
-// advertises the real ID, flipping the GM's single card every 5s.
-function pushClaimLive() {
-    const cur = _readPushClaim();
-    return !!cur && !!cur.playerId && (Date.now() - (cur.ts || 0) < PUSH_CLAIM_TTL);
-}
-// Could this tab publish at all? Only tabs that would actually push may take the
-// claim: the record is the one piece of cross-tab evidence that somebody IS pushing,
-// and a tab that claimed the slot while it had no room made pushClaimLive() answer
-// "yes" for a stream nobody was publishing. See selfStreamLive().
-function canPush() { return !!currentCharId && !!vdoRoom && !cameraOff; }
-// Claim (or renew) the right to push for this character. Returns whether we hold it.
-// A tab that can no longer push hands the slot back instead of sitting on it until
-// the TTL — a sibling that can push should not have to wait 12s for it.
-function refreshPushClaim() {
-    if (!canPush()) { releasePushClaim(); return false; }
-    const cur = _readPushClaim();
-    const heldByOther = cur && cur.playerId && cur.playerId !== playerId
-        && (Date.now() - (cur.ts || 0) < PUSH_CLAIM_TTL);
-    if (heldByOther) return false;
-    try {
-        localStorage.setItem(pushClaimKey(), JSON.stringify({ playerId, ts: Date.now() }));
-        // Read back before believing it. Two tabs that both find the slot free both
-        // write; localStorage serializes the writes, so the loser sees a foreign id
-        // here and backs off now instead of double-pushing until its next tick.
-        const back = _readPushClaim();
-        return !!back && back.playerId === playerId;
-    } catch (_) { return false; }
-}
-// True when this character's stream is being published — the precondition for a self
-// tile, which is just a muted viewer of it. Not gated on pushClaimHeld: a tab that
-// isn't the pusher still views the stream its sibling publishes, so its self tile
-// works like any other viewer. It IS gated on the claim record being fresh, which is
-// the only cross-tab evidence that anybody is pushing at all: if the claiming tab
-// crashes (no beforeunload, so no release), this drops the tile after the TTL instead
-// of showing a black rectangle until the survivor takes over.
-//
-// Deliberately NOT gated on this tab's own `vdoRoom` — canPush() carries the room
-// into the claim record instead. vdoRoom is per-tab, in-memory, and learned only from
-// gm-presence, so a reloaded second tab has none for up to 8s: the GM sends its
-// immediate reply only to playerIds it has never seen, and playerId lives in
-// sessionStorage, which survives a reload. That tab published streamId:'' while its
-// sibling published the real one, and since the GM, the overlay and every peer key
-// the entity by charId, the last heartbeat won — one to two WebRTC teardowns of a
-// live camera per reload. cameraOff is safe to read locally by contrast: it is
-// persisted, so a fresh tab knows it before its first heartbeat, and the `storage`
-// handler syncs later changes at once.
-function selfStreamLive() {
-    return !!currentCharId && !cameraOff && pushClaimLive();
-}
-// Give up the claim if it is ours, so another tab can push immediately.
-function releasePushClaim() {
+// The lock answers "which tab pushes" and nothing else. "Is anyone pushing?" is
+// `vdoRoom && !cameraOff` — shared state that every tab of the character evaluates
+// identically — so all of them advertise the same streamId and no consumer can see it
+// flip. Conflating those two questions is what the old claim record kept getting wrong.
+let pushLockHeld = false;
+let _pushLockRelease = null, _pushLockAbort = null;
+// Get in line for the webcam. Called once per character; held for the tab's life.
+function acquirePushLock() {
+    releasePushLock();
     if (!currentCharId) return;
+    // Web Locks needs a secure context with a real origin — from file:// it throws.
+    // Nothing can push there anyway (getUserMedia refuses too), so assume sole
+    // ownership rather than leaving the character with no pusher at all.
+    if (!navigator.locks) { pushLockHeld = true; updatePushIframe(); return; }
+    const ac = new AbortController();
+    _pushLockAbort = ac;
     try {
-        const cur = _readPushClaim();
-        if (cur && cur.playerId === playerId) localStorage.removeItem(pushClaimKey());
-    } catch (_) {}
-    pushClaimHeld = false;
+        navigator.locks.request('aria-push-' + currentCharId, { mode: 'exclusive', signal: ac.signal },
+            () => new Promise(release => {
+                _pushLockAbort = null;
+                _pushLockRelease = release;
+                pushLockHeld = true;
+                console.log('[VDO] push lock acquired — this tab owns the webcam');
+                updatePushIframe();
+                renderPresenceUI();
+            })
+        ).catch(() => {});   // AbortError when we left the queue before being granted
+    } catch (_) { pushLockHeld = true; updatePushIframe(); }
 }
-// Re-evaluate the claim and apply it to the push iframe. Call after anything that
-// changes canPush(): the room arriving or being cleared, the kill switch flipping,
-// leaving a campaign. Without it the claim only moved on the 5s presence tick, so the
-// stream ID this tab advertises (derived from the claim record) lagged the room by up
-// to a full tick. Returns true when the claim changed hands, so callers that should
-// re-announce themselves can do it immediately instead of waiting for the tick.
-function applyPushClaim() {
-    const had = pushClaimHeld;
-    pushClaimHeld = refreshPushClaim();
-    updatePushIframe();
-    return pushClaimHeld !== had;
+// Leave the queue, or hand the lock to the next tab, on character switch.
+function releasePushLock() {
+    if (_pushLockAbort) { try { _pushLockAbort.abort(); } catch (_) {} _pushLockAbort = null; }
+    if (_pushLockRelease) { _pushLockRelease(); _pushLockRelease = null; }
+    pushLockHeld = false;
+}
+// True when this character's stream is being published, by this tab or a sibling —
+// the precondition for a self tile, which is just a muted viewer of it. Every tab
+// answers this identically because both terms are shared state, so the tile cannot
+// flicker and no cross-tab liveness record is needed: the browser guarantees that
+// some live tab holds the lock whenever any tab of this character is open.
+function selfStreamLive() {
+    return !!currentCharId && !!vdoRoom && !cameraOff;
 }
 // Set the VDO.ninja push iframe src — iframe is full-viewport before #app-wrapper in DOM so browser grants camera access.
 function updatePushIframe() {
     const pushFrame = document.getElementById('vdo-push-frame');
     if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
-    if (!vdoRoom || !currentCharId || cameraOff || !pushClaimHeld) {
+    if (!vdoRoom || !currentCharId || cameraOff || !pushLockHeld) {
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the whole app inside the hidden iframe.
         if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
@@ -312,8 +251,7 @@ function updatePushIframe() {
 }
 let ablyInstance = null;
 let currentHP = null;
-let presenceIntervalId = null;
-const knownPlayers = {}; // { playerId: { name, ts } } — other players seen via presence
+const knownPlayers = {}; // { charId: { name } } — other players, from the presence set
 let soignerTarget = null; // null = self, or { playerId, name }
 let soignerPct = 0;
 
@@ -665,6 +603,11 @@ function saveCurrentCharacter() {
     if (idx >= 0) chars[idx] = entry;
     else chars.push(entry);
     saveCharacters(chars);
+    // The GM's card, the overlay's widgets and the peers' labels all read this from
+    // our presence data. The 5s heartbeat used to carry sheet edits to them within a
+    // tick; publishing on save is what replaces it (debounced, since an edit touches
+    // several fields — and the callers here are already behind a 700ms autosave).
+    schedulePresence();
 }
 
 // Migrate a single legacy aria-character entry to the multi-character array format.
@@ -850,7 +793,6 @@ function cancelCreateCharacter() {
 // Tear down the current session (Ably, dddice, music, VDO) and return to selection screen.
 function switchCharacter() {
     if (currentCharId) saveCurrentCharacter();
-    if (presenceIntervalId) { clearInterval(presenceIntervalId); presenceIntervalId = null; }
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch(_){} dddiceSDK = null; }
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null; pendingSecondaryRoll = null; dddiceAPI = null;
@@ -862,16 +804,12 @@ function switchCharacter() {
     _stopSlot('A'); _stopSlot('B'); musicIsPlaying = false;
     const musicBar = document.getElementById('music-bar');
     if (musicBar) musicBar.style.visibility = 'hidden';
-    const doCloseAbly = () => {
-        if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
-        ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
-    };
-    if (ablyDamage) {
-        try { ablyDamage.publish('leave', { playerId }).then(doCloseAbly, doCloseAbly); } catch(_){ doCloseAbly(); }
-    } else {
-        doCloseAbly();
-    }
-    releasePushClaim();   // before resetCameraState: it blanks the push iframe
+    // Closing the connection leaves the presence set — Ably tells everyone, so there
+    // is no departure message to publish and nothing to await before closing.
+    if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
+    ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
+    ablyPresence = null; presenceEntered = false;
+    releasePushLock();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     localStorage.removeItem(LAST_CHAR_KEY);   // deliberate exit — don't auto-re-enter
     showSelectionScreen();
@@ -884,17 +822,14 @@ function switchCharacter() {
 // WebRTC connections stay up.
 //
 // Shared by switchCharacter() and by saveConfig() when the join code changes, since
-// both leave the current campaign. Callers are responsible for publishing `leave` on
-// the OLD channel first — this function does not touch Ably.
+// both leave the current campaign. Callers are responsible for closing the OLD Ably
+// connection (which leaves its presence set) — this function does not touch Ably.
 function resetCameraState() {
-    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
     vdoRoom = '';
     vdoRoomPassword = '';
-    applyPushClaim();         // → claim released, about:blank, camera released
+    updatePushIframe();       // → about:blank, camera released
     peerCameras.clear();
-    peerSessions.clear();
     gmStreamId = '';
-    gmPresenceTs = 0;
     spotlightCharId = null;
     localStageSid = '';
     renderPresenceUI();
@@ -908,22 +843,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     await tryRestoreSupabase();
 });
 
-// Closing the tab left the GM showing our card (and peers showing our camera tile)
-// until the 30s presence sweep. Best-effort only: the browser may kill the page
-// before the publish reaches the wire, which is exactly what the sweep still covers.
-window.addEventListener('beforeunload', () => {
-    if (ablyDamage) { try { ablyDamage.publish('leave', { playerId }); } catch (_) {} }
-    // Hand the push claim over now rather than making another tab wait out the TTL.
-    releasePushClaim();
-});
+// No `beforeunload` teardown, deliberately. Announcing a departure on unload cannot
+// distinguish "closing the tab" from "refreshing", which is what forced a grace
+// period to ignore the announcement and then auto-re-entry to make that grace period
+// reachable — three mechanisms whose combined effect on a refresh was to do nothing.
+// Ably reaps the dropped connection 15s later; a refresh has already re-entered under
+// a new connectionId by then, so the presence set is never empty and nobody reacts.
+// The Web Lock is released by the browser on unload, crash included.
 
 // Initialize the full player app after a character is selected.
 function initApp() {
     console.log('[PLAYER] initApp: char:', character.name, '| charId:', currentCharId, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     currentHP = null;
     cameraOff = localStorage.getItem(cameraOffKey()) === '1';
-    // Before the first updatePushIframe() below — it is gated on the claim.
-    pushClaimHeld = refreshPushClaim();
     playerTabs = JSON.parse(localStorage.getItem('aria-player-tabs-' + currentCharId) || '{"cards":false,"alchemy":false}');
     playerFiles = JSON.parse(localStorage.getItem('aria-player-files-' + currentCharId) || '[]');
     initCurrentHP();
@@ -939,19 +871,9 @@ function initApp() {
     document.getElementById('tab-inventory').addEventListener('input', scheduleAutoSave);
     document.getElementById('tab-alchemy').addEventListener('input', scheduleAutoSave);
     loadNotes();
-    if (presenceIntervalId) clearInterval(presenceIntervalId);
-    presenceIntervalId = setInterval(() => {
-        // Renew (or pick up) the push claim first: sendPresence advertises a streamId
-        // only while we hold it, and a change means the push iframe must start/stop.
-        const had = pushClaimHeld;
-        pushClaimHeld = refreshPushClaim();
-        if (pushClaimHeld !== had) {
-            console.log('[VDO] push claim', pushClaimHeld ? 'acquired' : 'lost to another tab');
-            updatePushIframe();
-        }
-        sendPresence();
-        prunePeers();
-    }, 5000);
+    // No presence heartbeat: `presence.enter` in initAbly announces us once and
+    // `presence.update` publishes on change. Nothing polls, and nothing expires.
+    acquirePushLock();
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     updateOverlayEditorBtn();
     const volSlider = document.getElementById('music-bar-volume');
@@ -1691,23 +1613,19 @@ function renderCamerasTab() {
             msg = '⚠ Caméra indisponible : la page doit être servie en HTTPS (page GitHub Pages) — depuis un fichier local le navigateur refuse l’accès webcam. Vous voyez les autres, ils ne vous voient pas.';
         } else if (vdoRoom && cameraOff) {
             msg = '📹 Votre caméra est coupée — les autres ne vous voient pas. Bouton 🚫 dans la barre du haut pour rétablir.';
-        } else if (vdoRoom && !pushClaimHeld && pushClaimLive()) {
+        } else if (vdoRoom && !pushLockHeld) {
             // Informational, not a failure: the stream is live, this tab just isn't
             // the one publishing it. Stated because the webcam LED belongs to the
-            // other tab and that is otherwise puzzling.
+            // other tab and that is otherwise puzzling. There is no "taking over"
+            // state to report any more — the lock passes the instant its holder dies.
             msg = 'ℹ Ce personnage est aussi ouvert dans un autre onglet, qui diffuse la caméra. Celui-ci se contente de la regarder — une seule webcam par personnage.';
-        } else if (vdoRoom && !pushClaimHeld) {
-            // Claim record still held by a tab that stopped renewing (closed without
-            // running beforeunload). Nobody is pushing; this tab takes over when the
-            // record expires. Say so rather than showing an unexplained empty grid.
-            msg = '⏳ Reprise de la diffusion en cours — l’onglet qui diffusait ne répond plus. Quelques secondes.';
         }
         warn.textContent = msg;
         warn.style.display = msg ? '' : 'none';
     }
     // Self tile: a muted viewer of our own pushed stream. The camera itself belongs to
-    // #vdo-push-frame; there is no native <video> path. No room, camera cut, or another
-    // tab holding the push claim ⇒ nothing is being published, so no self tile.
+    // #vdo-push-frame; there is no native <video> path. No room or camera cut ⇒ nothing
+    // is being published by any tab of this character, so no self tile.
     let selfCell = grid.querySelector('.camera-cell[data-self]');
     if (vdoRoom && selfStreamLive()) {   // room required — see spotlightSid()
         const sid = derivedStreamId();
@@ -1892,6 +1810,7 @@ function handleGMDamage(data) {
     currentHP = hpAfter;
     localStorage.setItem(hpKey(), currentHP); debouncedSyncState();
     updateHPDisplay();
+    schedulePresence();   // was carried by the 5s heartbeat
     triggerDamageVFX(damage, false);
     showToast('gm-dmg-toast', `Dégâts reçus : -${damage} PV`);
     if (hpAfter <= 0) showMort();
@@ -1904,6 +1823,7 @@ function handleGMHeal(data) {
     currentHP = hpAfter;
     localStorage.setItem(hpKey(), currentHP); debouncedSyncState();
     updateHPDisplay();
+    schedulePresence();   // was carried by the 5s heartbeat
     showHealNumber(amount);
     showToast('gm-heal-toast', `♥ Soins reçus : +${amount} PV`);
 }
@@ -2643,10 +2563,9 @@ function handleResult(skillName, threshold, roll) {
 // Open the Soigner target picker modal listing self and nearby players.
 function openSoignerTargetPicker(pct) {
     soignerPct = pct;
-    const now = Date.now();
-    const others = Object.entries(knownPlayers)
-        .filter(([, p]) => now - p.ts < 30000)
-        .map(([id, p]) => ({ id, name: p.name }));
+    // knownPlayers is rebuilt from the presence set on every change, so everyone in
+    // it is live by construction — there is no last-seen age left to filter on.
+    const others = Object.entries(knownPlayers).map(([id, p]) => ({ id, name: p.name }));
     const container = document.getElementById('stm-targets');
     container.innerHTML = '';
     const selfBtn = document.createElement('button');
@@ -2658,7 +2577,7 @@ function openSoignerTargetPicker(pct) {
         const btn = document.createElement('button');
         btn.className = 'stm-btn';
         btn.textContent = name;
-        btn.onclick = () => { soignerTarget = { playerId: id, name }; closeSoignerTargetPicker(); doRoll('Soigner', soignerPct); };
+        btn.onclick = () => { soignerTarget = { charId: id, name }; closeSoignerTargetPicker(); doRoll('Soigner', soignerPct); };
         container.appendChild(btn);
     });
     document.getElementById('soigner-scrim').classList.add('show');
@@ -2700,7 +2619,7 @@ function applySoigner(success) {
                     showToast('gm-heal-toast', `♥ Soins : +${heal} PV`);
                     sendPresence();
                 } else {
-                    if (ablyDamage) ablyDamage.publish('heal', { targetId: target.playerId, amount: heal, source: 'player' });
+                    if (ablyDamage) ablyDamage.publish('heal', { targetId: target.charId, amount: heal, source: 'player' });
                     showToast('gm-heal-toast', `♥ Soins : +${heal} PV → ${target.name}`);
                 }
             });
@@ -2721,7 +2640,7 @@ function applySoigner(success) {
                     if (after <= 0) showMort();
                     sendPresence();
                 } else {
-                    if (ablyDamage) ablyDamage.publish('damage', { targetId: target.playerId, damage: dmg, source: 'player' });
+                    if (ablyDamage) ablyDamage.publish('damage', { targetId: target.charId, damage: dmg, source: 'player' });
                     showToast('gm-dmg-toast', `Blessure : -${dmg} PV → ${target.name}`);
                 }
             });
@@ -3176,7 +3095,11 @@ function campaignChannel(base) {
 function initAbly() {
     console.log('[PLAYER] initAbly: connecting with key', config.ablyKey?.slice(0, 8) + '...', '| campaign channel suffix:', character.campaignKey || '(global)');
     try {
-        ablyInstance = new Ably.Realtime({ key: config.ablyKey, transports: ['web_socket'] });
+        // clientId is the character UUID: it is what identifies us in the presence
+        // set, and what every consumer keys this participant by. Two tabs share it
+        // and are told apart by the connectionId Ably assigns each connection, so
+        // there is no per-tab id to invent, publish, or reconcile.
+        ablyInstance = new Ably.Realtime({ key: config.ablyKey, clientId: currentCharId, transports: ['web_socket'] });
         ablyRolls = ablyInstance.channels.get(campaignChannel('aria-rolls'));
         ablyRollsHidden = ablyInstance.channels.get(campaignChannel('aria-rolls-hidden'));
         ablyCards = ablyInstance.channels.get(campaignChannel('aria-cards'));
@@ -3225,40 +3148,20 @@ function initAbly() {
         ablyInstance.connection.on('failed',       () => { console.error('[PLAYER] Ably connection FAILED'); setAblyStatus(false); });
         ablyInstance.connection.on('disconnected', () => console.warn('[PLAYER] Ably disconnected'));
         ablyInstance.connection.on('suspended',    () => console.warn('[PLAYER] Ably suspended'));
-        // Listen for GM damage/heal targeted at this player
-        const myId = playerId;
+        // The roster. Any change to the set — someone entered, left, or updated their
+        // data — is re-read in full rather than patched, so there is no local replica
+        // that can drift from the server's.
+        ablyPresence = ablyInstance.channels.get(campaignChannel('aria-presence'));
+        ablyPresence.presence.subscribe(() => refreshPresenceSet());
+        sendPresence();
+        // Targeted messages are addressed to the CHARACTER, not to one tab. Every tab
+        // of a character receives and applies them, so a message can no longer be
+        // delivered to the one tab that just closed — which is what the "repoint the
+        // stored playerId at a surviving session" dance existed to avoid.
+        const myId = currentCharId;
         ablyDamage.subscribe(msg => {
             const d = msg.data;
             if (!d) return;
-            // Track other players' presence for Soigner targeting
-            if (msg.name === 'presence' && d.playerId && d.playerId !== myId) {
-                knownPlayers[d.playerId] = { name: d.name, ts: Date.now() };
-                if (d.charId) {
-                    _touchPeerSession(d.charId, d.playerId);
-                    if (d.streamId) peerCameras.set(d.charId, { name: d.name || d.charId, streamId: d.streamId, playerId: d.playerId, ts: Date.now() });
-                    else peerCameras.delete(d.charId);
-                    updateCamerasTabVisibility();
-                }
-                return;
-            }
-            // A peer switched character: drop their Soigner entry and camera tile
-            // immediately (the GM does the same with its player card).
-            if (msg.name === 'leave') {
-                if (d.playerId && d.playerId !== myId) {
-                    // knownPlayers is keyed per session (Soigner targets a playerId),
-                    // so that entry always goes. The camera tile is keyed per
-                    // character and only goes when the peer's last tab does.
-                    delete knownPlayers[d.playerId];
-                    const cid = _peerCharForSession(d.playerId);
-                    if (cid) {
-                        const survivor = _dropPeerSession(cid, d.playerId);
-                        if (survivor) { const pc = peerCameras.get(cid); if (pc) pc.playerId = survivor; }
-                        else peerCameras.delete(cid);
-                    }
-                    updateCamerasTabVisibility();
-                }
-                return;
-            }
             // Handle player-to-player heal/damage (from another player's Soigner)
             if (d.source === 'player') {
                 if (d.targetId === myId) {
@@ -3281,16 +3184,17 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'tab-config') {
-                if (d.playerId !== myId) return;
+                if (d.charId !== myId) return;
                 console.log('[PLAYER] tab-config received:', JSON.stringify(d.tabs));
                 playerTabs = { ...playerTabs, ...d.tabs };
                 localStorage.setItem('aria-player-tabs-' + currentCharId, JSON.stringify(playerTabs));
                 debouncedSyncState();
                 applyTabVisibility();
+                schedulePresence();   // `tabs` rides along in our presence data
                 return;
             }
             if (msg.name === 'potion-grant') {
-                if (d.playerId !== myId) return;
+                if (d.charId !== myId) return;
                 if (!d.potion) return;
                 console.log('[PLAYER] potion-grant received:', d.potion.name);
                 if (!character.potionRecipes) character.potionRecipes = [];
@@ -3303,7 +3207,7 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'potion-revoke') {
-                if (d.playerId !== myId) return;
+                if (d.charId !== myId) return;
                 console.log('[PLAYER] potion-revoke received:', d.potionId);
                 character.potionRecipes = (character.potionRecipes || []).filter(r => r.id !== d.potionId);
                 saveCurrentCharacter();
@@ -3311,7 +3215,7 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'vial-grant') {
-                if (d.playerId !== myId) return;
+                if (d.charId !== myId) return;
                 console.log('[PLAYER] vial-grant received:', d.qty, 'vials');
                 character.vials = (character.vials ?? 0) + (d.qty || 1);
                 saveCurrentCharacter();
@@ -3321,9 +3225,9 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'file-grant') {
-                if (d.playerId !== myId && d.playerId !== 'all') return;
+                if (d.charId !== myId && d.charId !== 'all') return;
                 if (!d.file?.id) return;
-                console.log('[PLAYER] file-grant received:', d.file.name, '| for:', d.playerId === 'all' ? 'all' : 'me');
+                console.log('[PLAYER] file-grant received:', d.file.name, '| for:', d.charId === 'all' ? 'all' : 'me');
                 if (!playerFiles.find(f => f.id === d.file.id)) {
                     playerFiles.push(d.file);
                     localStorage.setItem('aria-player-files-' + currentCharId, JSON.stringify(playerFiles));
@@ -3335,7 +3239,7 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'file-revoke') {
-                if (d.playerId !== myId && d.playerId !== 'all') return;
+                if (d.charId !== myId && d.charId !== 'all') return;
                 if (!d.fileId) return;
                 console.log('[PLAYER] file-revoke received:', d.fileId);
                 playerFiles = playerFiles.filter(f => f.id !== d.fileId);
@@ -3346,7 +3250,7 @@ function initAbly() {
                 return;
             }
             if (msg.name === 'karma-set') {
-                if (d.playerId !== myId) return;
+                if (d.charId !== myId) return;
                 console.log('[PLAYER] karma-set received:', d.karma);
                 character.karma = d.karma ?? 0;
                 saveCurrentCharacter();
@@ -3355,60 +3259,17 @@ function initAbly() {
                 renderCombatSidebar();
                 return;
             }
-            if (msg.name === 'spotlight') {
-                console.log('[VDO] spotlight received:', d.charId || '(cleared)');
-                spotlightCharId = d.charId || null;
-                renderPresenceUI();
-                // Full render, not just applyStageMain: the grid carries the .spotlit
-                // marker in every density now, not only the Tablée stage promotion.
-                if (document.getElementById('tab-cameras')?.classList.contains('active')) renderCamerasTab();
-                return;
-            }
-            if (msg.name === 'gm-presence') {
-                gmPresenceTs = Date.now();
-                const newRoom = d.vdoRoom === undefined ? vdoRoom : (d.vdoRoom || '');
-                // An empty room is the GM's explicit "session over". Don't tear down on
-                // the spot: the GM also emits it from beforeunload, so a simple page
-                // refresh would kill and fully restart every player's camera (iframe
-                // reload + WebRTC renegotiation). Wait out one broadcast cycle instead —
-                // GM_OFF_GRACE_MS is longer than the 8s heartbeat, so a reload never
-                // interrupts anything, while a real shutdown still stops in ~12s.
-                if (!newRoom && (vdoRoom || gmStreamId)) {
-                    if (!gmOffGraceTimer) {
-                        console.log('[VDO] GM signalled session over — stopping in', GM_OFF_GRACE_MS / 1000, 's unless it comes back');
-                        gmOffGraceTimer = setTimeout(() => {
-                            gmOffGraceTimer = null;
-                            stopGMSession('grace period elapsed after GM signalled session over');
-                            updateCamerasTabVisibility();
-                        }, GM_OFF_GRACE_MS);
-                    }
-                    return;   // keep the current room/tile until the grace period ends
-                }
-                // The GM is (still) here — cancel any pending stop.
-                if (gmOffGraceTimer) {
-                    console.log('[VDO] GM came back before the grace period elapsed — camera untouched');
-                    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
-                }
-                gmStreamId = d.streamId || '';
-                if (d.spotlightCharId !== undefined) spotlightCharId = d.spotlightCharId || null;
-                if (d.vdoRoom !== undefined) {
-                    vdoRoom = newRoom;
-                    vdoRoomPassword = d.vdoRoomPassword || '';
-                    // The room is what makes this tab eligible to push, so re-run the
-                    // claim now. Taking it changes the stream ID we advertise, so say
-                    // so at once rather than on the next 5s heartbeat.
-                    if (applyPushClaim()) sendPresence();
-                }
-                updateCamerasTabVisibility();
-                return;
-            }
             if (d.targetId && d.targetId !== myId) return;
             if (msg.name === 'damage') { console.log('[PLAYER] GM damage received: -', d.damage, 'PV | HP:', d.hpBefore, '→', d.hpAfter, '/', d.maxHP); handleGMDamage(d); }
             if (msg.name === 'heal')   { console.log('[PLAYER] GM heal received: +',  d.amount,  'PV | HP:', d.hpBefore, '→', d.hpAfter, '/', d.maxHP); handleGMHeal(d); }
         });
         ablyRolls.subscribe('roll', msg => {
             const d = msg.data;
-            if (!d || d.playerId === myId) return;
+            // Rolls still carry the per-tab `playerId` — it is what suppresses the
+            // toast for our OWN roll, and it is deliberately not the charId: a second
+            // tab of this character should still be told about a roll made in the
+            // first. (`myId` above is the charId, which addresses the character.)
+            if (!d || d.playerId === playerId) return;
             console.log('[PLAYER] other player rolled:', d.char, '| skill:', d.skillName, '| roll:', d.roll, '| threshold:', d.threshold, '|', d.success ? 'SUCCÈS' : 'ÉCHEC');
             showOtherRollToast(d);
         });
@@ -3448,65 +3309,20 @@ function copyOverlayUrl() {
 function publishCard(type, extra = {}) {
     if (ablyCards) ablyCards.publish(type, { ...extra, excluded: [...cardExcluded], drawn: [...cardDrawn], deckIds: cardDeck.map(c => c.id), lastCardId });
 }
-// Forget the GM camera session: MJ tile gone, room dropped, push iframe blanked
-// (which releases the webcam). Shared by the explicit "session over" broadcast and
-// by the 30s silence expiry.
-function stopGMSession(reason) {
-    console.log('[VDO] stopping GM session —', reason);
-    clearTimeout(gmOffGraceTimer); gmOffGraceTimer = null;
-    gmStreamId = '';
-    vdoRoom = '';
-    vdoRoomPassword = '';
-    spotlightCharId = null;
-    // applyPushClaim, not updatePushIframe: the advertised stream ID is now derived
-    // from the claim record alone (see selfStreamLive), so leaving a fresh claim
-    // behind would keep every receiver opening a viewer on a stream we just stopped
-    // pushing, for the whole 12s TTL.
-    applyPushClaim();     // → claim released, about:blank, camera released
-}
-// Drop peers whose heartbeats stopped (tab closed without a leave message) so
-// stale camera tiles don't linger and the Caméras tab can auto-hide. Runs on the
-// same 5s interval as the presence heartbeat.
-function prunePeers() {
-    const now = Date.now();
-    let changed = false;
-    peerCameras.forEach((p, cid) => {
-        if (now - (p.ts || 0) > 30000) { peerCameras.delete(cid); changed = true; }
-    });
-    // Same sweep for the session map, or a peer that vanished without a `leave` would
-    // leave entries behind that make a later `leave` look like it has a survivor.
-    peerSessions.forEach((s, cid) => {
-        s.forEach((ts, pid) => { if (now - ts > 30000) s.delete(pid); });
-        if (!s.size) peerSessions.delete(cid);
-    });
-    // Expire the GM the same way. Without this the cached vdoRoom lives forever:
-    // the MJ tile stays on screen and — worse — the push iframe keeps broadcasting
-    // the player's webcam long after the GM closed the session.
-    if ((gmStreamId || vdoRoom) && gmPresenceTs && now - gmPresenceTs > 30000) {
-        stopGMSession('gm-presence expired (30s)');
-        changed = true;
-    }
-    Object.entries(knownPlayers).forEach(([id, p]) => {
-        if (now - (p.ts || 0) > 60000) delete knownPlayers[id];
-    });
-    if (changed) updateCamerasTabVisibility();
-}
-// Publish the player's full presence heartbeat to the aria-damage channel.
-function sendPresence() {
-    if (!ablyDamage) return;
-    // Only advertise a stream ID while the push iframe is actually publishing. Sending
-    // it unconditionally made the GM (and every peer) open a viewer iframe on a stream
-    // nobody was pushing — a permanent black box per player.
-    // Deliberately NOT gated on pushClaimHeld: the claim decides which tab owns the
-    // webcam, not whether the character's stream exists. A non-claiming tab that
-    // advertised '' would fight the claiming tab over the GM's single card — both
-    // heartbeat under the same charId — adding and removing its camera iframe every
-    // 5s. It IS gated on the shared claim record (selfStreamLive), which every tab
-    // reads identically: that stops advertising a stream whose pusher crashed instead
-    // of leaving a black tile on the GM's card and on the OBS output.
-    const sid = selfStreamLive() ? derivedStreamId() : '';
-    ablyDamage.publish('presence', {
-        playerId, charId: currentCharId, name: character.name, charClass: character.class,
+// ── Presence: publish ─────────────────────────────────────────────────────────
+let presenceEntered = false;
+let _presenceTimer = null;
+// The member data this tab publishes. Sent on entry and on every change — never on
+// a timer, so a table sitting still costs nothing.
+function presenceData() {
+    // Advertise a stream ID only while this character's camera is actually being
+    // published: an ID nobody is pushing makes every receiver open a viewer iframe on
+    // a dead stream — a black box on the GM's card, on each peer's rail, and on the
+    // OBS output. selfStreamLive() is shared state, so every tab of this character
+    // publishes the same value and the tile cannot flip between them.
+    return {
+        role: 'player',
+        charId: currentCharId, name: character.name, charClass: character.class,
         hp: currentHP, maxHP: getMaxHP(), stats: character.stats,
         protection: character.protection,
         skills: character.skills,
@@ -3521,8 +3337,80 @@ function sendPresence() {
         karma: character.karma ?? 0,
         campaignKey: character.campaignKey || '',
         ariaType: character.ariaType || 'ancient',
-        streamId: sid,
-    }).catch(err => console.error('[ARIA] publish error:', err));
+        streamId: selfStreamLive() ? derivedStreamId() : '',
+        ts: Date.now(),
+    };
+}
+// Announce ourselves, or republish after a change. `enter` is only used once; the
+// SDK re-enters automatically after a reconnect, so there is no resend loop here.
+function sendPresence() {
+    if (!ablyPresence) return;
+    const d = presenceData();
+    if (presenceEntered) {
+        ablyPresence.presence.update(d).catch(err => console.error('[PLAYER] presence update:', err));
+    } else {
+        ablyPresence.presence.enter(d).then(
+            () => { presenceEntered = true; console.log('[PLAYER] entered presence as', currentCharId); },
+            err => console.error('[PLAYER] presence enter:', err));
+    }
+}
+// Coalesce bursts — editing the character sheet touches several fields in a row.
+function schedulePresence() {
+    clearTimeout(_presenceTimer);
+    _presenceTimer = setTimeout(sendPresence, 250);
+}
+
+// ── Presence: consume ─────────────────────────────────────────────────────────
+// Re-read the whole set on any change. Cheap (the SDK serves it from its local
+// replica) and it removes the entire class of bugs where an incrementally patched
+// copy of the roster drifts from the real one.
+async function refreshPresenceSet() {
+    if (!ablyPresence) return;
+    try { applyPresenceSet(await ablyPresence.presence.get()); }
+    catch (err) { console.error('[PLAYER] presence get:', err); }
+}
+// Collapse members to participants. Several tabs of one person share a clientId and
+// differ by connectionId; so does the ghost of a tab that refreshed, until Ably reaps
+// it 15s later. Newest ts wins, which is always a live tab.
+function _mergeMembers(members) {
+    const byId = new Map();
+    (members || []).forEach(m => {
+        const key = m.clientId || '';
+        const d = m.data || {};
+        if (!key) return;
+        const prev = byId.get(key);
+        if (!prev || (d.ts || 0) >= (prev.ts || 0)) byId.set(key, d);
+    });
+    return byId;
+}
+function applyPresenceSet(members) {
+    const byId = _mergeMembers(members);
+    // The GM decides the room, the MJ tile and the spotlight. No members ⇒ no GM ⇒
+    // no session: the room goes and the push iframe stops. A GM refresh does not
+    // reach this state, because the reconnected tab has already entered by the time
+    // the dropped connection is reaped.
+    const gm = [...byId.values()].find(d => d.role === 'gm');
+    const room = gm ? (gm.vdoRoom || '') : '';
+    const pw = gm ? (gm.vdoRoomPassword || '') : '';
+    const roomChanged = room !== vdoRoom || pw !== vdoRoomPassword;
+    vdoRoom = room;
+    vdoRoomPassword = pw;
+    gmStreamId = gm ? (gm.streamId || '') : '';
+    spotlightCharId = gm ? (gm.spotlightCharId || null) : null;
+    // Peers, for the camera tiles and the Soigner target picker. Both are keyed by
+    // charId: Soigner now targets the character, so every tab of the target applies
+    // the HP change and none of them can be addressed after closing.
+    peerCameras.clear();
+    Object.keys(knownPlayers).forEach(k => delete knownPlayers[k]);
+    byId.forEach((d, charId) => {
+        if (d.role !== 'player' || charId === currentCharId) return;
+        knownPlayers[charId] = { name: d.name };
+        if (d.streamId) peerCameras.set(charId, { name: d.name || charId, streamId: d.streamId });
+    });
+    // The room is what decides whether we publish at all, so a change to it changes
+    // the stream ID we advertise — say so now rather than leaving receivers to guess.
+    if (roomChanged) { updatePushIframe(); sendPresence(); }
+    updateCamerasTabVisibility();   // → renderPresenceUI + renderCamerasTab
 }
 // Update the Ably status dot and text labels in the topbar and config modal.
 function setAblyStatus(ok) {
@@ -3545,19 +3433,17 @@ window.addEventListener('storage', e => {
         applyTheme(!!config.lightMode);
         return;
     }
-    // The kill switch is per-character localStorage state, but it was read only in
-    // initApp — so a sibling tab on the same character never learned the camera had
-    // been cut. It went on advertising the streamId on its own 5s timer while the
-    // claiming tab advertised '', and since the GM keys its player cards by charId,
-    // its single card flipped between a camera tile and none every few seconds — on a
-    // stream nobody was pushing any more. (The `storage` event only fires in the
-    // *other* tabs, so this never re-enters the tab that toggled.)
+    // The kill switch is per-character localStorage state, and selfStreamLive() reads
+    // it — so every tab of this character has to agree on it or they would advertise
+    // different stream IDs under the same clientId and the tile would flip between
+    // them. (`storage` fires only in the *other* tabs, so this never re-enters the
+    // tab that made the change.)
     if (currentCharId && e.key === cameraOffKey()) {
         const off = e.newValue === '1';
         if (off === cameraOff) return;
         cameraOff = off;
         console.log('[VDO] camera', cameraOff ? 'OFF' : 'ON', '(synced from another tab)');
-        applyPushClaim();
+        updatePushIframe();
         sendPresence();
         updateCamerasTabVisibility();
     }
@@ -3575,11 +3461,10 @@ function saveConfig() {
     const newCampaignKey = document.getElementById('cfg-campaign-key').value.trim().toUpperCase();
     // Editing the join code re-subscribes every channel onto another campaign's
     // suffix (campaignChannel() reads character.campaignKey), so it is a campaign
-    // switch and needs the same teardown switchCharacter does. Without it the push
-    // iframe went on broadcasting the webcam into the room of the campaign just left
-    // — until the 30s gm-presence expiry — the old table's peer tiles stayed live,
-    // and the old GM kept showing this player's card and camera iframe because no
-    // `leave` was ever published.
+    // switch and needs the same teardown switchCharacter does — otherwise the push
+    // iframe goes on broadcasting the webcam into the room of the campaign just left
+    // and the old table's peer tiles stay live. Leaving the old campaign's presence
+    // set is handled by closing the old connection.
     const campaignChanged = newCampaignKey !== (character.campaignKey || '');
     character.campaignKey = newCampaignKey;
     saveCurrentCharacter();
@@ -3593,24 +3478,16 @@ function saveConfig() {
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null;
     // Close the old Ably connection before reinit — nulling the refs without closing
-    // leaves the old WebSocket subscribed, duplicating every incoming message. When
-    // leaving a campaign the close waits for the `leave` ack first: closing right
-    // after a fire-and-forget publish drops the message. The instance is captured in
-    // a local because initAbly() below assigns a new one before that ack lands —
-    // closing `ablyInstance` from the callback would kill the fresh connection.
-    const oldInstance = ablyInstance;
-    const oldDamage = campaignChanged ? ablyDamage : null;
-    const doCloseAbly = () => { if (oldInstance) { try { oldInstance.close(); } catch (_) {} } };
-    if (oldDamage) {
-        try { oldDamage.publish('leave', { playerId }).then(doCloseAbly, doCloseAbly); } catch (_) { doCloseAbly(); }
-    } else {
-        doCloseAbly();
-    }
+    // leaves the old WebSocket subscribed, duplicating every incoming message. The
+    // close is also what leaves the old campaign's presence set, so there is nothing
+    // to publish first and nothing to await before closing.
+    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
     dddiceAPI = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
+    ablyPresence = null; presenceEntered = false;
     if (campaignChanged) {
         resetCameraState();
-        // Soigner targets are campaign-scoped too — the old table's players would
-        // otherwise stay in the picker until their 60s expiry.
+        // Soigner targets are campaign-scoped too; the new campaign's presence set
+        // repopulates the picker.
         Object.keys(knownPlayers).forEach(k => delete knownPlayers[k]);
     }
     if (config.dddiceKey && config.dddiceRoom) initDddice();

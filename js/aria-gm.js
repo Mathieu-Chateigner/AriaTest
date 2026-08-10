@@ -32,46 +32,24 @@ let pendingGMRoll = null;        // { name, threshold, atk } for GM rolls in pro
 let gmRollSafetyTimer = null;    // fallback timer in case RollFinished never fires
 let dddiceResizeHandler = null;  // stored so we can remove it before re-registering
 
-// Players presence map: charId (stable UUID) -> {playerId,name,charClass,hp,maxHP,stats,ts,...}
+// Players, keyed by charId (stable UUID) -> presence data + { online }.
+//
+// This map is a projection of the `aria-presence` channel's presence set, not a
+// replica maintained by hand. Ably decides who is present: a member enters, updates
+// or leaves and the whole set is re-read. Three things follow, each of which used to
+// be a mechanism here:
+//
+//  · No heartbeat and no offline sweep. `online` is membership in the set.
+//  · No per-character session bookkeeping. One character open in several tabs is
+//    several members sharing a clientId (= charId) and differing by connectionId, so
+//    closing one tab cannot drop the card — the other member is still in the set.
+//  · No teardown-on-unload to interpret. A refresh re-enters under a new connectionId
+//    before Ably reaps the old one (15s), so the set never empties and nothing here
+//    observes a departure that is about to be undone.
+//
+// Entries persisted in aria-gm-known-players-{id} are seeded with online:false so the
+// Joueurs tab still lists the table while nobody is connected.
 const players = new Map();
-const PRESENCE_TIMEOUT = 30000; // 30s offline threshold
-
-// One character can be open in several tabs: same charId, one playerId per tab. The
-// card is keyed by charId and stores a single playerId (the one messages are targeted
-// at), which is whichever tab heartbeat last — so matching `leave` against it dropped
-// the card, and its live camera iframe, roughly half the time a player closed one of
-// two tabs. It also cleared the spotlight, which no later heartbeat restores.
-// So sessions are tracked per character and the card only goes when the last one does.
-const playerSessions = new Map();   // charId → Map(playerId → lastSeen ts)
-function _touchPlayerSession(charId, playerId) {
-    let s = playerSessions.get(charId);
-    if (!s) { s = new Map(); playerSessions.set(charId, s); }
-    s.set(playerId, Date.now());
-}
-// Which character does this session belong to? '' when unknown.
-function _charIdForSession(playerId) {
-    for (const [cid, s] of playerSessions) if (s.has(playerId)) return cid;
-    // Entries restored from the known-players snapshot have a playerId but never had
-    // a session recorded, so fall back to the stored one.
-    for (const [cid, p] of players) if (p.playerId === playerId) return cid;
-    return '';
-}
-// Drop one session. Returns a surviving live playerId for that character, or '' when
-// that was the last one (stale sessions are pruned on the way through — a tab that
-// crashed without publishing `leave` must not keep a card alive forever).
-function _dropPlayerSession(charId, playerId) {
-    const s = playerSessions.get(charId);
-    if (!s) return '';
-    s.delete(playerId);
-    const now = Date.now();
-    let survivor = '';
-    for (const [pid, ts] of s) {
-        if (now - ts > PRESENCE_TIMEOUT) s.delete(pid);
-        else if (!survivor) survivor = pid;
-    }
-    if (!s.size) playerSessions.delete(charId);
-    return survivor;
-}
 
 // Campaign state — loaded after selection
 let currentCampaignId = null;
@@ -83,9 +61,6 @@ let rollFeed = [];
 let rollFilter   = new Set();
 let playerFilter = new Set();
 let cardHistory = [];
-let sweepIntervalId = null;
-let gmPresenceIntervalId = null;
-let gmPresenceWasOn = false;   // true once this session broadcast a VDO room to players
 let currentVdoRoom = '';
 let currentVdoRoomPassword = '';
 // GM-side camera kill switch, the mirror of the player's `cameraOff`. The GM decides
@@ -93,60 +68,45 @@ let currentVdoRoomPassword = '';
 // for the GM to go camera-off was clearing the room — which cuts every player's
 // camera too. Persisted per campaign so it survives a refresh.
 let gmCameraOff = false;
-// Per-tab id, the GM's equivalent of the player's `playerId`. sessionStorage, so it
-// survives a reload of this tab (which lets a refreshed tab reclaim its own push
-// claim instead of locking itself out) but differs between tabs.
-let gmTabId = sessionStorage.getItem('aria-gm-tab-id');
-if (!gmTabId) { gmTabId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('aria-gm-tab-id', gmTabId); }
-// Single-pusher claim, the mirror of the player's. gmDerivedStreamId() is a pure
-// function of campaignId, so two GM tabs on one campaign would publish into the same
-// VDO room under the same ID. The TTL covers ~2.5 missed renewals of the 8s
-// gm-presence tick — the same ratio the player uses (12s TTL on a 5s tick). It used
-// to be 30s to match PRESENCE_TIMEOUT, which meant a crashed pusher's stream ID stayed
-// advertised for up to 38s (TTL + one tick) while nobody published it: a black
-// rectangle on every player's rail and on the OBS output for that whole window.
-const GM_PUSH_CLAIM_TTL = 20000;
-let gmPushClaimHeld = false;
-function gmPushClaimKey() { return 'aria-gm-push-claim-' + currentCampaignId; }
-function _readGMPushClaim() {
-    if (!currentCampaignId) return null;
-    try { return JSON.parse(localStorage.getItem(gmPushClaimKey()) || 'null'); } catch (_) { return null; }
-}
-// Is SOME tab pushing the GM camera right now? Answered from the shared claim record,
-// so every tab on this campaign gets the same answer — which is what makes it safe to
-// gate the advertised stream ID on it. Gating on gmPushClaimHeld instead would have
-// the non-pushing tab advertise '' while its sibling advertises the real ID, flipping
-// the MJ tile on every player's rail every 8s.
-function gmPushClaimLive() {
-    const cur = _readGMPushClaim();
-    return !!cur && !!cur.tabId && (Date.now() - (cur.ts || 0) < GM_PUSH_CLAIM_TTL);
-}
-// Claim (or renew) the right to push the GM camera. Returns whether we hold it.
-function refreshGMPushClaim() {
-    if (!currentCampaignId) return false;
-    const cur = _readGMPushClaim();
-    const heldByOther = cur && cur.tabId && cur.tabId !== gmTabId
-        && (Date.now() - (cur.ts || 0) < GM_PUSH_CLAIM_TTL);
-    if (heldByOther) return false;
+// ── Single-pusher lock (the mirror of the player's) ────────────────────────────
+// gmDerivedStreamId() is a pure function of campaignId, so two GM tabs on one
+// campaign would publish into the same VDO room under the same ID. An exclusive Web
+// Lock names the one tab that owns the webcam: the browser queues the others and
+// releases it when the holder's tab dies, crash included, with no id to invent, no
+// TTL to tune against a heartbeat, and no record to read back.
+//
+// As on the player side the lock answers "which tab pushes" only. "Is anyone
+// pushing?" is `currentVdoRoom && !gmCameraOff` — shared state every GM tab reads
+// identically, so they all advertise the same stream ID and the MJ tile cannot flip.
+let gmPushLockHeld = false;
+let _gmLockRelease = null, _gmLockAbort = null;
+function acquireGMPushLock() {
+    releaseGMPushLock();
+    if (!currentCampaignId) return;
+    // Web Locks needs a secure context with a real origin; from file:// it throws.
+    // Nothing can push there anyway, so assume sole ownership rather than leaving the
+    // campaign with no pusher.
+    if (!navigator.locks) { gmPushLockHeld = true; updateGMPushIframe(); return; }
+    const ac = new AbortController();
+    _gmLockAbort = ac;
     try {
-        localStorage.setItem(gmPushClaimKey(), JSON.stringify({ tabId: gmTabId, ts: Date.now() }));
-        // Read back before believing it. Two tabs that both find the slot free both
-        // write; localStorage serializes the writes, so the loser sees a foreign id
-        // here and backs off now instead of double-pushing until its next tick.
-        const back = _readGMPushClaim();
-        return !!back && back.tabId === gmTabId;
-    } catch (_) { return false; }
+        navigator.locks.request('aria-gm-push-' + currentCampaignId, { mode: 'exclusive', signal: ac.signal },
+            () => new Promise(release => {
+                _gmLockAbort = null;
+                _gmLockRelease = release;
+                gmPushLockHeld = true;
+                console.log('[GM] push lock acquired — this tab owns the webcam');
+                updateGMPushIframe();
+            })
+        ).catch(() => {});   // AbortError when we left the queue before being granted
+    } catch (_) { gmPushLockHeld = true; updateGMPushIframe(); }
 }
-// Give up the claim if it is ours, so another GM tab can push immediately.
-function releaseGMPushClaim() {
-    if (currentCampaignId) {
-        try {
-            const cur = _readGMPushClaim();
-            if (cur && cur.tabId === gmTabId) localStorage.removeItem(gmPushClaimKey());
-        } catch (_) {}
-    }
-    gmPushClaimHeld = false;
+function releaseGMPushLock() {
+    if (_gmLockAbort) { try { _gmLockAbort.abort(); } catch (_) {} _gmLockAbort = null; }
+    if (_gmLockRelease) { _gmLockRelease(); _gmLockRelease = null; }
+    gmPushLockHeld = false;
 }
+let ablyPresence = null;   // the aria-presence channel — its presence set IS the roster
 let gmClickHandlerRegistered = false;
 let renderPlayerCardsTimer = null;
 let renderMonstersTimer = null;
@@ -384,13 +344,12 @@ async function loadFromSupabase() {
         if (!camps.length) return true;
         const campaigns = camps.map(c => ({ id: c.id, name: c.name, joinCode: c.join_code, vdoRoom: c.vdo_room || '', vdoRoomPassword: c.vdo_room_password || '', ariaType: c.aria_type || 'ancient' }));
         localStorage.setItem('aria-gm-campaigns', JSON.stringify(campaigns));
-        // Campaigns load concurrently, not one after another. This runs before
-        // restoreLastCampaign(), and the players' camera grace period (GM_OFF_GRACE_MS,
-        // 12s) starts the moment our beforeunload publishes "session over" — a
-        // sequential loop made startup cost one round-trip PER CAMPAIGN, so a GM with
-        // several campaigns on a slow link could blow through the grace and restart
-        // every player's camera on a plain refresh. Each iteration writes only its own
-        // campaign-scoped keys, so there is nothing to serialize.
+        // Campaigns load concurrently, not one after another: a sequential loop cost
+        // one round-trip PER CAMPAIGN before the app was usable. Each iteration writes
+        // only its own campaign-scoped keys, so there is nothing to serialize.
+        // (This used to be load-bearing for the camera teardown too — startup had to
+        // finish inside the players' 12s grace period or a refresh restarted every
+        // camera. Presence removed that constraint; the speed is still worth having.)
         await Promise.all(campaigns.map(async c => {
             const [mons, pots, files, kp, notes, music] = await Promise.all([
                 sbSelect('monsters', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
@@ -598,9 +557,6 @@ function loadCampaignState(id) {
     // Read after currentCampaignId is set — gmCameraOffKey() depends on it. A GM who
     // opted out must not be re-broadcast by the next page load.
     gmCameraOff = localStorage.getItem(gmCameraOffKey()) === '1';
-    // Same: the claim key is campaign-scoped. Taken here so the first
-    // updateGMPushIframe() in initApp already knows whether this tab may push.
-    gmPushClaimHeld = refreshGMPushClaim();
     monsters    = JSON.parse(localStorage.getItem(monstersKey())  || '[]');
     rollFeed    = JSON.parse(localStorage.getItem(rollsKey())     || '[]');
     cardHistory = JSON.parse(localStorage.getItem(cardHistKey()) || '[]');
@@ -613,35 +569,16 @@ function loadCampaignState(id) {
     musicPlayingPlaylistId = null;
     musicCurrentIndex = -1;
     players.clear();
-    playerSessions.clear();
     const knownRaw = JSON.parse(localStorage.getItem(knownPlayersKey()) || '{}');
     Object.entries(knownRaw).forEach(([, p]) => {
         // Same id check as handlePresence. This snapshot is written from presence
-        // payloads, but entries persisted before that validation existed can hold
+        // data, but entries persisted before that validation existed can hold
         // anything — and they land in the same element ids and inline handlers, so
         // the guard has to cover this path too, not just the live one.
-        if (!p.charId || !_isIdToken(p.charId) || (p.playerId && !_isIdToken(p.playerId))) return;
+        if (!p.charId || !_isIdToken(p.charId)) return;
+        // Seeded offline; whoever is actually connected is marked online by the first
+        // applyPresenceSet, which arrives as soon as the channel attaches.
         players.set(p.charId, { ...p, online: false });
-        // Seed the session map from the snapshot too, so the _charIdForSession
-        // fallback and _dropPlayerSession agree. Without it the fallback could return
-        // a charId whose session map did not exist, and _dropPlayerSession answered
-        // "no survivor" because the map was missing rather than because the character
-        // had gone — so a `leave` either dropped a card it should have kept, or (once
-        // a sibling's heartbeat had overwritten the stored playerId) found nothing at
-        // all and left the targeted playerId pointing at the departed tab. The stored
-        // ts comes with it, so a genuinely stale session is still pruned on the way
-        // through, and sweepOfflinePlayers clears the rest within 10s.
-        //
-        // This does NOT close the whole window: a `leave` arriving before ANY live
-        // heartbeat still drops the card, because nothing anywhere is evidence that
-        // another tab exists. That case self-heals on the sibling's next heartbeat
-        // (<=5s) and has no cheap fix — not deleting would leave genuinely departed
-        // single-tab players on the grid instead.
-        if (p.playerId) {
-            let s = playerSessions.get(p.charId);
-            if (!s) { s = new Map(); playerSessions.set(p.charId, s); }
-            s.set(p.playerId, _finiteNum(p.ts) ?? 0);
-        }
     });
     console.log('[GM] loadCampaignState:', camp.name, '| joinCode:', currentJoinCode, '| type:', currentCampaignType, '| vdoRoom:', currentVdoRoom || '(none)', '| monsters:', monsters.length, '| knownPlayers:', players.size, '| playlists:', gmPlaylists.length, '| music tracks:', _allTracks().length, '| files:', gmFiles.length);
     return true;
@@ -693,10 +630,10 @@ function showApp() {
 }
 
 // Remembered across reloads so a refresh comes straight back into the campaign.
-// Players hold their camera for GM_OFF_GRACE_MS (12s) after the GM's beforeunload
-// fires its "session over" broadcast, which only helps if the GM is broadcasting
-// again inside that window — landing on the selection screen and waiting for a click
-// blew through it, so every GM refresh tore down and restarted every player's camera.
+// This is now a convenience, not a correctness requirement: it used to be the only
+// thing that got the GM broadcasting again inside the players' 12s camera grace
+// period, so a refresh that paused on the selection screen restarted every player's
+// camera. Presence has no such window — the reconnected tab is simply a new member.
 // Cleared by an explicit "changer de campagne", which is a deliberate exit.
 const LAST_CAMPAIGN_KEY = 'aria-gm-last-campaign';
 
@@ -813,28 +750,23 @@ function switchCampaign() {
     musicCurrentIndex = -1;
     ablyMusic = null;
     filesGrantedSessions.clear();
-    if (sweepIntervalId) { clearInterval(sweepIntervalId); sweepIntervalId = null; }
-    if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
-    // Tell players to stop pushing, then close. The close must wait for the ack:
-    // ablyInstance.close() right after a fire-and-forget publish drops the message
-    // (same reason the player awaits its `leave` publish in switchCharacter).
-    const offPublish = publishGMPresenceOff();
     currentVdoRoom = '';
     currentVdoRoomPassword = '';
-    releaseGMPushClaim();   // while currentCampaignId still resolves the key
+    releaseGMPushLock();   // while currentCampaignId still resolves the lock name
     stopGMSelfView();
     if (renderPlayerCardsTimer) { clearTimeout(renderPlayerCardsTimer); renderPlayerCardsTimer = null; }
     if (renderMonstersTimer) { clearTimeout(renderMonstersTimer); renderMonstersTimer = null; }
     if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch(_){} dddiceSDK = null; }
     clearTimeout(gmRollSafetyTimer);
     pendingGMRoll = null;
-    const inst = ablyInstance;
-    const doCloseAbly = () => { if (inst) { try { inst.close(); } catch(_){} } };
-    if (offPublish?.then) offPublish.then(doCloseAbly, doCloseAbly); else doCloseAbly();
+    // Closing the connection leaves the presence set, which is how players learn the
+    // session is over — no message to publish first, and nothing to await before
+    // closing (a fire-and-forget publish followed by close() would have been dropped).
+    if (ablyInstance) { try { ablyInstance.close(); } catch(_){} }
     ablyInstance = null;
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
+    ablyPresence = null; gmPresenceEntered = false;
     players.clear();
-    playerSessions.clear();
     // Emptying the Map is not enough — nothing re-renders the grid on this path
     // (renderTabLayout doesn't touch player cards), so #players-grid kept live
     // viewer iframes on the previous campaign's players for as long as the user
@@ -858,14 +790,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     await tryRestoreSupabase();
 });
 
-// Closing the GM tab is the end of the camera session — tell players to stop pushing
-// instead of leaving them broadcasting for the 30s expiry. Best-effort: the browser
-// may kill the page first, which is what the players' expiry still covers.
-window.addEventListener('beforeunload', () => {
-    publishGMPresenceOff();
-    // Hand the push claim over now rather than making another GM tab wait out the TTL.
-    releaseGMPushClaim();
-});
+// No `beforeunload` teardown, deliberately — see the note in aria-player.js. Saying
+// "session over" on unload could not tell a close from a refresh, so players needed a
+// grace period to ignore it and the GM needed auto-re-entry to satisfy that grace
+// period. Ably reaps the dropped connection 15s later; a refresh has re-entered under
+// a new connectionId well before that, so the set never empties and no player reacts.
+// The Web Lock is released by the browser on unload, crash included.
 
 // Initialize the full GM app after a campaign is selected.
 function initApp() {
@@ -882,12 +812,10 @@ function initApp() {
     renderTabLayout(); // apply the restored multi-pane layout
     loadConfigInputs();
     if (config.dddiceKey && config.dddiceRoom) initDddice();
-    if (config.ablyKey) initAbly();
-    startGMPresenceBroadcast();
+    if (config.ablyKey) initAbly();   // enters presence with the room + spotlight
+    acquireGMPushLock();
     updateGMPushIframe();   // drives both the hidden push frame and the preview
     applyReadTable();
-    if (sweepIntervalId) clearInterval(sweepIntervalId);
-    sweepIntervalId = setInterval(sweepOfflinePlayers, 10000);
     if (!gmClickHandlerRegistered) {
         document.addEventListener('click', e => { if (!e.target.closest('.gm-select')) closeAllSelects(); });
         gmClickHandlerRegistered = true;
@@ -1408,7 +1336,9 @@ function campaignChannel(base) {
 function initAbly() {
     console.log('[GM] initAbly: connecting with key', config.ablyKey?.slice(0, 8) + '...', '| campaign channel suffix:', currentJoinCode || '(global)');
     try {
-        ablyInstance = new Ably.Realtime({ key: config.ablyKey, transports: ['web_socket'] });
+        // clientId identifies the GM in the presence set. Two GM tabs on one campaign
+        // share it and are told apart by the connectionId Ably assigns each connection.
+        ablyInstance = new Ably.Realtime({ key: config.ablyKey, clientId: 'gm-' + currentCampaignId, transports: ['web_socket'] });
         ablyRolls = ablyInstance.channels.get(campaignChannel('aria-rolls'));
         ablyRollsHidden = ablyInstance.channels.get(campaignChannel('aria-rolls-hidden'));
         ablyCards = ablyInstance.channels.get(campaignChannel('aria-cards'));
@@ -1422,47 +1352,11 @@ function initAbly() {
         ablyRollsHidden.subscribe('roll', msg => { console.log('[GM] received HIDDEN roll from', msg.data?.char, '| skill:', msg.data?.skillName, '| roll:', msg.data?.roll); handleIncomingRoll(msg.data); });
         ablyCards.subscribe('draw',     msg => { console.log('[GM] received card draw:', msg.data?.cardId, 'by player'); handlePlayerCard(msg.data); });
         ablyCards.subscribe('reshuffle', () => { console.log('[GM] received card reshuffle'); handlePlayerReshuffle(); });
-        ablyDamage.subscribe('presence', msg => { handlePresence(msg.data); });
-        ablyDamage.subscribe('leave', msg => {
-            const sessionId = msg.data?.playerId;
-            if (!sessionId) return;
-            // Forget the session's "already bootstrapped" mark. playerId lives in the
-            // player's sessionStorage and survives a reload, so without this a
-            // refreshed tab was still in the set and skipped the immediate
-            // gm-presence reply below — it then had no vdoRoom for up to 8s and
-            // published streamId:'' over its sibling's real one, tearing down a live
-            // camera iframe. (The set also grew one entry per refresh, forever.)
-            filesGrantedSessions.delete(sessionId);
-            const key = _charIdForSession(sessionId);
-            if (!key) return;
-            const survivor = _dropPlayerSession(key, sessionId);
-            if (survivor) {
-                // Another tab on the same character is still alive. Keep the card and
-                // its camera iframe; just retarget damage/heal/grants at the surviving
-                // session, since the departed one will never read them again.
-                const p = players.get(key);
-                if (p && p.playerId === sessionId) { p.playerId = survivor; saveKnownPlayers(); }
-                console.log('[GM] session left but character still open in another tab:', p?.name, '| charId:', key);
-                return;
-            }
-            const p = players.get(key);
-            console.log('[GM] player LEFT (Ably leave):', p?.name, '| charId:', key);
-            players.delete(key);
-            // Drop the spotlight with the card. It is otherwise only cleared by
-            // clicking ☀ again or switching campaign, so a spotlight on a departed
-            // player stayed armed forever — invisible, since the card carrying the ☀
-            // state is gone — and silently re-applied if that player came back.
-            // Deliberately NOT done by sweepOfflinePlayers: `leave` is an explicit
-            // departure, while a silent sweep is usually a network blip the spotlight
-            // should survive. The cost is that a player refreshing their page
-            // (beforeunload publishes `leave` too) loses the spotlight and the GM
-            // re-clicks — but no longer when they merely close a second tab.
-            if (gmSpotlightCharId === key) {
-                gmSpotlightCharId = null;
-                try { ablyDamage.publish('spotlight', { charId: null }); } catch (_) {}
-            }
-            renderPlayerCards();
-        });
+        // The roster. Any change to the set is re-read in full rather than patched,
+        // so the Joueurs tab cannot drift from who is actually connected.
+        ablyPresence = ablyInstance.channels.get(campaignChannel('aria-presence'));
+        ablyPresence.presence.subscribe(() => refreshPresenceSet());
+        publishGMPresence();
         console.log('[GM] initAbly: subscribed to all channels');
     } catch (e) { console.error('[GM] initAbly error:', e); setAblyStatus(false); }
 }
@@ -1471,55 +1365,101 @@ function setAblyStatus(ok) {
     ['ably-dot', 'cfg-ably-dot'].forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
     ['ably-status', 'cfg-ably-status'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
 }
-// Tell players the GM camera session is over: an empty room makes them clear the
-// cached room and switch their push iframe to about:blank (releasing the webcam).
-// Players also expire the GM after 30s of silence, but this makes it immediate.
-// Returns the publish promise (or null) so callers that are about to close the Ably
-// connection can wait for the ack — a fire-and-forget publish followed by close() is
-// dropped, which is how the player's `leave` message is already handled.
-function publishGMPresenceOff() {
-    // Only meaningful if this session actually broadcast a room. Publishing
-    // unconditionally meant a second GM tab opened on the same campaign (before its
-    // room was configured) told every player "session over" and cut their cameras.
-    if (!ablyDamage || !gmPresenceWasOn) return null;
-    gmPresenceWasOn = false;
-    console.log('[GM] publishGMPresenceOff: telling players to stop pushing');
-    try {
-        const p = ablyDamage.publish('gm-presence', { streamId: '', vdoRoom: '', vdoRoomPassword: '', spotlightCharId: null });
-        // Re-arm on failure: the flag is what allows a later attempt (campaign switch,
-        // tab close) to try again. Burning it on a publish that never left would mean
-        // players only stop via the 30s expiry.
-        p?.catch?.(() => { gmPresenceWasOn = true; });
-        return p;
-    } catch (_) { gmPresenceWasOn = true; return null; }
-}
-// Start broadcasting gm-presence (streamId + VDO room) to players every 8s.
-function startGMPresenceBroadcast() {
-    if (gmPresenceIntervalId) { clearInterval(gmPresenceIntervalId); gmPresenceIntervalId = null; }
-    if (!currentVdoRoom || !ablyDamage) {
-        console.log('[GM] startGMPresenceBroadcast: skipped (vdoRoom:', currentVdoRoom || 'empty', '| ablyDamage:', !!ablyDamage, ')');
-        // The room was just cleared in the config modal: without this final publish
-        // the players keep the last known room and keep streaming their webcam.
-        if (!currentVdoRoom) publishGMPresenceOff();
-        return;
-    }
-    // Computed per tick, not captured once: the kill switch and the spotlight both
-    // change between heartbeats. The push claim is renewed on the same tick — this is
-    // the only timer that runs exactly when the GM has a room, which is exactly when
-    // pushing matters.
-    const publish = () => {
-        const had = gmPushClaimHeld;
-        gmPushClaimHeld = refreshGMPushClaim();
-        if (gmPushClaimHeld !== had) {
-            console.log('[GM] push claim', gmPushClaimHeld ? 'acquired' : 'lost to another GM tab');
-            updateGMPushIframe();
-        }
-        ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
+// ── Presence: publish ─────────────────────────────────────────────────────────
+// What the GM tells the table: the VDO room, the MJ stream, and the spotlight.
+// Published as presence member data, so it is part of the roster rather than a
+// broadcast that has to be repeated on a timer for late joiners — `presence.get()`
+// hands a player who connects an hour from now exactly the same thing.
+//
+// There is no "session over" message to publish, and so none to be misread as one:
+// leaving the presence set IS the signal, and Ably emits it when the connection
+// goes. That also removes the second-GM-tab hazard the old flag guarded against —
+// a tab that has entered cannot make the set look empty while its sibling is in it.
+let gmPresenceEntered = false;
+function gmPresenceData() {
+    return {
+        role: 'gm',
+        streamId: gmAdvertisedStreamId(),
+        vdoRoom: currentVdoRoom,
+        vdoRoomPassword: currentVdoRoomPassword,
+        spotlightCharId: gmSpotlightCharId,
+        ts: Date.now(),
     };
-    gmPresenceWasOn = true;   // this session has told players about a room — an "off" is now warranted
-    publish();
-    gmPresenceIntervalId = setInterval(publish, 8000);
-    console.log('[GM] startGMPresenceBroadcast: broadcasting every 8s | streamId:', gmAdvertisedStreamId());
+}
+// Announce, or republish after a change to the room / kill switch / spotlight.
+function publishGMPresence() {
+    if (!ablyPresence) return;
+    const d = gmPresenceData();
+    if (gmPresenceEntered) {
+        ablyPresence.presence.update(d).catch(err => console.error('[GM] presence update:', err));
+    } else {
+        ablyPresence.presence.enter(d).then(
+            () => { gmPresenceEntered = true; console.log('[GM] entered presence | room:', currentVdoRoom || '(none)', '| streamId:', d.streamId || '(none)'); },
+            err => console.error('[GM] presence enter:', err));
+    }
+}
+
+// ── Presence: consume ─────────────────────────────────────────────────────────
+// Re-read the whole set on any change and rebuild `players` from it.
+async function refreshPresenceSet() {
+    if (!ablyPresence) return;
+    try { applyPresenceSet(await ablyPresence.presence.get()); }
+    catch (err) { console.error('[GM] presence get:', err); }
+}
+function applyPresenceSet(members) {
+    // Collapse members to participants: several tabs of one character share a
+    // clientId and differ by connectionId, as does the ghost of a tab that refreshed
+    // until Ably reaps it. Newest ts wins, which is always a live tab.
+    const byId = new Map();
+    (members || []).forEach(m => {
+        const d = m.data || {};
+        if (!m.clientId || d.role !== 'player') return;
+        const prev = byId.get(m.clientId);
+        if (!prev || (d.ts || 0) >= (prev.ts || 0)) byId.set(m.clientId, d);
+    });
+    // Everyone currently in the set is online; everyone we knew who is not, is not.
+    // No sweep, no PRESENCE_TIMEOUT, no last-seen arithmetic. Entries are marked
+    // offline rather than deleted: `players` doubles as the known-players snapshot
+    // that lists the table when nobody is connected.
+    players.forEach(p => { p.online = false; });
+    byId.forEach((data, charId) => { handlePresence(charId, data); });
+    // Bootstrap sessions that have just appeared, and forget the ones that went, so a
+    // player who reconnects is bootstrapped again. Keyed by connectionId — the real
+    // per-tab identity, which (unlike the old sessionStorage id) cannot survive a
+    // reload and leave a refreshed tab looking already-served.
+    const liveConns = new Set((members || []).map(m => m.connectionId).filter(Boolean));
+    [...filesGrantedSessions].forEach(c => { if (!liveConns.has(c)) filesGrantedSessions.delete(c); });
+    let anyNewSession = false;
+    (members || []).forEach(m => {
+        const d = m.data || {};
+        if (!m.connectionId || d.role !== 'player') return;
+        // `online` is the proof handlePresence ACCEPTED this member — `players` can
+        // also hold offline entries restored from the known-players snapshot, and
+        // bootstrapping off those would send this campaign's files to a member whose
+        // campaignKey or ariaType we just rejected.
+        const p = players.get(m.clientId);
+        if (!p || p.online !== true) return;
+        if (filesGrantedSessions.has(m.connectionId)) return;
+        filesGrantedSessions.add(m.connectionId);
+        sendFileGrantsToPlayer(p);
+        anyNewSession = true;
+    });
+    // Once per apply, not once per new member: publishMusicPlay is a broadcast to the
+    // whole table, so a loop would re-send it to everyone for each arrival.
+    if (anyNewSession && musicIsPlaying && _currentTrack()) publishMusicPlay(_currentTrack());
+    // Drop the spotlight when the player carrying it leaves the set — it is otherwise
+    // only cleared by clicking ☀ again, so it stayed armed on a departed player,
+    // invisible (the card carrying the ☀ state is gone) and silently re-applied if
+    // they came back. Ably has already waited out a reconnect before reporting the
+    // departure, so this no longer fires on a refresh or a closed second tab.
+    if (gmSpotlightCharId && !byId.has(gmSpotlightCharId)) {
+        console.log('[GM] spotlighted player left — clearing spotlight');
+        gmSpotlightCharId = null;
+        publishGMPresence();
+    }
+    saveKnownPlayers();
+    clearTimeout(renderPlayerCardsTimer);
+    renderPlayerCardsTimer = setTimeout(renderPlayerCards, 150);
 }
 // ═══════════════════════════════════════════
 //  PRESENCE — "Lire la table" + Spotlight (design frame 26)
@@ -1541,7 +1481,7 @@ function applyReadTable() {
 // Clicking the same player again clears the spotlight.
 function toggleSpotlight(charId) {
     gmSpotlightCharId = gmSpotlightCharId === charId ? null : charId;
-    if (ablyDamage) ablyDamage.publish('spotlight', { charId: gmSpotlightCharId });
+    publishGMPresence();   // the spotlight lives in our presence data
     renderPlayerCards();
 }
 
@@ -1549,19 +1489,19 @@ function toggleSpotlight(charId) {
 function gmDerivedStreamId() {
     return currentCampaignId ? 'aria-gm-' + currentCampaignId.slice(0, 8) : '';
 }
-// What gm-presence actually advertises. Empty while the camera is cut, for the same
+// What our presence data advertises. Empty while the camera is cut, for the same
 // reason the player sends an empty streamId then: an ID nobody is pushing makes every
 // receiver open a viewer iframe on a dead stream — a black box on each player's rail
-// and, worse, on the OBS output. The room stays in the payload, so this is NOT the
-// all-empty "session over" signal and players keep publishing their own cameras.
+// and, worse, on the OBS output. `vdoRoom` stays in the member data, so cutting the
+// camera is NOT "session over" and players keep publishing their own cameras; only
+// the MJ tile goes.
 //
-// Also empty when the claim record has gone stale, which is the only cross-tab
-// evidence available that nobody is pushing: if the claiming tab crashes (no
-// beforeunload, so no release), this stops advertising a dead stream after the TTL
-// instead of leaving receivers on a black tile until the survivor takes over. The
-// record is shared, so both tabs answer identically and the tile never flips.
+// Both terms are shared state that every GM tab reads identically, so they advertise
+// the same ID and the MJ tile cannot flip between them — and if the tab holding the
+// push lock dies, the browser hands the lock to a queued sibling immediately, so
+// there is no window in which the advertised ID has no publisher behind it.
 function gmAdvertisedStreamId() {
-    return (gmCameraOff || !gmPushClaimLive()) ? '' : gmDerivedStreamId();
+    return (gmCameraOff || !currentVdoRoom) ? '' : gmDerivedStreamId();
 }
 function gmCameraOffKey() { return 'aria-gm-camera-off-' + currentCampaignId; }
 // Cut / restore the GM camera. Off ⇒ push iframe to about:blank (webcam released),
@@ -1572,9 +1512,7 @@ function toggleGMCamera() {
     if (currentCampaignId) localStorage.setItem(gmCameraOffKey(), gmCameraOff ? '1' : '0');
     console.log('[GM] camera', gmCameraOff ? 'OFF (local)' : 'ON');
     updateGMPushIframe();
-    if (ablyDamage && currentVdoRoom) {
-        ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
-    }
+    publishGMPresence();   // players drop the MJ tile as soon as this lands
 }
 // Sync the topbar kill-switch button. Only meaningful while a room is active — with
 // no room nothing is published either way, so the control would be a no-op.
@@ -1616,14 +1554,14 @@ function updateGMPushIframe() {
     // The preview follows the first, the push frame the second, exactly as on the
     // player side: a tab that isn't the pusher still views what its sibling publishes.
     const sid = gmDerivedStreamId();
-    // gmPushClaimLive(): a preview is a viewer of our own stream, so it is only worth
-    // showing while some tab is publishing it — same rule as the advertised ID.
-    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushClaimLive();
-    const shouldPush = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushClaimHeld;
+    // The preview is a viewer of our own stream, so it is only worth showing while
+    // some tab is publishing it — the same rule as the advertised ID.
+    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff;
+    const shouldPush = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushLockHeld;
     if (!shouldPush) {
         const why = gmCameraOff ? 'camera cut by the GM'
                   : !currentVdoRoom ? 'no vdoRoom'
-                  : 'another GM tab holds the push claim';
+                  : 'another GM tab holds the push lock';
         console.log('[GM] updateGMPushIframe:', why, '— clearing push iframe');
         // 'about:blank', never '' — an empty src resolves to the page's own URL and
         // would load a second copy of the GM app inside the iframe.
@@ -1711,19 +1649,17 @@ function publishMusicResume() {
 // ═══════════════════════════════════════════
 //  PLAYER PRESENCE
 // ═══════════════════════════════════════════
-// Process a player presence heartbeat: update the players Map and trigger card/music/file grants.
-function handlePresence(data) {
-    if (!data?.playerId || !data?.charId) { console.warn('[GM] handlePresence: missing playerId or charId', data); return; }
-    if (!_isIdToken(data.charId) || !_isIdToken(data.playerId)) {
-        console.warn('[GM] handlePresence: IGNORED (malformed charId/playerId)', data.charId, data.playerId);
-        return;
-    }
+// Project one presence member onto the players Map. The set decides who is here;
+// this only validates and shapes what they published about themselves.
+function handlePresence(charId, data) {
+    if (!charId || !_isIdToken(charId)) { console.warn('[GM] handlePresence: malformed charId', charId); return; }
     if (currentJoinCode && (data.campaignKey || '') !== currentJoinCode) { console.log('[GM] handlePresence: IGNORED (campaignKey mismatch:', data.campaignKey, 'vs', currentJoinCode, ') from', data.name); return; }
     if (currentCampaignType && (data.ariaType || 'ancient') !== currentCampaignType) { console.log('[GM] handlePresence: IGNORED (ariaType mismatch:', data.ariaType, 'vs', currentCampaignType, ') from', data.name); return; }
-    // Numeric fields are interpolated into innerHTML by the card renders — coerce
-    // them here so a crafted presence payload can't smuggle markup through them.
+    // Presence data is still remote-controlled — anyone holding the Ably key can enter
+    // the set — so the coercion that keeps crafted values out of innerHTML stays.
     const playerData = {
         ...data,
+        charId,
         hp:    _finiteNum(data.hp),
         maxHP: _finiteNum(data.maxHP),
         vials: _finiteNum(data.vials) ?? 0,
@@ -1733,52 +1669,9 @@ function handlePresence(data) {
     // reload wipes the in-memory map; without this, the next ± click would send
     // karma-set with ±1 and clobber the player's real karma). After seeding, the
     // GM's local value stays authoritative — the GM is the only karma writer.
-    if (!(data.charId in gmKarma)) gmKarma[data.charId] = _finiteNum(data.karma) ?? 0;
-    _touchPlayerSession(data.charId, data.playerId);
-    players.set(data.charId, playerData);
-    saveKnownPlayers();
-    syncKnownPlayer(data.charId, playerData);
-    clearTimeout(renderPlayerCardsTimer);
-    renderPlayerCardsTimer = setTimeout(renderPlayerCards, 150);
-    // Auto-send file grants, music state, and gm-presence to newly connected sessions
-    if (!filesGrantedSessions.has(data.playerId)) {
-        filesGrantedSessions.add(data.playerId);
-        sendFileGrantsToPlayer(data);
-        if (musicIsPlaying && _currentTrack()) {
-            publishMusicPlay(_currentTrack());
-        }
-        if (currentVdoRoom && ablyDamage) {
-            console.log('[GM] new session detected — sending immediate gm-presence to', data.name);
-            ablyDamage.publish('gm-presence', { streamId: gmAdvertisedStreamId(), vdoRoom: currentVdoRoom, vdoRoomPassword: currentVdoRoomPassword, spotlightCharId: gmSpotlightCharId });
-        }
-    }
-}
-// Mark players as offline when they stop sending heartbeats. Never hard-delete
-// here: the players Map doubles as the known-players snapshot (persisted via
-// saveKnownPlayers) that repopulates the Joueurs tab offline — deleting silent
-// entries wiped restored snapshots on the first sweep after entering a campaign.
-// Explicit removal happens through the 'leave' message on character switch.
-function sweepOfflinePlayers() {
-    const now = Date.now();
-    let changed = false;
-    players.forEach((p, id) => {
-        const age = now - (p.ts || 0);
-        const wasOnline = p.online !== false;
-        const isOnline = age < PRESENCE_TIMEOUT;
-        if (wasOnline !== isOnline) {
-            console.log('[GM] sweep:', p.name, isOnline ? '→ ONLINE' : '→ OFFLINE', '(last seen', Math.round(age/1000), 's ago)');
-            p.online = isOnline; changed = true;
-        }
-        else if (p.online === undefined) { p.online = isOnline; changed = true; }
-    });
-    // Sessions were only ever pruned inside _dropPlayerSession, i.e. when a `leave`
-    // happened to arrive for that character — so tabs that crashed silently left
-    // entries behind indefinitely. The player and overlay already sweep theirs.
-    playerSessions.forEach((s, cid) => {
-        s.forEach((ts, pid) => { if (now - ts > PRESENCE_TIMEOUT) s.delete(pid); });
-        if (!s.size) playerSessions.delete(cid);
-    });
-    if (changed) { saveKnownPlayers(); renderPlayerCards(); }
+    if (!(charId in gmKarma)) gmKarma[charId] = _finiteNum(data.karma) ?? 0;
+    players.set(charId, playerData);
+    syncKnownPlayer(charId, playerData);
 }
 // Render/update all player cards with in-place DOM updates to preserve camera iframes.
 // Cosmetic combat-feedback FX on a player/monster card (flash + shake + number pop).
@@ -1819,7 +1712,7 @@ function renderPlayerCards() {
         if (!players.has(el.dataset.charId)) el.remove();
     });
     players.forEach((p, charId) => {
-        const isOnline = p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT;
+        const isOnline = p.online !== false;
         // Coerce here too: known-players snapshots persisted before the presence
         // coercion existed can still hold arbitrary values.
         const hp = _finiteNum(p.hp) ?? _finiteNum(p.maxHP) ?? '?', maxHP = _finiteNum(p.maxHP) ?? '?';
@@ -2114,7 +2007,7 @@ function closePlayerDetails() {
 }
 // Send a tab-config message to toggle a player's Cartes or Alchimie tab access.
 // `charId` is the stable character UUID (the players Map key); the published
-// payload targets the session `p.playerId`.
+// payload targets the character, so every tab of it applies the change.
 function sendTabConfig(charId, tab, enabled) {
     if (!ablyDamage) { console.warn('[GM] sendTabConfig: ablyDamage not ready'); return; }
     const p = players.get(charId);
@@ -2122,7 +2015,7 @@ function sendTabConfig(charId, tab, enabled) {
     if (!p.tabs) p.tabs = { cards: false, alchemy: false };
     p.tabs[tab] = enabled;
     console.log('[GM] sendTabConfig → ', p.name, '| tab:', tab, '=', enabled, '| full tabs:', JSON.stringify(p.tabs));
-    ablyDamage.publish('tab-config', { playerId: p.playerId, tabs: p.tabs });
+    ablyDamage.publish('tab-config', { charId: p.charId, tabs: p.tabs });
     openPlayerDetails(charId); // refresh modal to reflect new state
 }
 
@@ -2140,7 +2033,7 @@ function applyPlayerDamage(charId) {
     console.log('[GM] applyPlayerDamage:', p.name, '| raw:', rawDmg, '| armor:', prot, '| net dmg:', dmg, '| HP:', hpBefore, '→', hpAfter);
     p.hp = hpAfter;
     inp.value = '';
-    publishDamage(p.playerId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
+    publishDamage(p.charId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
     triggerCardFx(playerCardEl(charId), 'dmg');
 }
@@ -2156,7 +2049,7 @@ function applyPlayerHeal(charId) {
     console.log('[GM] applyPlayerHeal:', p.name, '| heal:', amt, '| HP:', hpBefore, '→', hpAfter);
     p.hp = hpAfter;
     inp.value = '';
-    publishHeal(p.playerId, amt, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
+    publishHeal(p.charId, amt, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
     triggerCardFx(playerCardEl(charId), 'heal');
 }
@@ -2811,7 +2704,7 @@ function showGMRollResult(name, threshold, roll, success, dmgResult) {
         : '';
     let targetHtml = '';
     if (dmgResult) {
-        const online = [...players.entries()].filter(([, p]) => p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT);
+        const online = [...players.entries()].filter(([, p]) => p.online !== false);
         if (online.length) {
             const btns = online.map(([id, p]) => `<button class="gm-target-btn" data-pid="${id}" onclick="applyDamageToPlayer('${id}',${dmgResult.total})">${_escHtml(p.name || id.slice(-4))}</button>`).join('');
             targetHtml = `<div class="gm-target-section"><div class="gm-target-label">Appliquer à :</div><div class="gm-target-btns">${btns}</div></div>`;
@@ -2834,7 +2727,7 @@ function applyDamageToPlayer(charId, amount) {
     const hpBefore = p.hp ?? p.maxHP ?? 0;
     const hpAfter = Math.max(0, hpBefore - dmg);
     p.hp = hpAfter;
-    publishDamage(p.playerId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
+    publishDamage(p.charId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     renderPlayerCards();
     const btn = document.querySelector(`.gm-target-btn[data-pid="${charId}"]`);
     if (btn) { btn.disabled = true; btn.classList.add('applied'); btn.textContent = `✓ ${p.name || charId}`; }
@@ -2855,14 +2748,14 @@ function bulkDamageAll() {
     const inp = document.getElementById('bulk-dmg-input');
     const rawDmg = parseInt(inp?.value);
     if (!rawDmg || rawDmg <= 0) return;
-    const online = [...players.entries()].filter(([, p]) => p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT);
+    const online = [...players.entries()].filter(([, p]) => p.online !== false);
     online.forEach(([id, p]) => {
         const prot = p.protection?.valeur || 0;
         const dmg = Math.max(0, rawDmg - prot);
         const hpBefore = p.hp ?? p.maxHP ?? 0;
         const hpAfter = Math.max(0, hpBefore - dmg);
         p.hp = hpAfter;
-        publishDamage(p.playerId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
+        publishDamage(p.charId, dmg, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     });
     if (inp) inp.value = '';
     renderPlayerCards();
@@ -2873,12 +2766,12 @@ function bulkHealAll() {
     const inp = document.getElementById('bulk-heal-input');
     const amt = parseInt(inp?.value);
     if (!amt || amt <= 0) return;
-    const online = [...players.entries()].filter(([, p]) => p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT);
+    const online = [...players.entries()].filter(([, p]) => p.online !== false);
     online.forEach(([id, p]) => {
         const hpBefore = p.hp ?? 0;
         const hpAfter = Math.min(p.maxHP || hpBefore, hpBefore + amt);
         p.hp = hpAfter;
-        publishHeal(p.playerId, amt, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
+        publishHeal(p.charId, amt, hpBefore, hpAfter, p.maxHP || hpBefore, p.name);
     });
     if (inp) inp.value = '';
     renderPlayerCards();
@@ -2892,7 +2785,7 @@ function setPlayerKarma(charId, delta) {
     gmKarma[charId] = (gmKarma[charId] ?? 0) + delta;
     const p = players.get(charId);
     if (p && ablyDamage) {
-        ablyDamage.publish('karma-set', { playerId: p.playerId, karma: gmKarma[charId] });
+        ablyDamage.publish('karma-set', { charId: p.charId, karma: gmKarma[charId] });
     }
     renderPlayerCards();
 }
@@ -2986,8 +2879,9 @@ function saveConfig() {
     if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
     ablyInstance = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     if (config.dddiceKey && config.dddiceRoom) initDddice();
-    if (config.ablyKey) initAbly();
-    startGMPresenceBroadcast();
+    ablyPresence = null; gmPresenceEntered = false;
+    if (config.ablyKey) initAbly();   // re-enters presence with the new room
+    acquireGMPushLock();
     updateGMPushIframe();
     // Setting or clearing the room changes whether player cards may carry a camera at
     // all. Without this the grid waited for the next presence heartbeat (up to 5s) —
@@ -3451,13 +3345,13 @@ function sendPotionGrant(charId, potionId) {
     const alreadyGranted = player.potionRecipeIds.includes(potionId);
     if (alreadyGranted) {
         console.log('[GM] sendPotionGrant: REVOKING potion', potionId, 'from', player.name);
-        ablyDamage.publish('potion-revoke', { playerId: player.playerId, potionId });
+        ablyDamage.publish('potion-revoke', { charId: player.charId, potionId });
         player.potionRecipeIds = player.potionRecipeIds.filter(id => id !== potionId);
     } else {
         const pot = gmPotions.find(p => p.id === potionId);
         if (!pot) return;
         console.log('[GM] sendPotionGrant: GRANTING potion', pot.name, 'to', player.name);
-        ablyDamage.publish('potion-grant', { playerId: player.playerId, potion: { ...pot } });
+        ablyDamage.publish('potion-grant', { charId: player.charId, potion: { ...pot } });
         player.potionRecipeIds.push(potionId);
     }
     openPlayerDetails(charId);
@@ -3468,7 +3362,7 @@ function sendVialGrant(charId, qty) {
     const p = players.get(charId);
     if (!p) return;
     console.log('[GM] sendVialGrant:', qty, 'vials to', p.name);
-    ablyDamage.publish('vial-grant', { playerId: p.playerId, qty });
+    ablyDamage.publish('vial-grant', { charId: p.charId, qty });
 }
 
 // ═══════════════════════════════════════════
@@ -4400,7 +4294,7 @@ async function handleFileUpload(input) {
 async function removeGmFile(fileId) {
     const f = gmFiles.find(f => f.id === fileId);
     if (!f) return;
-    if (ablyDamage) ablyDamage.publish('file-revoke', { playerId: 'all', fileId });
+    if (ablyDamage) ablyDamage.publish('file-revoke', { charId: 'all', fileId });
     await deleteFileFromStorage(f.path);
     sbDelete('campaign_files', 'id=eq.' + encodeURIComponent(fileId));
     gmFiles = gmFiles.filter(f => f.id !== fileId);
@@ -4416,14 +4310,14 @@ function grantFileToAll(fileId) {
     if (f.grantedTo === 'all') {
         console.log('[GM] grantFileToAll: REVOKING', f.name, 'from all');
         f.grantedTo = [];
-        if (ablyDamage) ablyDamage.publish('file-revoke', { playerId: 'all', fileId });
+        if (ablyDamage) ablyDamage.publish('file-revoke', { charId: 'all', fileId });
     } else {
         console.log('[GM] grantFileToAll: GRANTING', f.name, 'to all online players');
         f.grantedTo = 'all';
         if (ablyDamage) {
             players.forEach(p => {
-                if (p.online !== false && Date.now() - p.ts < PRESENCE_TIMEOUT) {
-                    ablyDamage.publish('file-grant', { playerId: p.playerId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
+                if (p.online !== false) {
+                    ablyDamage.publish('file-grant', { charId: p.charId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
                 }
             });
         }
@@ -4442,11 +4336,11 @@ function grantFileToPlayer(fileId, charId) {
     if (f.grantedTo.includes(charId)) {
         console.log('[GM] grantFileToPlayer: REVOKING', f.name, 'from', p.name);
         f.grantedTo = f.grantedTo.filter(id => id !== charId);
-        if (ablyDamage) ablyDamage.publish('file-revoke', { playerId: p.playerId, fileId });
+        if (ablyDamage) ablyDamage.publish('file-revoke', { charId: p.charId, fileId });
     } else {
         console.log('[GM] grantFileToPlayer: GRANTING', f.name, 'to', p.name);
         f.grantedTo.push(charId);
-        if (ablyDamage) ablyDamage.publish('file-grant', { playerId: p.playerId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
+        if (ablyDamage) ablyDamage.publish('file-grant', { charId: p.charId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
     }
     saveGmFiles();
     openPlayerDetails(charId);
@@ -4460,7 +4354,7 @@ function sendFileGrantsToPlayer(playerData) {
         const shouldGrant = f.grantedTo === 'all' || (Array.isArray(f.grantedTo) && f.grantedTo.includes(playerData.charId));
         if (shouldGrant) {
             grants.push(f.name);
-            ablyDamage.publish('file-grant', { playerId: playerData.playerId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
+            ablyDamage.publish('file-grant', { charId: playerData.charId, file: { id: f.id, name: f.name, type: f.type, url: f.url } });
         }
     }
     if (grants.length) console.log('[GM] sendFileGrantsToPlayer:', playerData.name, '| files:', grants.join(', '));

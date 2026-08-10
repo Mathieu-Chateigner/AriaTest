@@ -81,7 +81,8 @@ All three apps share **one Ably key** (entered on `index.html`) and use five gam
 | `aria-rolls` | `aria-player` (per roll) | `aria-gm` (roll feed) + other `aria-player` instances (toast) + `aria-overlay` |
 | `aria-rolls-hidden` | `aria-player` (rolls made with **Jet caché** armed) | `aria-gm` only — other players and the overlay never subscribe |
 | `aria-cards` | `aria-player` or `aria-gm` | `aria-overlay` |
-| `aria-damage` | `aria-gm` (damage/heal/gm-presence/monster-state/tab-config/grants/karma-set/spotlight) + `aria-player` (presence heartbeat every 5s, `leave` on switch **and on tab close**, Soigner damage/heal to a target) | `aria-player` (GM damage/heal + gm-presence + grants + peer presence) + `aria-gm` (presence + leave) + `aria-overlay` (presence + **leave** + gm-presence for the camera widgets' VDO room + monster-state; ignores `source:'player'` damage/heal — see payloads) |
+| `aria-damage` | `aria-gm` (damage/heal/monster-state/tab-config/grants/karma-set) + `aria-player` (Soigner damage/heal to a target) | `aria-player` (GM damage/heal + grants, all addressed by `charId`) + `aria-overlay` (monster-state; ignores `source:'player'` damage/heal — see payloads) |
+| `aria-presence` | `aria-player` + `aria-gm` (Ably **presence** enter/update — not messages) | all three, via `presence.subscribe` + `presence.get`. The presence set is the roster: who is connected, each participant's character data, and the GM's room/spotlight. See *Presence*. |
 | `aria-music` | `aria-gm` (play/stop/pause/resume commands) | `aria-player` (subscribe only) — GM does **not** subscribe to its own commands |
 | `aria-overlay-config` | overlay editor (layout/content updates) | `aria-overlay` (receives layout changes in real time) |
 
@@ -118,13 +119,13 @@ Both player and GM use a **save key** (UUID) to sync localStorage to Supabase, e
 **Sync architecture** — `js/aria-supabase.js` exposes shared helpers (`sbUpsert`, `sbDelete`, `sbSelect`, `sbInsert`, `runMigration`). Both panels use **per-entity granular sync** — separate debounced functions per data type — rather than one monolithic blob. `localStorage` is always the runtime source of truth; Supabase is only the persistence layer.
 
 - Player: `debouncedSync()` for character data, `debouncedSyncState()` for HP/cards/tabs, `syncCharacterNote` / `deleteCharacterNote` for notes, `syncCharacterFile` / `deleteCharacterFile` for files.
-- GM: `syncCampaign`, `debouncedSyncMonsters`, `insertRoll` / `insertCardHistory` (append-only — `clearRolls()` / `clearCardHistory()` never touch the DB), `debouncedSyncPotions`, `debouncedSyncFiles`, `syncGMNote` / `deleteGMNoteFromDB`, `syncKnownPlayer` (called on every presence heartbeat), `syncMusicTrack` / `debouncedSyncMusic` / `deleteMusicTrackFromDB` (Supabase table `campaign_music`; field `youtube_id` maps to `youtubeId` in JS).
+- GM: `syncCampaign`, `debouncedSyncMonsters`, `insertRoll` / `insertCardHistory` (append-only — `clearRolls()` / `clearCardHistory()` never touch the DB), `debouncedSyncPotions`, `debouncedSyncFiles`, `syncGMNote` / `deleteGMNoteFromDB`, `syncKnownPlayer` (called whenever the presence set changes), `syncMusicTrack` / `debouncedSyncMusic` / `deleteMusicTrackFromDB` (Supabase table `campaign_music`; field `youtube_id` maps to `youtubeId` in JS).
 - `runMigration` is a one-time runner that reads the old JSON blob from `saves` and populates the relational tables. It checks `player_migrated_at` / `gm_migrated_at` flags to skip if already done.
 
 ### No server, no build
 
 - State persisted in `localStorage` (character, config, cards, HP, monsters, potions)
-- `sessionStorage` holds the per-tab `playerId` (UUID, regenerates per tab)
+- `sessionStorage` holds the per-tab `playerId` (UUID, regenerates per tab) — used only to suppress the toast for one's own roll; see *Player identity*
 
 ### Config — shared between player and GM
 
@@ -162,7 +163,6 @@ All campaign-scoped data uses keys suffixed with `currentCampaignId`:
 | `aria-gm-notes-{id}` | GM notes `[{ id, name, content }]` |
 | `aria-gm-known-players-{id}` | last-seen presence snapshot per charId (repopulates the Joueurs tab offline) |
 | `aria-gm-camera-off-{id}` | `'1'` when the GM cut their own camera (kill switch, survives refresh) |
-| `aria-gm-push-claim-{id}` | `{ tabId, ts }` — which GM tab owns the webcam (see *Only one tab pushes*) |
 
 Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()`, `gmNotesKey()`, `knownPlayersKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key. (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
 
@@ -172,70 +172,82 @@ Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`,
 
 Three distinct identifiers — do not conflate them:
 - `character.name` — display name, sent as `char` in roll payloads and `name` in presence.
-- `playerId` — per-tab session UUID (sessionStorage), used to **target** Ably messages (grants, damage, tab-config). Changes on every refresh.
-- `charId` — stable character UUID, used as the key in the GM `players` Map and to derive the VDO.ninja stream ID.
+- `charId` — stable character UUID. It is the Ably **`clientId`**, so it identifies the participant in the presence set, keys the GM `players` Map, **targets** every addressed message (grants, damage, tab-config, karma-set), and derives the VDO.ninja stream ID.
+- `playerId` — per-tab session UUID (sessionStorage). Now used **only** in roll payloads, to suppress the toast for one's own roll. It is deliberately not the targeting token: a second tab of the same character should still be told about a roll made in the first, but it *should* receive that character's damage and grants.
+- `connectionId` — assigned by Ably per connection, never by this code. It is what distinguishes two tabs sharing a `clientId`, and the GM keys `filesGrantedSessions` by it.
+
+### Presence — Ably Presence API
+
+**Liveness is not computed by this codebase.** All three apps use the presence set of a per-campaign channel, `aria-presence-{JOINCODE}`, as the roster. The player and the GM `enter()` it and `update()` their member data on change; the overlay only subscribes. Any change to the set is handled by re-reading it whole (`presence.get()`) rather than patching a local copy, so no app can drift from the server's view.
+
+- **Player** — `clientId = charId`, member data is the character payload (see *Ably message payloads*).
+- **GM** — `clientId = 'gm-' + campaignId`, member data is `{ role:'gm', streamId, vdoRoom, vdoRoomPassword, spotlightCharId, ts }`.
+- **Overlay** — no `clientId`, never enters. Observers do not need one.
+
+Two properties of Ably presence carry the design, and most of what used to live here was a hand-rolled substitute for them:
+
+**A `clientId` may be present several times, differentiated by `connectionId`.** One character open in two tabs is two members, not a contested single slot. There is no per-character session registry in any of the three apps, and closing one tab cannot drop the character — the other member is still in the set. Members are collapsed to participants by `clientId`, newest `ts` winning.
+
+**An abrupt disconnect is reported as `leave` after 15 seconds.** A page refresh opens a *new* connection that enters before the old one is reaped, so the set is never empty across a reload. This is why **neither app has a `beforeunload` handler** and why nothing announces its own departure: there is no signal that could be misread as a shutdown, so there is no grace period to ignore it and no auto-re-entry needed to satisfy that grace period. Do not add one back — the previous design needed three mechanisms whose combined effect on a refresh was to do nothing, and each was a bug source on its own. Ably's 15s can be shortened via `remainPresentFor` in `transportParams` if a genuine departure ever needs to be noticed faster; the trade is churn on flaky links.
+
+Consequences worth stating because they used to be code:
+
+- The GM has no `gm-presence` heartbeat. Room, MJ stream and spotlight are member data, so a player connecting an hour later gets them from `presence.get()` — which is what the 8s rebroadcast and the "immediate reply to new sessions" existed for.
+- The GM has no offline sweep. `players` entries are marked `online:false` when they leave the set and kept, since that map doubles as the known-players snapshot; the camera iframe is gated on `online`.
+- The player has no 5s heartbeat. Presence is republished from `saveCurrentCharacter()`, the HP handlers, and the tab-config handler — every place that used to rely on the next tick. `schedulePresence()` debounces bursts at 250ms.
+- **Targeted messages on `aria-damage` address the `charId`, not a tab.** Every tab of a character receives and applies them, so a message can no longer be delivered to the tab that just closed — which is what the "repoint the stored `playerId` at a surviving session" logic existed to prevent. `playerId` survives only in roll payloads, where it suppresses the toast for one's *own* roll (a second tab of the same character should still be told).
 
 ### VDO.ninja camera integration
 
 Each participant's camera stream is identified by an **auto-derived stream ID** — players never set this manually:
-- Player: `'aria-' + charId.slice(0, 8)` — derived in `derivedStreamId()` in `aria-player.js`
-- GM: `'aria-gm-' + campaignId.slice(0, 8)` — derived inline in `startGMPresenceBroadcast()`
+- Player: `'aria-' + charId.slice(0, 8)` — `derivedStreamId()` in `aria-player.js`
+- GM: `'aria-gm-' + campaignId.slice(0, 8)` — `gmDerivedStreamId()` in `aria-gm.js`
 
-The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. This is broadcast to players every **8s** via `gm-presence` on `aria-damage` (plus immediately when a new player session appears). Players activate their hidden push iframe (`#vdo-push-frame`) when they receive the room from `gm-presence`. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
+The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. It reaches players as part of the GM's presence member data. Players activate their hidden push iframe (`#vdo-push-frame`) once they see a room. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
 
 **Viewer iframes need the room password too.** Streams pushed into a password-protected room are encrypted, so a bare `?view=SID` stays black — `vdoViewSrc()` (player), `gmVdoViewSrc()` (GM) and `vdoCamSrc()` (overlay) all append `&room` + `&password`. (An earlier version of this file claimed viewers didn't need it; that was wrong and cost a debugging session.)
 
 **The push iframes live outside the tab/pane layout** — `#vdo-push-frame` (player) and `#vdo-gm-push-frame` (GM) are siblings of `#app-wrapper`, fixed and full-viewport at `opacity:0`. Never `display:none` (can block camera capture) and never visible (the self-preview shows through the app's transparent backgrounds). The GM's push frame used to sit inside the Joueurs tab, whose `.tab-content` goes `display:none` on every tab switch — the GM camera silently died. What shows in the Joueurs tab is a **muted viewer** of the GM's own stream, which is safe to hide.
 
-**The GM broadcast is expired like a peer.** Players stamp `gmPresenceTs` on every `gm-presence`; `prunePeers()` (5s tick) clears `gmStreamId`/`vdoRoom`/`vdoRoomPassword` and calls `updatePushIframe()` after **30s** of silence. Without this the cached room lived forever and the player's push iframe kept broadcasting the webcam after the GM closed the session. The GM also publishes an **empty** `gm-presence` (`publishGMPresenceOff()`) when the room is cleared in the config modal, on `switchCampaign()`, and on `beforeunload`. Players act on it after a **12s grace period** (`GM_OFF_GRACE_MS`, cancelled the moment a room reappears) — not immediately. `beforeunload` also fires on a plain page refresh, and the documented dev loop is "save, `Ctrl+Shift+R`", so an immediate teardown restarted every player's camera (iframe reload + WebRTC renegotiation) on every GM reload. The grace period is longer than the 8s heartbeat, so a reload never interrupts anything while a real shutdown still stops in ~12s — **provided the GM is actually back inside the campaign within those 12s**, which is what *Auto re-entry* below is for. While the GM landed on the selection screen and waited for a click, the grace period almost always lapsed and every camera restarted anyway. `stopGMSession()` is the single teardown path, shared by the grace timer and the 30s silence expiry. Two rules on that function: it **returns the publish promise** and `switchCampaign()` awaits it before `ablyInstance.close()` (closing right after a fire-and-forget publish drops the message — the player's `leave` is awaited for the same reason), and it is gated on `gmPresenceWasOn` so a second GM tab opened on the same campaign, before its own room is configured, doesn't tell every player "session over" and cut their cameras.
+**The session ends when the GM leaves the presence set.** Players then clear the room and blank the push iframe. There is no "session over" message, no silence timer, and no grace period — see *Presence* above for why a GM refresh does not reach this state.
 
-**Nothing calls `getUserMedia` — in either app.** The push iframes own the camera; every in-app tile is a VDO.ninja **viewer**, the self tiles being viewers of one's own stream with `&muted`. A native self-view fallback used to exist for the "no VDO room" case on both sides; it was unreachable (the Caméras tab only appears once a room or a peer stream is known, so the fallback could never bootstrap) and is gone. Don't reintroduce it: it lights the camera LED for a preview nobody is watching.
+**Nothing calls `getUserMedia` — in either app.** The push iframes own the camera; every in-app tile is a VDO.ninja **viewer**, the self tiles being viewers of one's own stream with `&muted`. A native self-view fallback used to exist for the "no VDO room" case on both sides; it was unreachable (the Caméras tab only appears once a room is known, so the fallback could never bootstrap) and is gone. Don't reintroduce it: it lights the camera LED for a preview nobody is watching.
 
-**Players advertise `streamId` only while pushing** (`sendPresence()` sends `''` when `vdoRoom` is empty), and `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline && currentVdoRoom`. Sending it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
+**Participants advertise `streamId` only while actually publishing.** `selfStreamLive()` (`= charId && vdoRoom && !cameraOff`) and `gmAdvertisedStreamId()` gate it; `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline && currentVdoRoom`. Advertising it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
 
-**A viewer tile requires a room.** A viewer URL without `&room` cannot decrypt a stream pushed into a password-protected room, so a tile built from a `streamId` that outlived the room is a guaranteed black rectangle. Every tile builder gates on the room: `camerasAvailable()` (`= !!vdoRoom`) drives the player's Caméras tab and presence control, the GM/peer entries in `renderCamerasTab()` and `renderPresenceRail()` are gated on `vdoRoom` like the self tile always was, and the GM's player cards require `currentVdoRoom`. A `streamId` only ever arrives alongside a room, so this is the implicit precondition made explicit — and it drops the tiles the instant the session ends, instead of waiting out the 30s `peerCameras` prune (player) or the next presence heartbeat (GM). The GM's `saveConfig()` calls `renderPlayerCards()` so setting/clearing the room applies at once.
+**A viewer tile requires a room.** A viewer URL without `&room` cannot decrypt a stream pushed into a password-protected room, so a tile built from a `streamId` that outlived the room is a guaranteed black rectangle. Every tile builder gates on the room: `camerasAvailable()` (`= !!vdoRoom`) drives the player's Caméras tab and presence control, the GM/peer entries in `renderCamerasTab()` and `renderPresenceRail()` are gated on `vdoRoom` like the self tile always was, and the GM's player cards require `currentVdoRoom`. The GM's `saveConfig()` calls `renderPlayerCards()` so setting/clearing the room applies at once.
 
-**Leaving a campaign requires a camera teardown, not just an Ably re-subscribe.** `resetCameraState()` (player) clears the room/peers/GM stream/spotlight, blanks the push iframe and re-renders. It is called by `switchCharacter()` **and** by `saveConfig()` when the join code changed — editing the join code in the ⚙ modal re-subscribes every channel onto another campaign and is a campaign switch. Without it the push iframe kept broadcasting the webcam into the room of the campaign just left (until the 30s expiry), and `saveConfig()` must also publish `leave` on the **old** `ablyDamage` (awaited before closing, and closing the *captured* old instance — `initAbly()` assigns a new one before the ack lands) or the old GM keeps the player's card and camera iframe.
+**Leaving a campaign requires a camera teardown, not just an Ably re-subscribe.** `resetCameraState()` (player) clears the room/peers/GM stream/spotlight, blanks the push iframe and re-renders. It is called by `switchCharacter()` **and** by `saveConfig()` when the join code changed — editing the join code in the ⚙ modal re-subscribes every channel onto another campaign and is a campaign switch. Closing the old Ably connection is what leaves the old campaign's presence set, so nothing needs to be published (or awaited) first.
 
-**Players own a camera kill switch.** `cameraOff` (persisted per character in `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) gates the push iframe, the advertised `streamId`, the self tile and the rail entry. The GM decides the room; the player decides whether to publish into it. The Caméras tab states the fact when it is on.
+**Both sides own a camera kill switch.** `cameraOff` (per character, `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) and `gmCameraOff` (per campaign, `aria-gm-camera-off-{campaignId}`, toggled by `toggleGMCamera()` from the topbar `📹` next to *Lire la table*) gate the push iframe, the advertised `streamId`, and the self tile / "Votre caméra" preview. The GM decides the room; each participant decides whether to publish into it. Cutting the GM camera is deliberately **not** a session-over signal — `vdoRoom` stays in the member data, so players go on publishing and only the MJ tile disappears. `renderGMCameraToggle()` hides the button when no room is set.
 
-**One character, several tabs.** Both apps now re-enter the last campaign/character automatically on load (see *Auto re-entry*), so two tabs on one character is a routine state, not an edge case. Two things follow from it, and they are separate problems:
+**Both kill switches sync across tabs via the `storage` event.** They are per-character / per-campaign localStorage state that `selfStreamLive()` / `gmAdvertisedStreamId()` read, so every tab of a participant must agree on them — otherwise two tabs sharing a `clientId` would advertise different stream IDs and the tile would flip between them. `storage` fires only in the *other* tabs, so the handler never re-enters the tab that made the change.
 
-*Who pushes* — the push stream ID is a pure function of `charId`, so two tabs would publish into the same room under the same ID. One tab holds a timestamped claim in `aria-push-claim-{charId}` and renews it on the existing 5s presence tick (`refreshPushClaim()`); `releasePushClaim()` runs on `switchCharacter()` and `beforeunload` so the survivor takes over on its next tick instead of waiting out `PUSH_CLAIM_TTL` (12s, which is what covers a crashed tab).
+**One character, several tabs: only one may hold the webcam.** The push stream ID is a pure function of `charId` (`campaignId` for the GM), so two tabs would publish into the same room under the same ID. Arbitration is an **exclusive Web Lock** — `aria-push-{charId}` / `aria-gm-push-{campaignId}` — requested once per character/campaign and held for the tab's life via a promise that never resolves. The browser grants it to one tab, queues the rest, and releases it when the holder's tab goes away *including a crash*, at which point the next in the queue starts pushing immediately. `releasePushLock()` / `releaseGMPushLock()` abort the queued request or resolve the held one on character/campaign switch.
 
-*Who counts as present* — every consumer of `leave` keys its entity by `charId` but matches the message on `playerId`, and the stored `playerId` is whichever tab heartbeat last. So closing one of two tabs used to drop the whole character: the GM's card and its live camera iframe, the overlay's face and camera widget on the OBS output, and every peer's tile — all rebuilt up to 5s later on the next heartbeat, and the GM spotlight lost for good. All three apps therefore track **sessions per character** (`playerSessions` in the GM, `peerSessions` in the player, `presenceSessions` in the overlay): a `Map(charId → Map(playerId → lastSeen))`, written on every presence, and `leave` only removes the entity when the last live session goes. When a session leaves and others remain, the stored `playerId` is repointed at a survivor so targeted messages (damage/heal/grants/tab-config) keep reaching a tab that is actually listening. Sessions older than the presence timeout are pruned wherever the entity itself is pruned, so a tab that crashed without publishing `leave` cannot keep a departed character alive.
+There is no TTL, no timestamped record, no read-back-after-write, and no "taking over" state to report: those all existed because the previous localStorage claim had to detect a dead holder itself. Web Locks needs a secure context with a real origin and throws from `file://`; both apps then assume sole ownership, which is correct there since nothing can push from `file://` anyway.
 
-**Auto re-entry.** Both apps remember what they were in — `aria-gm-last-campaign`, `aria-last-character` — and `tryRestoreSupabase()` re-enters it after `showSelectionScreen()`, so a refresh comes straight back rather than parking on the selection screen. This is what makes the two teardown grace windows work: the GM's `beforeunload` publishes "session over" and the player's publishes `leave`, both of which are meant to be *undone* by the app coming back within seconds. A manual click through the selection screen blew past `GM_OFF_GRACE_MS` almost every time, so the documented dev loop ("save, `Ctrl+Shift+R`") restarted every player's camera on every GM reload — exactly what the grace period exists to prevent. An unknown id (deleted elsewhere) is refused and the key cleared; `switchCampaign()` / `switchCharacter()` clear it, since leaving on purpose should not be undone on the next load.
-
-The GM has the mirror of this: `gmDerivedStreamId()` is a pure function of `campaignId`, so two GM tabs on one campaign collide the same way. `aria-gm-push-claim-{campaignId}` is keyed by a per-tab `gmTabId` (sessionStorage, so a reload reclaims its own claim), renewed on the existing **8s** `gm-presence` tick — the only timer that runs exactly when the GM has a room — and released by `switchCampaign()` and `beforeunload`. `GM_PUSH_CLAIM_TTL` is **20s**: ~2.5 missed renewals of the 8s tick, the same ratio the player uses (12s on a 5s tick). It was 30s to match `PRESENCE_TIMEOUT`, which stretched the crashed-pusher window below to ~38s. `updateGMPushIframe()` splits the two questions it has to answer — `streamLive` drives the "Votre caméra" preview, `shouldPush` (`streamLive` minus the liveness term, plus `gmPushClaimHeld`) drives the push frame.
-
-Both `refreshPushClaim()` and `refreshGMPushClaim()` **read the record back after writing it** and only report success when their own id survived. Two tabs that both find the slot free both write; localStorage serializes the writes, so the loser sees a foreign id and backs off immediately instead of double-pushing until its next tick (which is how it used to converge).
-
-`pushClaimHeld` / `gmPushClaimHeld` gate **the push iframe and nothing else** — *which tab* owns the webcam is not the same question as *whether anyone* is pushing. In particular `sendPresence()` must not gate on them: a non-claiming tab sending `''` would fight the claiming tab over the GM's single card (both heartbeat under the same `charId`), adding and removing its camera iframe every 5s. `gmAdvertisedStreamId()` follows the same rule on the GM side, or the MJ tile would flip every 8s for every player.
-
-What they **are** gated on is `pushClaimLive()` / `gmPushClaimLive()` — is the shared claim record fresh, regardless of who holds it. Every tab reads the same record and gets the same answer, so there is no flicker, and a claim holder that **crashes** (no `beforeunload`, so no release) stops being advertised one TTL after it went quiet instead of leaving every receiver on a black rectangle until the survivor takes over. `selfStreamLive()` and the GM's `streamLive` use the same predicate, so the self tile and the "Votre caméra" preview disappear rather than sit black. The Caméras tab distinguishes the two states: another tab is broadcasting (informational) vs. the previous broadcaster stopped responding and this tab is about to take over.
-
-**The GM owns the mirror-image kill switch.** `gmCameraOff` (persisted per campaign in `aria-gm-camera-off-{campaignId}`, toggled by `toggleGMCamera()` from the `📹` button in the topbar next to *Lire la table*) gates the push iframe, the "Votre caméra" preview, and the `streamId` advertised in `gm-presence` — via `gmAdvertisedStreamId()`, which every `gm-presence` publish site must use instead of `gmDerivedStreamId()`. Without it the GM's only way to go camera-off was clearing the room, which cuts **every** player's camera too. Cutting the GM camera is deliberately **not** a session-over signal: the payload keeps its `vdoRoom`, so players go on publishing and only the MJ tile disappears. `renderGMCameraToggle()` hides the button when no room is set (nothing is published either way, so it would be a no-op).
-
-**Both kill switches sync across tabs via the `storage` event.** `cameraOff` / `gmCameraOff` are per-character / per-campaign localStorage state that used to be read only in `initApp()` / `loadCampaignState()`, so a sibling tab never learned the camera had been cut. It kept advertising the `streamId` on its own timer while the cutting tab advertised `''` — and because the GM keys player cards by `charId` (and players key the MJ tile off one `gmStreamId`), the tile flipped on and off every few seconds, on a stream nobody was pushing. The `storage` handler in each app now watches its own key and re-runs the tail of the toggle. `storage` fires only in the *other* tabs, so it never re-enters the tab that made the change.
+**The lock answers "which tab pushes" and nothing else.** "Is anyone pushing?" is `vdoRoom && !cameraOff` — shared state every tab of the participant evaluates identically — so they all advertise the same `streamId` and no consumer can see it flip. Gating the *advertised* ID on lock ownership would have a non-holding tab publish `''` under the same `clientId` as its sibling. `updateGMPushIframe()` keeps the two questions apart: `streamLive` drives the "Votre caméra" preview, `shouldPush` adds `gmPushLockHeld` and drives the push frame.
 
 **Viewer iframes get `allow="autoplay; fullscreen"` and nothing else.** Only the push frames (`#vdo-push-frame`, `#gm-self-view-wrap`'s iframe) need `camera; microphone; display-capture`. Don't copy the push permission list onto a viewer.
 
-**The VDO room password is a shared secret, not a credential.** It is broadcast in cleartext on `aria-damage` (every subscriber gets it — players need it to push), stored plaintext in `campaigns.vdo_room_password` and localStorage. Anyone holding the Ably key — which is pasted into OBS overlay URLs — can join the room. Treat the overlay URL as sensitive. The GM's push-URL log line redacts `password=` because those logs get pasted into bug reports.
+**The VDO room password is a shared secret, not a credential.** It is distributed in cleartext in the GM's presence data (every subscriber gets it — players need it to push), and stored plaintext in `campaigns.vdo_room_password` and localStorage. Anyone holding the Ably key — which is pasted into OBS overlay URLs — can join the room. Treat the overlay URL as sensitive. The GM's push-URL log line redacts `password=` because those logs get pasted into bug reports.
 
-**Push failure is reported, not silent.** `renderCamerasTab()` renders `#cameras-warning` when a room is active but `window.isSecureContext` is false (the `file://` case, where `getUserMedia` refuses and the player is invisible to everyone), and when the player cut their own camera.
+**Push failure is reported, not silent.** `renderCamerasTab()` renders `#cameras-warning` when a room is active but `window.isSecureContext` is false (the `file://` case, where `getUserMedia` refuses and the player is invisible to everyone), when the player cut their own camera, and when another tab holds the push lock.
 
 **The Bandeau rail and the Caméras grid must never both be live** — they open viewer iframes on the same streams, doubling the WebRTC connections per peer. `renderPresenceUI()` hides the rail while `tab-cameras` is in `openPanes`; `renderTabLayout()` calls `renderPresenceUI()` so docking/undocking the pane re-evaluates it.
 
-**Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `vdoViewSrc()` (player) and `gmVdoViewSrc()` (GM) append `&solo&room=...` together. The player's hidden `#vdo-push-frame` is full-viewport with `opacity:0` — never `display:none` (can block camera capture) and never visible (its self-preview shows through the app's transparent backgrounds).
+**Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `vdoViewSrc()` (player) and `gmVdoViewSrc()` (GM) append `&solo&room=...` together.
 
 **Push URLs MUST include a blank `&view`** (`?push=SID&room=ROOM&view&...`) — per VDO.ninja docs, an empty `&view` means "no streams will play; only publishing will be allowed". Without it, a push page inside a room acts as a full room client and *renders every other guest's video* next to the self-preview (players appeared inside the GM's "Votre caméra" panel) and silently downloads all remote streams in the player's hidden push iframe.
 
-**Important:** `renderPlayerCards()` in `aria-gm.js` does **in-place DOM updates** (not `grid.innerHTML = ''`) so that camera iframes are never removed from the DOM during routine presence heartbeats. Removing an iframe from the DOM kills its WebRTC stream. The same principle applies to `renderCamerasTab()` in `aria-player.js` — it surgically adds/removes cells rather than clearing the grid.
+**Important:** `renderPlayerCards()` in `aria-gm.js` does **in-place DOM updates** (not `grid.innerHTML = ''`) so that camera iframes are never removed from the DOM when the roster changes. Removing an iframe from the DOM kills its WebRTC stream. The same principle applies to `renderCamerasTab()` in `aria-player.js` — it surgically adds/removes cells rather than clearing the grid.
+
+**Auto re-entry.** Both apps remember what they were in — `aria-gm-last-campaign`, `aria-last-character` — and `tryRestoreSupabase()` re-enters it after `showSelectionScreen()`, so a refresh comes straight back rather than parking on the selection screen. This is now a convenience: it used to be the only thing that got the GM broadcasting again inside the players' 12s camera grace period. An unknown id (deleted elsewhere) is refused and the key cleared; `switchCampaign()` / `switchCharacter()` clear it, since leaving on purpose should not be undone on the next load.
 
 ### Overlay editor (`aria-overlay-editor.js`)
 
-A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every presence tick. The overlay caches `vdoRoom`/`vdoRoomPassword` from the GM's `gm-presence` broadcast and builds camera iframe URLs with `vdoCamSrc()` (`&solo&room&password` appended once known — a bare `?view=SID` stays black for streams pushed into a password-protected room); `refreshCameraWidgets()` re-srcs the iframes when the room info arrives, **and swaps a widget for the `—` placeholder when its stream stops** — liveness is `liveStreamIds()` (the `streamId`s in `presenceCache`, which is pruned at `PRESENCE_MAX_AGE`, plus `gmLiveStreamId` from `gm-presence`). Without it a disconnected player left a black rectangle on stream forever. `renderWidgetContent()` applies the same rule so a layout re-render can't recreate a dead iframe, and neither path re-srcs an iframe that is already correct (that would kill the WebRTC connection and flicker the picture every heartbeat). `gmLiveStreamId` and `vdoRoom` are only ever updated from a **non-empty** `gm-presence`; the overlay ignores the empty "session over" payload entirely and lets `GM_PRESENCE_MAX_AGE` (30s of silence, measured from the last real broadcast) drop `gmLiveStreamId`. Acting on the empty payload cleared `vdoRoom` and re-src'd every live *player* camera iframe (their `vdoCamSrc` loses `&room`), flickering every camera on the OBS output on a plain GM refresh — the on-air version of the player-side flicker the 12s grace period fixes. The camera widget's stream ID is picked from a **dropdown** (`#prop-stream-pick`, filled by `availableStreams()`) — stream IDs are derived from UUIDs and shown nowhere in the panels, so the free-text field alone was unfillable. The list is rebuilt from same-origin localStorage: `aria-gm-known-players-{campaignId}` for a GM overlay, `aria-characters` for a player one. Manual entry still works and the two fields stay mirrored.
+A separate drag-and-drop editor opened in a new tab from the player or GM panel. Widgets are defined in `WIDGET_DEFS` (persistent and event categories). Each widget has `{ id, type, category, x, y, w, h, visible, config }` where all positions are percentages of the 1920×1080 canvas. The editor saves to Supabase `overlay_configs` table (keyed by `{type}_{ownerId}`) and publishes `layout-update` on `aria-overlay-config` for live sync to the running overlay. `camera` widgets (GM-only) render a VDO.ninja viewer iframe and are **skipped in `updateWidgetData()`** to prevent iframe reload on every roster change. The overlay reads `vdoRoom`/`vdoRoomPassword` from the GM's presence member and builds camera iframe URLs with `vdoCamSrc()` (`&solo&room&password` appended once known — a bare `?view=SID` stays black for streams pushed into a password-protected room); `refreshCameraWidgets()` re-srcs the iframes when the room info arrives, **and swaps a widget for the `—` placeholder when its stream stops** — liveness is `liveStreamIds()` (the `streamId`s in `presenceCache`, i.e. the players currently in the presence set, plus `gmLiveStreamId`). Without it a disconnected player left a black rectangle on stream forever. `renderWidgetContent()` applies the same rule so a layout re-render can't recreate a dead iframe, and neither path re-srcs an iframe that is already correct (that would kill the WebRTC connection and flicker the picture). `applyPresenceSet()` computes whether anything camera-relevant actually moved before calling `refreshCameraWidgets()`, for the same reason. **`vdoRoom` is only ever cleared by a GM that is still present and has cleared it** — when the GM leaves the set entirely, only `gmLiveStreamId` is dropped and the cached room is kept: clearing it would change every *player* widget's URL (theirs lose `&room`) and re-src live iframes, flickering every camera on the OBS output. Their streams stop being live on their own once the players stop publishing. The camera widget's stream ID is picked from a **dropdown** (`#prop-stream-pick`, filled by `availableStreams()`) — stream IDs are derived from UUIDs and shown nowhere in the panels, so the free-text field alone was unfillable. The list is rebuilt from same-origin localStorage: `aria-gm-known-players-{campaignId}` for a GM overlay, `aria-characters` for a player one. Manual entry still works and the two fields stay mirrored.
 
 `renderWidgetLayer()` **reconciles in place** — it must never do `container.innerHTML = ''`. It runs on every `layout-update`, and the editor publishes one 1.5s after any drag/resize/property edit, so rebuilding blacked out every camera on the OBS output whenever the layout was touched. Existing elements are never re-appended either (moving an iframe reloads it); new ones go on the end, which keeps DOM order matching `overlayConfig.widgets` because the editor only ever appends widgets. Cameras go through `syncCameraWidget()`, shared with `refreshCameraWidgets()`.
 
@@ -298,7 +310,6 @@ Each character carries its own `id` (UUID). HP and card state are keyed by that 
 | `aria-player-files-{id}` | GM-granted files `[{ id, name, type, url }]` |
 | `aria-player-rolls-{id}` | local roll history (max 100, also inserted into Supabase `character_rolls`) |
 | `aria-camera-off-{id}` | `'1'` when the player cut their own camera (kill switch, survives refresh) |
-| `aria-push-claim-{id}` | `{ playerId, ts }` — which tab owns the webcam for this character (see *Only one tab pushes*) |
 
 Tab visibility is managed separately from the character object and persisted per character ID. Helper functions `hpKey()`, `cardKey()`, `notesKey()` return the scoped key for the active character. Always use these — never hardcode the bare key. `deleteCharacter()` must remove **all** of these keys plus the Supabase rows (`characters`, `character_state`, `character_notes`, `character_files`, `character_rolls`).
 
@@ -350,6 +361,37 @@ The **empty vials row** in the Inventaire tab is only rendered when `playerTabs.
 ### `aria-rolls-hidden` / `roll`
 Same payload with `hidden: true`. Published instead of `aria-rolls` while the player's **Jet caché** toggle (`hiddenRollMode`) is armed. Only the GM subscribes; the feed marks these rows with an `MJ` badge. The roller still sees their own float card.
 
+### `aria-presence` — presence member data (not messages)
+
+Published with `presence.enter()` / `presence.update()`, read with `presence.get()`. There is no heartbeat: a member republishes only when something changes.
+
+**Player** (`clientId = charId`):
+```js
+{ role: 'player', charId, name, charClass, hp, maxHP, stats, protection, skills, specials,
+  weapons, inventory, potions, vials, potionRecipeIds, tabs, money, karma,
+  campaignKey, ariaType, streamId, ts }
+```
+- `charId` — character UUID (stable; never changes even if the name does). Also the `clientId`, so it keys the participant in every consumer.
+- `streamId` — `'aria-' + charId.slice(0, 8)`, or `''` unless a `vdoRoom` is active and `cameraOff` is false (an advertised ID nobody is pushing renders as a black iframe on every receiver).
+- `ts` — publish time. Used to pick the newest member when one `clientId` has several (two tabs, or the ghost of a refreshed tab).
+- `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
+
+Republished by `saveCurrentCharacter()`, `handleGMDamage()` / `handleGMHeal()`, the Soigner self-heal paths, and the `tab-config` handler — every place that previously relied on the next 5s tick. `schedulePresence()` debounces at 250ms.
+
+**GM** (`clientId = 'gm-' + campaignId`):
+```js
+{ role: 'gm', streamId, vdoRoom, vdoRoomPassword, spotlightCharId, ts }
+```
+`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on or no room is set (`gmAdvertisedStreamId()`). Players read `vdoRoom`/`vdoRoomPassword` from here to activate their push iframe. `spotlightCharId` lives here rather than in a broadcast so a late joiner picks it up from `presence.get()`.
+
+Republished by `toggleSpotlight()`, `toggleGMCamera()`, `saveConfig()` (via re-entry on the new connection), and when the spotlighted player leaves the set.
+
+There is **no "session over" payload**. Leaving the presence set is the signal, and Ably emits it. `gmSpotlightCharId` is cleared when the spotlighted player is no longer in the set — Ably has already waited out a possible reconnect, so this no longer fires on a refresh or a closed second tab.
+
+**Validation.** Presence data is still remote-controlled (anyone holding the Ably key can enter the set), so the GM's `handlePresence()` rejects members whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match, **validates that `charId` is UUID-shaped** via `_isIdToken()` (`/^[A-Za-z0-9_-]{1,64}$/`) since it ends up in element ids, CSS selectors and inline handlers, and **coerces `hp`/`maxHP`/`vials`/`karma` via `_finiteNum()`** since those are interpolated into `innerHTML` by the card renders.
+
+`loadCampaignState()` applies the **same `_isIdToken()` check** when rehydrating the `aria-gm-known-players-{id}` snapshot. That snapshot is written from presence data, but entries persisted before the validation existed can hold anything, and they feed the same `players` Map and the same renders. `renderPlayerCards()` additionally wraps its lookup selector in `CSS.escape` (as `playerCardEl()` already did): an unescaped quote throws out of `players.forEach`, which kills that render and every later one, freezing the Joueurs tab and its camera iframes.
+
 ### `aria-damage` / `damage` | `heal`
 ```js
 { targetId, damage, hpBefore, hpAfter, maxHP, charName, source: 'gm' }     // GM → player
@@ -357,66 +399,29 @@ Same payload with `hidden: true`. Published instead of `aria-rolls` while the pl
 { targetId, damage, source: 'player' }                                     // player → player (Soigner)
 { targetId, amount, source: 'player' }
 ```
-`charName` is displayed by the overlay's damage/heal VFX. The `source:'player'` variants carry **no HP fields** — the target computes and applies the change itself, and the overlay ignores them.
-
-### `aria-damage` / `presence` (heartbeat every 5s)
-```js
-{ playerId, charId, name, charClass, hp, maxHP, stats, protection, skills, specials,
-  weapons, inventory, potions, vials, potionRecipeIds, tabs, money, karma,
-  campaignKey, ariaType, streamId }
-```
-- `playerId` — session UUID (sessionStorage, changes per tab/refresh); used only for Ably targeting
-- `charId` — character UUID (stable; never changes even if name changes); used as the key in the GM `players` Map
-- `streamId` — auto-derived as `'aria-' + charId.slice(0, 8)`, but sent as `''` unless a `vdoRoom` is active and `cameraOff` is false (an advertised ID nobody is pushing renders as a black iframe on every receiver); used for VDO.ninja viewer iframes
-- `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
-
-The GM's `handlePresence()` rejects messages whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign type, **validates that `charId`/`playerId` are UUID-shaped** via `_isIdToken()` (`/^[A-Za-z0-9_-]{1,64}$/`) since they end up in element ids, CSS selectors and inline handlers, and **coerces the numeric fields (`hp`, `maxHP`, `vials`, `karma`) via `_finiteNum()`** since those are interpolated into `innerHTML` by the player-card renders.
-
-`loadCampaignState()` applies the **same `_isIdToken()` check** when rehydrating the `aria-gm-known-players-{id}` snapshot. That snapshot is written from presence payloads, but entries persisted before the validation existed can hold anything, and they feed the same `players` Map and the same renders — validating only the live path left the door open. `renderPlayerCards()` additionally wraps its lookup selector in `CSS.escape` (as `playerCardEl()` already did): an unescaped quote throws out of `players.forEach`, which kills that render and every later one, freezing the Joueurs tab and its camera iframes.
-
-### `aria-damage` / `leave`
-```js
-{ playerId }
-```
-Sent by the player on `switchCharacter()` and on `beforeunload`. **Both the GM and the overlay subscribe to it** — the GM drops the player card, the overlay drops the `presenceCache` entry and refreshes its camera widgets. Without the overlay half, a face and its camera stayed on stream for the full `PRESENCE_MAX_AGE` (60s) after the player left. The unload publish is best-effort — the browser may kill the page first, which is what the 30s sweep still covers.
-
-### `aria-damage` / `gm-presence` (every 8s from GM, plus immediately for new sessions)
-```js
-{ streamId, vdoRoom, vdoRoomPassword, spotlightCharId }
-```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on (`gmAdvertisedStreamId()`). Players cache `vdoRoom` and `vdoRoomPassword` and use them to activate their push iframe. `spotlightCharId` mirrors the GM spotlight so late joiners pick it up.
-
-Two different "empty" payloads — do not conflate them:
-- **All-empty** (`streamId` *and* `vdoRoom` empty) is the explicit "camera session over" signal (`publishGMPresenceOff()`) — players clear the room and stop pushing (after `GM_OFF_GRACE_MS`), and the overlay ignores it entirely.
-- **Empty `streamId`, room still set** is the GM kill switch mid-session. Players drop the MJ tile and keep publishing; the overlay acts on it at once (`if (!gmSid && !room) return;`) so the GM's camera widget swaps to the placeholder instead of sitting black for the 30s `GM_PRESENCE_MAX_AGE`. Only `gmLiveStreamId` changes, so player widget URLs are untouched and their streams survive.
-
-### `aria-damage` / `spotlight`
-```js
-{ charId }   // null clears — that player's camera goes big on every player's Bandeau/Tablée view
-```
-`gmSpotlightCharId` is cleared (and `spotlight: null` published) when the spotlighted player is dropped by the **`leave`** handler — that is, when their **last** session goes (see *One character, several tabs*). It used to be cleared only by clicking ☀ again or switching campaign, so a spotlight on a departed player stayed armed forever — invisible, since the card carrying the ☀ state is gone — and silently re-applied if that player came back. Deliberately **not** done by `sweepOfflinePlayers()`: `leave` is an explicit departure, while a silent sweep is usually a network blip the spotlight should survive. The cost is that a player refreshing their page (`beforeunload` publishes `leave` too) loses the spotlight and the GM re-clicks — but no longer when they merely close a second tab.
+`targetId` is a **`charId`** — every tab of that character receives and applies the change. `charName` is displayed by the overlay's damage/heal VFX. The `source:'player'` variants carry **no HP fields** — the target computes and applies the change itself, and the overlay ignores them.
 
 ### `aria-damage` / `karma-set`
 ```js
-{ playerId, karma: number }   // GM sets a player's karma; player stores it on the character
+{ charId, karma: number }   // GM sets a player's karma; player stores it on the character
 ```
 
 ### `aria-damage` / `tab-config`
 ```js
-{ playerId, tabs: { cards: bool, alchemy: bool } }
+{ charId, tabs: { cards: bool, alchemy: bool } }
 ```
 
 ### `aria-damage` / `potion-grant` | `potion-revoke` | `vial-grant`
 ```js
-{ playerId, potion: { id, name, desc, ingredients, successChance } }
-{ playerId, potionId: string }
-{ playerId, qty: number }
+{ charId, potion: { id, name, desc, ingredients, successChance } }
+{ charId, potionId: string }
+{ charId, qty: number }
 ```
 
 ### `aria-damage` / `file-grant` | `file-revoke`
 ```js
-{ playerId, file: { id, name, type, url } }   // grant — player adds file to playerFiles
-{ playerId, fileId: string }                   // revoke — player removes file from playerFiles
+{ charId, file: { id, name, type, url } }   // grant — player adds file to playerFiles
+{ charId, fileId: string }                   // revoke — player removes file from playerFiles
 ```
 Player stores granted files in `localStorage: aria-player-files-{charId}`. The Fichiers tab auto-hides when `playerFiles` is empty.
 
@@ -450,7 +455,7 @@ GM plays locally via `_musicTriggerPlay()` AND broadcasts — it does not subscr
 Displays Joueur / Maître de Jeu cards and a **⚙ Configuration** panel at the bottom. Reads and writes `aria-config` via inline `<script>`. This is the canonical entry point for key configuration.
 
 ### Player character selection screen
-Lists all saved characters. Creating a character prompts for name, class, an optional campaign join code, and the character type (Médiéval/Contemporain radio — picks the template). The join code and type are shown as badges on each character card. `selectCharacter(id)` → `loadCharacterState(id)` → `initApp()`. `switchCharacter()` publishes `leave`, then tears down Ably and dddice before returning.
+Lists all saved characters. Creating a character prompts for name, class, an optional campaign join code, and the character type (Médiéval/Contemporain radio — picks the template). The join code and type are shown as badges on each character card. `selectCharacter(id)` → `loadCharacterState(id)` → `initApp()`. `switchCharacter()` closes Ably (which leaves the presence set), releases the push lock, and tears down dddice before returning.
 
 ### GM campaign selection screen
 Lists all campaigns, each showing its join code (click to copy). `selectCampaign(id)` → `loadCampaignState(id)` → `initApp()`. After entering a campaign, the join code is shown in the topbar (click to copy) so the GM can share it with players.
@@ -469,7 +474,7 @@ The GM ♪ Musique tab holds **multiple named playlists** rendered as a chip bar
 
 The **Monstres** and **Fichiers** tabs each have a **group chip bar** (`#monster-group-bar` / `#file-group-bar`) for navigating long lists — a `Tous` chip (always present) plus one chip per group, then `＋`. Clicking a chip name filters the grid to that group; the active group chip carries ✎/✕ (rename/delete). Each card has a `⠿` drag grip; drag a card onto a chip to assign it (drop on `Tous` un-assigns). Adding a monster/file while a group is filtered auto-assigns it to that group. Groups + membership live in a **separate, non-synced** localStorage key (`monsterGroupsKey()` / `fileGroupsKey()`) — see *Monster/file grouping is not synced* under Known pitfalls. The grouping engine is shared by both tabs (`_renderGroupBar(type)`, `_groupChip`, drag helpers `_groupDrag*`, and `assign{Monster,File}ToGroup`).
 
-The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` does **in-place DOM updates** — it never clears the grid entirely — to preserve live camera iframes across presence heartbeats.
+The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` does **in-place DOM updates** — it never clears the grid entirely — to preserve live camera iframes when the roster changes.
 
 ### Bonus/Malus bar (player)
 Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected). `doRoll` also adds the character's **karma** to every non-skipBM threshold — all live previews (skills, specials, stat cards, combat reactions, potion chance) must include `liveBM() + (character.karma ?? 0)` so the displayed % matches the rolled threshold.
@@ -481,9 +486,9 @@ The bar also holds the **Jet caché** toggle (`hiddenRollMode`) — while armed,
 **Per-skill permanent modifier (#12)** — each skill/special carries an optional `bonus` (set via a `mod` input in the **Personnage** editor, next to the `%`). It is part of the character object (a JSON column on the `characters` table, so it round-trips cross-device — no migration). The modifier is **baked into `basePct`** at the roll call site (`doRoll(name, skill.pct + bonus)` for skills/specials/Soigner/parade/esquive), so the rolled threshold already includes it; `bonus` is therefore distinct from `bonusMalus`, the temp modifier, and `karma`. Live previews (`renderSkills`, `updateBMDisplay`, combat sidebar) add it; a `.skill-mod` badge marks non-zero values in the Compétences list. The GM player-details modal folds it in via `_pdmSkillPct(s)` (shows `pct+bonus` with a `+N` note). Because it is baked into the threshold, no Ably payload changes.
 
 ### Player presence (GM — Joueurs tab)
-- Players send heartbeat every 5s on `aria-damage` channel
-- GM's `handlePresence()` rejects any message where `campaignKey !== currentJoinCode`
-- GM sweeps offline players every 10s (threshold: 30s = offline)
+- The `players` Map is rebuilt from the `aria-presence` set on every change — no heartbeat, no sweep. `online` is membership in the set.
+- `handlePresence(charId, data)` rejects members whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign
+- Players who leave are marked `online:false`, not deleted — the map doubles as the offline known-players snapshot
 - 📋 modal shows full character data and tab toggles
 
 ### Post-roll effect pattern
