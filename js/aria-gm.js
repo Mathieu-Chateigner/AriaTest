@@ -1,30 +1,20 @@
 // ═══════════════════════════════════════════
-//  CARD CONSTANTS
+//  PANEL WIRING
 // ═══════════════════════════════════════════
-const SUITS = [
-    { name: 'spades', sym: '♠', cls: 'c-black', pillCls: '' },
-    { name: 'clubs', sym: '♣', cls: 'c-black', pillCls: '' },
-    { name: 'hearts', sym: '♥', cls: 'c-red', pillCls: 'c-red' },
-    { name: 'diamonds', sym: '♦', cls: 'c-red', pillCls: 'c-red' },
-];
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const SUIT_FR = { spades: 'Pique', clubs: 'Trèfle', hearts: 'Cœur', diamonds: 'Carreau' };
-const ALL_CARDS = [];
-for (const s of SUITS) for (const r of RANKS) ALL_CARDS.push({ id: `${r}-${s.name}`, rank: r, suit: s });
-ALL_CARDS.push({ id: 'joker-red', isJoker: true, jokerColor: 'red', label: 'Joker Rouge' });
-ALL_CARDS.push({ id: 'joker-black', isJoker: true, jokerColor: 'black', label: 'Joker Noir' });
-// Look up a card in ALL_CARDS by its ID string.
-function cardById(id) { return ALL_CARDS.find(c => c.id === id); }
-// Fisher-Yates shuffle of an array, returning a new array.
-function shuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } return b; }
-// Build a freshly shuffled deck of all 54 cards.
-function buildDeck() { return shuffle([...ALL_CARDS]); }
+// Everything the two panels share lives in aria-shared.js, loaded before this file.
+// The differences between them are these hooks, not forked copies of the functions.
+ARIA.configure({
+    role:         'gm',
+    tag:          'GM',
+    splitKey:     'aria-gm-split-layout',
+    defaultPane:  'tab-players',
+    joinCode:     () => currentJoinCode || '',
+    syncAll:      () => _syncAllGMData(),
+    clearLocal:   () => _clearLocalGMData(),
+    afterRestore: () => restoreLastCampaign(),
+    onMusicPhase: (phase) => { renderMusicTab(); if (phase === 'faded') _startMusicProgress(); },
+});
 
-// ═══════════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════════
-let config = JSON.parse(localStorage.getItem('aria-config') || '{}');
-if (config.lightMode) document.body.classList.add('light-mode');
 let ablyInstance = null, ablyRolls = null, ablyCards = null, ablyDamage = null, ablyRollsHidden = null;
 let dddiceSDK = null;            // ThreeDDice SDK instance
 let dddiceAPI = null;            // { theme } once connected
@@ -133,16 +123,7 @@ let activePlaylistId = null;   // playlist currently shown/edited in the Musique
 let musicPlayingPlaylistId = null; // playlist the now-playing track belongs to
 let ablyMusic = null;
 const filesGrantedSessions = new Set();
-let saveKey        = localStorage.getItem('aria-save-key') || null;
-let _pendingNewKey = null;
 
-// ═══════════════════════════════════════════
-//  CLOUD SAVE — RELATIONAL SYNC
-// ═══════════════════════════════════════════
-// Check whether a save key is set (required for all Supabase writes).
-function _supabaseReady() { return !!saveKey; }
-// Return the current UTC time as an ISO 8601 string.
-function _nowISO() { return new Date().toISOString(); }
 
 // Upsert campaign metadata (name, join code, VDO room) to Supabase. Returns true if successful.
 async function syncCampaign(camp) {
@@ -373,117 +354,25 @@ async function loadFromSupabase() {
     } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
 }
 
-// Show the two-panel gateway (new key + existing key, side by side) with a freshly generated key.
-function showGateway() {
-    _pendingNewKey = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-    document.getElementById('gateway-key-display').textContent = _pendingNewKey;
-    const cancel = document.getElementById('gateway-cancel');
-    if (cancel) cancel.style.display = saveKey ? '' : 'none';
-    document.getElementById('file-gateway').style.display = 'flex';
-}
 
-// Both panels are always visible; just focus the existing-key input.
-function showGatewayExisting() {
-    document.getElementById('file-gateway').style.display = 'flex';
-    const input = document.getElementById('gateway-key-input');
-    if (input) { input.value = ''; input.focus(); }
-}
+// Per-campaign localStorage key prefixes. As on the player side, this list is the
+// ONLY enumeration of them — every path that drops a campaign routes through
+// _dropCampaignKeys(). deleteCampaign used to re-type all ten by hand, and neither
+// copy removed 'aria-gm-camera-off-', which therefore leaked on every delete.
+const _CAMPAIGN_KEY_PREFIXES = ['aria-gm-monsters-', 'aria-gm-rolls-', 'aria-gm-card-history-', 'aria-gm-potions-', 'aria-gm-known-players-', 'aria-gm-files-', 'aria-gm-notes-', 'aria-gm-music-', 'aria-gm-monster-groups-', 'aria-gm-file-groups-', 'aria-gm-camera-off-'];
 
-// Hide the file-gateway panel.
-function hideGateway() {
-    document.getElementById('file-gateway').style.display = 'none';
+// Remove every scoped key belonging to one campaign.
+function _dropCampaignKeys(id) {
+    _CAMPAIGN_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + id));
 }
-
-// Copy the displayed save key to the clipboard.
-function copyGatewayKey() {
-    const key = document.getElementById('gateway-key-display').textContent;
-    navigator.clipboard.writeText(key).catch(() => {});
-    const btn = document.getElementById('gateway-copy-btn');
-    if (btn) { btn.textContent = 'Copié !'; setTimeout(() => { btn.textContent = 'Copier'; }, 2000); }
-}
-
-// Confirm new save key creation: persist it, create the Supabase row, and sync data.
-async function confirmNewKey() {
-    if (!_pendingNewKey) return;
-    saveKey = _pendingNewKey;
-    localStorage.setItem('aria-save-key', saveKey);
-    await sbUpsert('saves', { save_key: saveKey, type: 'gm' });
-    await _syncAllGMData();
-    hideGateway();
-    showSelectionScreen();
-}
-
-// Campaign-scoped localStorage key prefixes (everything scoped by campaignId).
-const _CAMPAIGN_KEY_PREFIXES = ['aria-gm-monsters-', 'aria-gm-rolls-', 'aria-gm-card-history-', 'aria-gm-potions-', 'aria-gm-known-players-', 'aria-gm-files-', 'aria-gm-notes-', 'aria-gm-music-', 'aria-gm-monster-groups-', 'aria-gm-file-groups-'];
 
 // Remove all locally stored campaigns and their scoped keys (used when switching
 // to a different save key, so the old key's data never merges into the new one).
 function _clearLocalGMData() {
-    getCampaigns().forEach(c => _CAMPAIGN_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id)));
+    getCampaigns().forEach(c => _dropCampaignKeys(c.id));
     localStorage.removeItem('aria-gm-campaigns');
 }
 
-// Load data from Supabase using an existing save key entered by the user.
-async function submitExistingKey() {
-    const input = document.getElementById('gateway-key-input');
-    const key = input ? input.value.trim() : '';
-    if (!key) return;
-    // Verify the key exists before adopting it — a typo would otherwise push the
-    // previous key's local data under a brand-new key on the next sync.
-    const rows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(key) + '&select=save_key');
-    if (!rows.length) { alert('Clé introuvable. Vérifiez la clé saisie.'); return; }
-    // Switching keys: drop the old key's local data so it never merges into the new one.
-    if (saveKey && key !== saveKey) _clearLocalGMData();
-    saveKey = key;
-    localStorage.setItem('aria-save-key', key);
-    await loadFromSupabase();
-    hideGateway();
-    showSelectionScreen();
-}
-
-// Update the save-key status label on the campaign selection screen.
-function updateSaveKeyStatus() {
-    const label = document.getElementById('sel-save-label');
-    if (!label) return;
-    label.textContent = saveKey ? saveKey.slice(0, 8) + '…' : '—';
-    label.className = 'sel-save-label' + (saveKey ? ' connected' : '');
-}
-
-// Show the gateway (both panels) and focus the existing-key input so the user can switch keys.
-function changeSaveKey() {
-    showGateway();
-    const input = document.getElementById('gateway-key-input');
-    if (input) input.focus();
-}
-
-// Copy the current save key to the clipboard.
-function copySaveKey() {
-    if (!saveKey) return;
-    navigator.clipboard.writeText(saveKey).catch(() => {});
-    const btns = document.querySelectorAll('.sel-save-btn');
-    const copyBtn = [...btns].find(b => b.textContent === 'Copier');
-    if (copyBtn) { copyBtn.textContent = 'Copié !'; setTimeout(() => { copyBtn.textContent = 'Copier'; }, 2000); }
-}
-
-// Cancel key entry: hide the gateway if a key exists, else show the creation panel.
-function cancelGateway() {
-    if (saveKey) { hideGateway(); } else { showGateway(); }
-}
-
-// On load: restore from Supabase if a save key exists, otherwise show the gateway.
-async function tryRestoreSupabase() {
-    if (!saveKey) { showGateway(); return; }
-    const ok = await loadFromSupabase();
-    hideGateway();
-    showSelectionScreen();
-    // Only push local data back up if the load succeeded — after a failed (offline)
-    // load, syncing would overwrite newer remote data with stale local state.
-    if (ok) _syncAllGMData();
-    // After showSelectionScreen so the screen is the fallback if nothing is remembered
-    // (and the one we return to on "changer de campagne"). _syncAllGMData reads every
-    // campaign straight from localStorage, so it does not care that one is now active.
-    restoreLastCampaign();
-}
 
 // ═══════════════════════════════════════════
 //  CAMPAIGN MANAGEMENT
@@ -594,14 +483,18 @@ function renderCampaignScreen() {
         return;
     }
     campaigns.forEach(c => {
-        const card = document.createElement('div');
-        card.className = 'sel-card';
-        const typeBadge = c.ariaType === 'contemporary'
-            ? '<span class="sel-card-type contemporary">Contemporain</span>'
-            : '<span class="sel-card-type">Médiéval</span>';
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCampaign('${_escHtml(_escJs(c.id))}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div class="sel-card-name">${_escHtml(c.name)}</div><div class="sel-card-joincode" onclick="event.stopPropagation();copyJoinCodeFromCard(this,'${_escHtml(_escJs(c.joinCode||''))}')">Code · ${_escHtml(c.joinCode || '—')}</div><div class="sel-card-cta">Diriger &rarr;</div>`;
-        card.addEventListener('click', () => selectCampaign(c.id));
-        grid.appendChild(card);
+        const stop = fn => e => { e.stopPropagation(); fn(e); };
+        grid.append(el('div', { className: 'sel-card', onclick: () => selectCampaign(c.id) },
+            el('button', { className: 'sel-card-delete', title: 'Supprimer', textContent: '×',
+                onclick: stop(() => deleteCampaign(c.id)) }),
+            el('div', { className: 'sel-card-head' },
+                el('span', { className: 'sel-card-diamond' }),
+                el('span', { className: 'sel-card-type' + (c.ariaType === 'contemporary' ? ' contemporary' : ''),
+                    textContent: c.ariaType === 'contemporary' ? 'Contemporain' : 'Médiéval' })),
+            el('div', { className: 'sel-card-name', textContent: c.name }),
+            el('div', { className: 'sel-card-joincode', textContent: 'Code · ' + (c.joinCode || '—'),
+                onclick: stop(e => copyJoinCodeFromCard(e.currentTarget, c.joinCode || '')) }),
+            el('div', { className: 'sel-card-cta', textContent: 'Diriger →' })));
     });
 }
 
@@ -615,12 +508,12 @@ function showSelectionScreen() {
 }
 
 // Copy a join code to the clipboard from a campaign card element, showing feedback.
-function copyJoinCodeFromCard(el, code) {
+function copyJoinCodeFromCard(node, code) {
     if (!code) return;
     navigator.clipboard.writeText(code).catch(() => {});
-    const orig = el.textContent;
-    el.textContent = '✓ Copié !';
-    setTimeout(() => { el.textContent = orig; }, 1500);
+    const orig = node.textContent;
+    node.textContent = '✓ Copié !';
+    setTimeout(() => { node.textContent = orig; }, 1500);
 }
 
 // Switch the UI to the main GM app view.
@@ -678,16 +571,7 @@ function deleteCampaign(id) {
     sbDelete('campaign_card_history',    'campaign_id=eq.' + encodeURIComponent(id));
     const campaigns = getCampaigns().filter(c => c.id !== id);
     saveCampaigns(campaigns);
-    localStorage.removeItem('aria-gm-monsters-' + id);
-    localStorage.removeItem('aria-gm-rolls-' + id);
-    localStorage.removeItem('aria-gm-card-history-' + id);
-    localStorage.removeItem('aria-gm-potions-' + id);
-    localStorage.removeItem('aria-gm-known-players-' + id);
-    localStorage.removeItem('aria-gm-files-' + id);
-    localStorage.removeItem('aria-gm-notes-' + id);
-    localStorage.removeItem('aria-gm-music-' + id);
-    localStorage.removeItem('aria-gm-monster-groups-' + id);
-    localStorage.removeItem('aria-gm-file-groups-' + id);
+    _dropCampaignKeys(id);
     renderCampaignScreen();
 }
 
@@ -822,8 +706,8 @@ function initApp() {
     }
     const campaigns = getCampaigns();
     const camp = campaigns.find(c => c.id === currentCampaignId);
-    const el = document.getElementById('campaign-display');
-    if (el && camp) el.value = camp.name;
+    const node = document.getElementById('campaign-display');
+    if (node && camp) node.value = camp.name;
     const jel = document.getElementById('joincode-display');
     if (jel) jel.textContent = currentJoinCode || '';
     const tbJoin = document.getElementById('tb-joincode');
@@ -856,8 +740,8 @@ function publishMonsterStateToOverlay() {
 function copyJoinCode() {
     if (!currentJoinCode) return;
     navigator.clipboard.writeText(currentJoinCode).catch(() => {});
-    const el = document.getElementById('joincode-display');
-    if (el) { const t = el.textContent; el.textContent = '✓ Copié !'; setTimeout(() => { el.textContent = t; }, 1500); }
+    const node = document.getElementById('joincode-display');
+    if (node) { const t = node.textContent; node.textContent = '✓ Copié !'; setTimeout(() => { node.textContent = t; }, 1500); }
     const tbEl = document.getElementById('tb-joincode');
     if (tbEl) { const t = tbEl.textContent; tbEl.textContent = '✓ Copié'; setTimeout(() => { tbEl.textContent = t; }, 1500); }
 }
@@ -880,10 +764,10 @@ function toggleSelect(trigger) {
 function getSelectValue(id) { return document.getElementById(id)?.dataset.value ?? ''; }
 // Set the displayed value and label of a custom select element.
 function setSelectValue(id, value, label) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.dataset.value = value;
-    const lbl = el.querySelector('.gm-select-label');
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.dataset.value = value;
+    const lbl = node.querySelector('.gm-select-label');
     if (lbl) lbl.textContent = label;
     closeAllSelects();
 }
@@ -896,88 +780,10 @@ function addSelectOpt(panel, value, label, onClick) {
     panel.appendChild(opt);
 }
 
-// ═══════════════════════════════════════════
-//  TABS
-// ═══════════════════════════════════════════
-// Multi-pane split view — same engine as the player panel (violet chrome).
-// openPanes lists the open tabs left → right; paneWeights holds their relative
-// widths (normalized to sum 100). Panes are the existing .tab-content divs
-// (classes + inline grid placement only — never reparented, so player-card
-// camera iframes are untouched). No pane-count limit.
-let openPanes = ['tab-players'];
-let paneWeights = [100];
-let focusIdx = 0;
 
-// Restore the persisted pane layout (hidden tabs are pruned in renderTabLayout).
-try {
-    const _sl = JSON.parse(localStorage.getItem('aria-gm-split-layout') || 'null');
-    if (_sl && Array.isArray(_sl.panes) && _sl.panes.length) {
-        openPanes = [...new Set(_sl.panes)];
-        paneWeights = (Array.isArray(_sl.weights) && _sl.weights.length === openPanes.length)
-            ? _sl.weights.slice() : openPanes.map(() => 1);
-    }
-} catch(_) {}
-
-function _persistSplit() {
-    localStorage.setItem('aria-gm-split-layout', JSON.stringify({ panes: openPanes, weights: paneWeights.map(w => Math.round(w * 100) / 100) }));
-}
-function _normWeights() {
-    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
-    paneWeights = paneWeights.map(w => w * 100 / sum);
-}
-// Back to a single default pane (campaign switch).
-function resetSplitState() {
-    openPanes = ['tab-players']; paneWeights = [100]; focusIdx = 0;
-}
-
-// Click on a tab button: classic tab switch — but only in single-pane mode.
-// Once a split is open, panes change through drag-to-dock only. Exception:
-// under the 900px breakpoint the split collapses to the single tab bar
-// (pane headers hidden), so clicks must keep working there.
-function switchTab(id, _btn) {
-    if (openPanes.length > 1) {
-        if (window.innerWidth > 900) return;
-        const j = openPanes.indexOf(id);
-        if (j > 0) {           // move the clicked pane to the visible front slot
-            openPanes.unshift(openPanes.splice(j, 1)[0]);
-            paneWeights.unshift(paneWeights.splice(j, 1)[0]);
-        } else if (j < 0) {
-            openPanes[0] = id; // replace the visible pane, keep the others
-        }
-    } else {
-        openPanes[0] = id;
-    }
-    focusIdx = 0;
-    renderTabLayout();
-}
-
-// Apply classes + grid placement to tab buttons and content panes.
+// Apply the shared layout pass, then the GM-specific pane work.
 function renderTabLayout() {
-    // Drop panes whose tab was hidden (conditional tabs set display:none on the button).
-    for (let i = openPanes.length - 1; i >= 0; i--) {
-        const btn = document.querySelector(`.tab-btn[data-tab="${openPanes[i]}"]`);
-        if (!btn || btn.style.display === 'none' || !document.getElementById(openPanes[i])) {
-            openPanes.splice(i, 1); paneWeights.splice(i, 1);
-            if (focusIdx > i) focusIdx--;
-        }
-    }
-    if (!openPanes.length) { openPanes = ['tab-players']; paneWeights = [100]; }
-    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
-    _normWeights();
-    const split = openPanes.length > 1;
-    const content = document.querySelector('.content');
-    content?.classList.toggle('split-mode', split);
-    document.querySelectorAll('.tab-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.tab === openPanes[focusIdx]);
-        b.classList.toggle('open', b.dataset.tab !== openPanes[focusIdx] && openPanes.includes(b.dataset.tab));
-    });
-    document.querySelectorAll('.tab-content').forEach(t => {
-        const i = openPanes.indexOf(t.id);
-        t.classList.toggle('active', i >= 0);
-        t.classList.toggle('split-primary', i === 0);
-        if (i >= 0 && split) { t.style.gridColumn = String(2 * i + 1); t.style.gridRow = '3'; }
-        else { t.style.gridColumn = ''; t.style.gridRow = ''; }
-    });
+    applyTabLayout();
     if (openPanes.includes('tab-gm-roll')) refreshMonsterSelect();
     // Both of these hold camera iframes, which survive .tab-content{display:none} with
     // their WebRTC connections intact. Each function drops its iframes when the
@@ -985,267 +791,10 @@ function renderTabLayout() {
     // that has to run on every layout change.
     renderPlayerCards();
     updateGMPushIframe();
-    updateSplitChrome();
-    _persistSplit();
+    finishTabLayout();
 }
 
-// ═══════════════════════════════════════════
-//  DRAG-TO-DOCK SPLIT VIEW (design frames 22-24)
-//  Drag a tab button — or an open pane's header — over the content region:
-//  the targeted half of the hovered pane darkens; dropping inserts the tab
-//  at that slot (left or right of any open pane).
-// ═══════════════════════════════════════════
-let _dockDrag = null;          // { tabId, label, started, startX, startY, insert }
-let _dockSuppressClick = false;
-let _dividerDrag = null;       // { idx } — divider between panes idx and idx+1
 
-// Human label for a tab (the button's text).
-function tabLabel(id) {
-    const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
-    return btn ? btn.textContent.trim() : '';
-}
-
-// Rebuild the split chrome (pane headers + dividers) to match the pane list.
-function updateSplitChrome() {
-    const content = document.querySelector('.content');
-    if (!content) return;
-    content.querySelectorAll('.split-pane-hdr, .split-divider').forEach(el => el.remove());
-    if (openPanes.length < 2) { content.style.gridTemplateColumns = ''; return; }
-    _applySplitColumns();
-    openPanes.forEach((id, i) => {
-        const hdr = document.createElement('div');
-        hdr.className = 'split-pane-hdr';
-        hdr.title = 'Glisser pour ré-ancrer';
-        hdr.style.gridColumn = String(2 * i + 1);
-        hdr.innerHTML = '<span class="sph-grip">⋮⋮</span><span class="sph-label"></span><span class="sph-spacer"></span><span class="sph-focus">Focus</span><button class="sph-close" title="Fermer le panneau">×</button>';
-        hdr.querySelector('.sph-label').textContent = tabLabel(id);
-        hdr.addEventListener('mousedown', e => startPaneDrag(e, i));
-        const close = hdr.querySelector('.sph-close');
-        close.addEventListener('mousedown', e => e.stopPropagation());
-        close.addEventListener('click', () => closePane(i));
-        content.appendChild(hdr);
-        if (i < openPanes.length - 1) {
-            const div = document.createElement('div');
-            div.className = 'split-divider';
-            div.title = 'Glisser pour répartir — double-clic : répartition égale';
-            div.style.gridColumn = String(2 * i + 2);
-            div.innerHTML = '<span></span><span></span><span></span>';
-            div.addEventListener('mousedown', e => startDividerDrag(e, i));
-            div.addEventListener('dblclick', resetSplitRatio);
-            content.appendChild(div);
-        }
-    });
-    updateSplitFocus();
-}
-// Set the grid column template from the pane weights (light path for divider drag).
-function _applySplitColumns() {
-    const content = document.querySelector('.content');
-    if (content) content.style.gridTemplateColumns = paneWeights.map(w => `minmax(0,${w.toFixed(2)}fr)`).join(' 9px ');
-}
-// Cosmetic "Focus" chip — marks the focused pane (frames 22/24).
-function updateSplitFocus() {
-    document.querySelectorAll('.content > .split-pane-hdr').forEach((h, i) =>
-        h.querySelector('.sph-focus')?.classList.toggle('on', i === focusIdx));
-}
-
-// Close pane i; the remaining panes share the freed width.
-function closePane(i) {
-    if (openPanes.length <= 1) return;
-    openPanes.splice(i, 1); paneWeights.splice(i, 1);
-    if (focusIdx > i) focusIdx--;
-    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
-    renderTabLayout();
-}
-
-// Dock a tab at insertion slot k (0..N, between existing panes). A panel never
-// opens twice — if the tab is already open, its pane moves to the new slot.
-function dockTab(id, k) {
-    const j = openPanes.indexOf(id);
-    if (j >= 0) {
-        const w = paneWeights[j];
-        openPanes.splice(j, 1); paneWeights.splice(j, 1);
-        if (k > j) k--;
-        openPanes.splice(k, 0, id); paneWeights.splice(k, 0, w);
-    } else {
-        openPanes.splice(k, 0, id);
-        paneWeights.splice(k, 0, 100 / Math.max(1, openPanes.length - 1));
-    }
-    focusIdx = k;
-    renderTabLayout();
-}
-
-// The dockable region: the content area below the tab strip (viewport coords).
-function _dockRegion() {
-    const content = document.querySelector('.content');
-    if (!content) return null;
-    const cr = content.getBoundingClientRect();
-    const tabs = content.querySelector('.tabs');
-    const top = tabs ? tabs.getBoundingClientRect().bottom : cr.top;
-    if (cr.bottom - top < 60) return null;
-    return { left: cr.left, right: cr.right, top, bottom: cr.bottom };
-}
-
-// Pane pixel edges across the dock region (accounts for the 9px dividers) — n+1 values.
-function _paneEdges(region) {
-    const n = openPanes.length;
-    const inner = (region.right - region.left) - 9 * (n - 1);
-    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
-    const edges = [region.left];
-    let x = region.left;
-    for (let i = 0; i < n; i++) {
-        x += inner * paneWeights[i] / sum + (i < n - 1 ? 9 : 0);
-        edges.push(i === n - 1 ? region.right : x);
-    }
-    return edges;
-}
-
-// Begin a potential drag from a tab button (starts after a 6px move threshold).
-function _dockBegin(tabId, e) {
-    _dockDrag = { tabId, label: tabLabel(tabId), started: false, startX: e.clientX, startY: e.clientY, insert: null };
-}
-// Begin re-anchoring an open pane by its header (frame 24: drag header to re-dock).
-function startPaneDrag(e, idx) {
-    if (e.button !== 0) return;
-    const id = openPanes[idx];
-    if (!id) return;
-    e.preventDefault();
-    focusIdx = idx;
-    updateSplitFocus();
-    _dockBegin(id, e);
-}
-
-function _dockMove(e) {
-    if (!_dockDrag) return;
-    if (!_dockDrag.started) {
-        if (Math.abs(e.clientX - _dockDrag.startX) + Math.abs(e.clientY - _dockDrag.startY) < 6) return;
-        _dockDrag.started = true;
-        document.body.classList.add('dock-dragging');
-        const ghost = document.getElementById('drag-ghost');
-        const gl = document.getElementById('drag-ghost-label');
-        if (gl) gl.textContent = _dockDrag.label;
-        if (ghost) ghost.style.display = 'flex';
-    }
-    const ghost = document.getElementById('drag-ghost');
-    if (ghost) { ghost.style.left = (e.clientX + 14) + 'px'; ghost.style.top = (e.clientY + 12) + 'px'; }
-    const region = _dockRegion();
-    const overlay = document.getElementById('dock-overlay');
-    let insert = null, zone = null;
-    if (region && e.clientX >= region.left && e.clientX <= region.right && e.clientY >= region.top && e.clientY <= region.bottom) {
-        const edges = _paneEdges(region);
-        let i = 0;
-        while (i < openPanes.length - 1 && e.clientX >= edges[i + 1]) i++;
-        const mid = (edges[i] + edges[i + 1]) / 2;
-        insert = e.clientX < mid ? i : i + 1;
-        zone = e.clientX < mid ? { left: edges[i], right: mid } : { left: mid, right: edges[i + 1] };
-    }
-    _dockDrag.insert = insert;
-    if (overlay) {
-        if (zone) {
-            overlay.style.display = 'flex';
-            overlay.style.left = zone.left + 'px';
-            overlay.style.top = region.top + 'px';
-            overlay.style.width = (zone.right - zone.left) + 'px';
-            overlay.style.height = (region.bottom - region.top) + 'px';
-            const lbl = document.getElementById('dock-label');
-            if (lbl) lbl.textContent = _dockDrag.label;
-        } else {
-            overlay.style.display = 'none';
-        }
-    }
-}
-
-function _dockEnd() {
-    if (!_dockDrag) return;
-    const { tabId, started, insert } = _dockDrag;
-    _dockDrag = null;
-    if (!started) return; // plain click on the tab button — let it through
-    _dockSuppressClick = true;
-    // The click (if any) fires synchronously after mouseup; clear the flag right
-    // after so an unrelated later click is never swallowed.
-    setTimeout(() => { _dockSuppressClick = false; }, 0);
-    document.body.classList.remove('dock-dragging');
-    const ghost = document.getElementById('drag-ghost');
-    if (ghost) ghost.style.display = 'none';
-    const overlay = document.getElementById('dock-overlay');
-    if (overlay) overlay.style.display = 'none';
-    if (insert !== null) dockTab(tabId, insert);
-}
-
-// Divider drag (frame 22/23): resize the two panes around divider idx;
-// double-click redistributes all panes equally.
-function startDividerDrag(e, idx) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    _dividerDrag = { idx };
-    document.body.classList.add('dock-dragging');
-}
-function _dividerMove(e) {
-    if (!_dividerDrag) return;
-    const region = _dockRegion();
-    if (!region) return;
-    const i = _dividerDrag.idx;
-    if (i >= openPanes.length - 1) return;
-    const edges = _paneEdges(region);
-    const span = edges[i + 2] - edges[i] - 9;   // px shared by the two panes
-    if (span <= 0) return;
-    const px = Math.min(Math.max(e.clientX - edges[i], span * 0.15), span * 0.85);
-    const pairW = paneWeights[i] + paneWeights[i + 1];
-    paneWeights[i] = pairW * px / span;
-    paneWeights[i + 1] = pairW - paneWeights[i];
-    _applySplitColumns();
-}
-function _dividerEnd() {
-    if (!_dividerDrag) return;
-    _dividerDrag = null;
-    document.body.classList.remove('dock-dragging');
-    _persistSplit();
-}
-function resetSplitRatio() {
-    paneWeights = openPanes.map(() => 100 / openPanes.length);
-    _applySplitColumns();
-    _persistSplit();
-}
-
-// Global listeners for the dock/divider engines (registered once at load).
-window.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('mousedown', e => {
-            if (e.button !== 0) return;
-            _dockBegin(btn.dataset.tab, e);
-        });
-    });
-    document.addEventListener('mousemove', e => { _dockMove(e); _dividerMove(e); });
-    // Chromium suppresses the compat mouseup after a preventDefault'd mousedown
-    // drag (pane headers) — listen to pointerup too; both enders are idempotent.
-    document.addEventListener('mouseup', () => { _dockEnd(); _dividerEnd(); });
-    document.addEventListener('pointerup', () => { _dockEnd(); _dividerEnd(); });
-    // After a real drag, swallow the click that would otherwise switch tabs.
-    document.addEventListener('click', e => {
-        if (_dockSuppressClick) { e.stopPropagation(); e.preventDefault(); _dockSuppressClick = false; }
-    }, true);
-    // Track which pane holds focus (drives the Focus chip and tab-click target).
-    document.querySelector('.content')?.addEventListener('mousedown', e => {
-        if (openPanes.length < 2) return;
-        const pane = e.target.closest('.tab-content');
-        if (!pane) return;
-        const i = openPanes.indexOf(pane.id);
-        if (i >= 0) { focusIdx = i; updateSplitFocus(); }
-    });
-});
-
-// ═══════════════════════════════════════════
-//  DDDICE
-// ═══════════════════════════════════════════
-// Extract the dddice room slug from a full URL or return the raw value.
-function extractRoomSlug(val) {
-    if (!val) return '';
-    const m = val.match(/\/room\/([^/?#]+)/);
-    return m ? m[1] : val.trim();
-}
-// Extract a roll UUID from either the sdk.roll() response or a RollFinished payload.
-// RollFinished fires for EVERY roll in the shared room; matching UUIDs stops a
-// player's dice from being consumed as the GM's pending roll result.
-function _ddRollUuid(r) { return r?.uuid ?? r?.data?.uuid ?? null; }
 function copyOverlayUrl() {
     const base = window.location.href.replace(/aria-gm\.html.*$/, 'aria-overlay.html');
     const params = new URLSearchParams({ mode: 'gm', ably: config.ablyKey || '' });
@@ -1315,23 +864,7 @@ async function initDddice() {
         sel.onchange = () => { if (dddiceAPI) dddiceAPI.theme = sel.value; config.dddiceTheme = sel.value; localStorage.setItem('aria-config', JSON.stringify(config)); };
     } catch (e) { console.error('dddice:', e); setDddiceStatus(false, e.message); dddiceSDK = null; dddiceAPI = null; }
 }
-// Update the dddice status dot and text labels in the topbar and config modal.
-function setDddiceStatus(ok, detail) {
-    ['dddice-dot', 'cfg-dddice-dot'].forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
-    ['dddice-status', 'cfg-dddice-status'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? `dddice: ${detail || 'connecté'}` : `Erreur: ${detail || 'dddice'}`; });
-}
 
-// ═══════════════════════════════════════════
-//  ABLY
-// ═══════════════════════════════════════════
-// Suffix a base Ably channel name with the active campaign's join code so each
-// campaign runs on its own isolated channels (rolls/cards/damage/music). Empty join
-// code → global channel (backward compatible). Players and the overlay derive the
-// same suffix from the join code, so all three apps land on the same channel.
-function campaignChannel(base) {
-    const t = (currentJoinCode || '').trim().toUpperCase();
-    return t ? `${base}-${t}` : base;
-}
 // Initialize Ably channels and subscribe to all game events (rolls, cards, presence).
 function initAbly() {
     console.log('[GM] initAbly: connecting with key', config.ablyKey?.slice(0, 8) + '...', '| campaign channel suffix:', currentJoinCode || '(global)');
@@ -1362,8 +895,8 @@ function initAbly() {
 }
 // Update the Ably status dot and text labels in the topbar and config modal.
 function setAblyStatus(ok) {
-    ['ably-dot', 'cfg-ably-dot'].forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
-    ['ably-status', 'cfg-ably-status'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
+    ['ably-dot', 'cfg-ably-dot'].forEach(id => { const node = document.getElementById(id); if (node) node.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
+    ['ably-status', 'cfg-ably-status'].forEach(id => { const node = document.getElementById(id); if (node) node.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
 }
 // ── Presence: publish ─────────────────────────────────────────────────────────
 // What the GM tells the table: the VDO room, the MJ stream, and the spotlight.
@@ -1399,13 +932,6 @@ function publishGMPresence() {
     }
 }
 
-// ── Presence: consume ─────────────────────────────────────────────────────────
-// Re-read the whole set on any change and rebuild `players` from it.
-async function refreshPresenceSet() {
-    if (!ablyPresence) return;
-    try { applyPresenceSet(await ablyPresence.presence.get()); }
-    catch (err) { console.error('[GM] presence get:', err); }
-}
 function applyPresenceSet(members) {
     // Collapse members to participants: several tabs of one character share a
     // clientId and differ by connectionId, as does the ghost of a tab that refreshed
@@ -1677,188 +1203,150 @@ function handlePresence(charId, data) {
 // Cosmetic combat-feedback FX on a player/monster card (flash + shake + number pop).
 // HP numbers are updated synchronously by the render; this only adds the transient
 // visual layer, then removes it so a re-render can't leave it stuck.
-function triggerCardFx(el, type) {
-    if (!el) return;
-    el.classList.remove('fx-dmg', 'fx-crit', 'fx-heal');
-    void el.offsetWidth; // restart the animation
-    el.classList.add('fx-' + type);
-    setTimeout(() => el.classList.remove('fx-' + type), 650);
+function triggerCardFx(node, type) {
+    if (!node) return;
+    node.classList.remove('fx-dmg', 'fx-crit', 'fx-heal');
+    void node.offsetWidth; // restart the animation
+    node.classList.add('fx-' + type);
+    setTimeout(() => node.classList.remove('fx-' + type), 650);
 }
-function playerCardEl(id) { try { return document.querySelector(`#players-grid [data-char-id="${CSS.escape(id)}"]`); } catch { return null; } }
-function monsterCardEl(id) { try { return document.querySelector(`#monsters-grid [data-monster-id="${CSS.escape(String(id))}"]`); } catch { return null; } }
+// Card lookups go through the reconciler's key map rather than a CSS selector, so
+// an id containing a quote is a miss instead of a thrown exception.
+function playerCardEl(id) { return keyedNode(document.getElementById('players-grid'), id); }
+function monsterCardEl(id) { return keyedNode(document.getElementById('monsters-grid'), String(id)); }
 
+// Derived display state for one player card, from the presence entry.
+// Coerced here because a known-players snapshot persisted before the presence
+// validation existed can still hold arbitrary values.
+function _playerCardState(p, charId) {
+    const online = p.online !== false;
+    const hp = _finiteNum(p.hp) ?? _finiteNum(p.maxHP) ?? '?';
+    const maxHP = _finiteNum(p.maxHP) ?? '?';
+    const pct = maxHP > 0 ? hp / maxHP : 0;
+    const dead = typeof hp === 'number' && hp <= 0;
+    return {
+        online, hp, maxHP, pct,
+        hpColor: pct > 0.5 ? 'var(--ok)' : pct > 0.25 ? 'var(--warn)' : 'var(--bad)',
+        hpClass: pct <= 0.25 ? 'critical' : pct <= 0.5 ? 'low' : '',
+        stateCls: dead ? ' is-dead' : (!dead && pct >= 0 && pct <= 0.25 ? ' hp-critical' : ''),
+        stats: p.stats || {},
+        karma: gmKarma[charId] ?? 0,
+        // A viewer URL without &room cannot decrypt a stream pushed into a
+        // password-protected room, and the known-players snapshot keeps the last
+        // streamId of players who have gone — so both gates, or the card shows a
+        // guaranteed-black rectangle.
+        camSrc: (p.streamId && online && currentVdoRoom) ? gmVdoViewSrc(p.streamId, false) : '',
+    };
+}
+
+// Render/update all player cards.
+//
+// One description of the card, not two. The previous version built it as a template
+// string on first sight and then maintained a second, parallel branch that reached
+// back in with querySelector to update each field — because innerHTML on the
+// container would have detached the camera iframes and killed their WebRTC
+// connections. reconcile() keeps the node identity instead, so `create` runs once and
+// `update` runs every pass over the same element, and the iframe is only ever
+// re-src'd when its URL actually changes.
 function renderPlayerCards() {
     const grid = document.getElementById('players-grid');
     const noP = document.getElementById('no-players');
     if (!grid || !noP) return;
     // Joueurs pane closed. .tab-content{display:none} hides the camera iframes but
-    // leaves their WebRTC connections up, so every player's stream kept being decoded
-    // for a tab nobody was looking at — and the sweep/heartbeat renders below happily
-    // kept them current. Drop them; renderTabLayout() rebuilds the grid on reopen.
-    // (The player app does the same for its own grid and rail in renderPresenceUI.)
-    if (!openPanes.includes('tab-players')) {
-        if (grid.childElementCount) grid.innerHTML = '';
-        return;
-    }
-    if (players.size === 0) {
-        noP.style.display = '';
-        grid.innerHTML = '';
+    // leaves their WebRTC connections up, so every player's stream would keep being
+    // decoded for a tab nobody is looking at. Drop them; renderTabLayout() rebuilds
+    // the grid on reopen. (The player app does the same in renderPresenceUI.)
+    if (!openPanes.includes('tab-players') || players.size === 0) {
+        noP.style.display = players.size === 0 ? '' : 'none';
+        clearKeyed(grid);
         return;
     }
     noP.style.display = 'none';
     const focusedId = document.activeElement?.id;
-    // Remove cards for players no longer in the Map
-    [...grid.querySelectorAll('[data-char-id]')].forEach(el => {
-        if (!players.has(el.dataset.charId)) el.remove();
-    });
-    players.forEach((p, charId) => {
-        const isOnline = p.online !== false;
-        // Coerce here too: known-players snapshots persisted before the presence
-        // coercion existed can still hold arbitrary values.
-        const hp = _finiteNum(p.hp) ?? _finiteNum(p.maxHP) ?? '?', maxHP = _finiteNum(p.maxHP) ?? '?';
-        const pct = maxHP > 0 ? hp / maxHP : 0;
-        const hpColor = pct > 0.5 ? 'var(--ok)' : pct > 0.25 ? 'var(--warn)' : 'var(--bad)';
-        const hpClass = pct <= 0.25 ? 'critical' : pct <= 0.5 ? 'low' : '';
-        const dead = (typeof hp === 'number' && hp <= 0);
-        const critical = !dead && pct >= 0 && pct <= 0.25;
-        const stateCls = dead ? ' is-dead' : (critical ? ' hp-critical' : '');
-        const stats = p.stats || {};
-        const k = gmKarma[charId] ?? 0;
-        // CSS.escape like playerCardEl() does: an unescaped quote here throws, and the
-        // exception propagates out of players.forEach — killing the whole render, and
-        // the next one, so the Joueurs tab would freeze and camera iframes with it.
-        let card = grid.querySelector(`[data-char-id="${CSS.escape(charId)}"]`);
-        if (!card) {
-            // First render: build full card structure
-            card = document.createElement('div');
-            card.dataset.charId = charId;
-            card.className = `player-card ${isOnline ? 'online' : 'offline'}${stateCls}`;
-            card.innerHTML = `
-              <div class="pc-header">
-                <div class="pc-online-dot ${isOnline ? 'online' : ''}"></div>
-                <div style="flex:1;min-width:0;">
-                  <div class="pc-name">${_escHtml(p.name || charId)}</div>
-                  <div class="pc-class">${_escHtml(p.charClass || '')}</div>
-                </div>
-                <button class="pc-btn spot${gmSpotlightCharId === charId ? ' active' : ''}" onclick="toggleSpotlight('${charId}')" title="Spotlight — la caméra de ce joueur passe en grand chez tous">☀</button>
-                <button class="pc-btn details" onclick="openPlayerDetails('${charId}')" title="Voir la fiche">≡</button>
-              </div>
-              <div class="pc-body">
-                <div class="pc-hp-row">
-                  <div>
-                    <div class="pc-hp-num ${hpClass}">${hp}</div>
-                    <div style="font-family:'Cormorant Garamond',serif;font-size:9px;color:var(--parchment-dim);">/ ${maxHP} PV</div>
-                  </div>
-                  <div class="pc-hp-bar-wrap"><div class="pc-hp-bar" style="width:${Math.round(pct * 100)}%;background:${hpColor};"></div></div>
-                </div>
-                ${p.protection ? `<div class="pc-prot" title="Protection"><span class="pc-prot-label">Prot.</span> <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}</div>` : ''}
-                <div class="pc-stats">
-                  ${Object.entries(stats).filter(([k]) => k !== 'PV').map(([k, v]) => `<span class="pc-stat">${_escHtml(k)} <span>${_escHtml(v)}</span></span>`).join('')}
-                </div>
-                <div class="pc-actions">
-                  <input class="pc-dmg-input" id="dmg-${charId}" type="text" inputmode="numeric"
-                    placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
-                    onkeydown="if(event.key==='Enter')applyPlayerDamage('${charId}')" />
-                  <button class="pc-btn dmg" onclick="applyPlayerDamage('${charId}')">−</button>
-                  <input class="pc-heal-input" id="heal-${charId}" type="text" inputmode="numeric"
-                    placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')"
-                    onkeydown="if(event.key==='Enter')applyPlayerHeal('${charId}')" />
-                  <button class="pc-btn heal" onclick="applyPlayerHeal('${charId}')">+</button>
-                </div>
-                <div class="pc-karma-row">
-                  <span class="pc-karma-label">Karma</span>
-                  <button class="pc-karma-btn minus" onclick="setPlayerKarma('${charId}',-1)">−</button>
-                  <span class="pc-karma-val ${k>0?'positive':k<0?'negative':''}">${k>0?'+':''}${k}</span>
-                  <button class="pc-karma-btn plus" onclick="setPlayerKarma('${charId}',1)">+</button>
-                </div>
-              </div>`;
-            grid.appendChild(card);
-            // Camera iframe for new card (wrapped for resize). Online only: the
-            // known-players snapshot keeps the last streamId, so offline entries
-            // would otherwise restore dead iframes on campaign load. A room is
-            // required too — gmVdoViewSrc without &room can't decrypt a stream pushed
-            // into one, so once the room is cleared these are guaranteed black.
-            if (p.streamId && isOnline && currentVdoRoom) {
-                const wrap = document.createElement('div');
-                wrap.className = 'pc-camera-wrap';
-                const iframe = document.createElement('iframe');
-                // Explicitly unmuted, like the player's peer tiles: the rule is "mute
-                // your own stream, never anyone else's". Only the GM's own preview
-                // passes muted:true. Moot while every push URL carries &noaudio, but
-                // muting the table here is what you'd get wrong when enabling audio.
-                iframe.src = gmVdoViewSrc(p.streamId, false);
-                iframe.allow = 'autoplay; fullscreen';   // viewer-only — see the update branch
-                iframe.allowFullscreen = true;
-                iframe.className = 'pc-camera-frame';
-                wrap.appendChild(iframe);
-                const pcBody = card.querySelector('.pc-body');
-                pcBody.insertBefore(wrap, pcBody.firstElementChild);
-            }
-        } else {
-            // In-place update: only touch what changed, never rebuild the whole card
-            card.className = `player-card ${isOnline ? 'online' : 'offline'}${stateCls}`;
-            const dot = card.querySelector('.pc-online-dot');
-            if (dot) dot.className = `pc-online-dot${isOnline ? ' online' : ''}`;
-            const nameEl = card.querySelector('.pc-name');
-            if (nameEl) nameEl.textContent = p.name || charId;
-            const classEl = card.querySelector('.pc-class');
-            if (classEl) classEl.textContent = p.charClass || '';
-            const hpNum = card.querySelector('.pc-hp-num');
-            if (hpNum) { hpNum.textContent = hp; hpNum.className = `pc-hp-num${hpClass ? ' ' + hpClass : ''}`; }
-            const hpRowFirstDiv = card.querySelector('.pc-hp-row > div');
-            if (hpRowFirstDiv?.lastElementChild) hpRowFirstDiv.lastElementChild.textContent = `/ ${maxHP} PV`;
-            const hpBar = card.querySelector('.pc-hp-bar');
-            if (hpBar) { hpBar.style.width = `${Math.round(pct * 100)}%`; hpBar.style.background = hpColor; }
-            const statsEl = card.querySelector('.pc-stats');
-            if (statsEl) statsEl.innerHTML = Object.entries(stats).filter(([sk]) => sk !== 'PV').map(([sk, v]) => `<span class="pc-stat">${_escHtml(sk)} <span>${_escHtml(v)}</span></span>`).join('');
-            let protEl = card.querySelector('.pc-prot');
-            if (p.protection) {
-                const protHtml = `<span class="pc-prot-label">Prot.</span> <span style="color:var(--parchment-dim)">${_escHtml(p.protection.nom || '')}</span>${p.protection.valeur ? ` <span style="color:var(--gold);font-weight:600;">${_escHtml(p.protection.valeur)}</span>` : ''}`;
-                if (!protEl) {
-                    protEl = document.createElement('div');
-                    protEl.className = 'pc-prot';
-                    protEl.title = 'Protection';
-                    card.querySelector('.pc-hp-row')?.insertAdjacentElement('afterend', protEl);
-                }
-                protEl.innerHTML = protHtml;
-            } else if (protEl) {
-                protEl.remove();
-            }
-            const karmaVal = card.querySelector('.pc-karma-val');
-            if (karmaVal) {
-                karmaVal.textContent = `${k > 0 ? '+' : ''}${k}`;
-                karmaVal.className = `pc-karma-val${k > 0 ? ' positive' : k < 0 ? ' negative' : ''}`;
-            }
-            const spotBtn = card.querySelector('.pc-btn.spot');
-            if (spotBtn) spotBtn.classList.toggle('active', gmSpotlightCharId === charId);
-            // Camera: only create/update when streamId changes, never destroy existing iframe
-            const existingWrap = card.querySelector('.pc-camera-wrap');
-            const existingIframe = existingWrap?.querySelector('.pc-camera-frame');
-            if (p.streamId && isOnline && currentVdoRoom) {   // room required — see the create branch
-                const expectedSrc = gmVdoViewSrc(p.streamId, false);   // unmuted — see the create branch
-                if (!existingWrap) {
-                    const wrap = document.createElement('div');
-                    wrap.className = 'pc-camera-wrap';
-                    const iframe = document.createElement('iframe');
-                    iframe.src = expectedSrc;
-                    // Viewer-only: no camera/mic/display-capture. Only the push iframes
-                    // need capture permissions; granting them here widens what a
-                    // third-party frame could ask for, for no benefit.
-                    iframe.allow = 'autoplay; fullscreen';
-                    iframe.allowFullscreen = true;
-                    iframe.className = 'pc-camera-frame';
-                    wrap.appendChild(iframe);
-                    const pcBody = card.querySelector('.pc-body');
-                    pcBody.insertBefore(wrap, pcBody.firstElementChild);
-                } else if (existingIframe && existingIframe.src !== expectedSrc) {
-                    existingIframe.src = expectedSrc;
-                }
-                // src unchanged → iframe stays alive, no reload
-            } else if (existingWrap) {
-                existingWrap.remove();
-            }
+
+    reconcile(grid, players, (charId, p) => {
+        const numeric = { type: 'text', inputMode: 'numeric', oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); } };
+        const dmgInput = el('input', { ...numeric, className: 'pc-dmg-input', id: `dmg-${charId}`, placeholder: 'Dégâts',
+            onkeydown: e => { if (e.key === 'Enter') applyPlayerDamage(charId); } });
+        const healInput = el('input', { ...numeric, className: 'pc-heal-input', id: `heal-${charId}`, placeholder: 'Soins',
+            onkeydown: e => { if (e.key === 'Enter') applyPlayerHeal(charId); } });
+
+        const refs = {
+            dot:   el('div', { className: 'pc-online-dot' }),
+            name:  el('div', { className: 'pc-name' }),
+            cls:   el('div', { className: 'pc-class' }),
+            spot:  el('button', { className: 'pc-btn spot', textContent: '☀', onclick: () => toggleSpotlight(charId),
+                       title: 'Spotlight — la caméra de ce joueur passe en grand chez tous' }),
+            hpNum: el('div', { className: 'pc-hp-num' }),
+            hpMax: el('div', { style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '9px', color: 'var(--parchment-dim)' } }),
+            hpBar: el('div', { className: 'pc-hp-bar' }),
+            prot:  el('div', { className: 'pc-prot', title: 'Protection' }),
+            stats: el('div', { className: 'pc-stats' }),
+            karma: el('span', { className: 'pc-karma-val' }),
+            // Viewer-only permissions. Only the push iframes need camera/microphone/
+            // display-capture; granting them here would widen what a third-party frame
+            // can ask for, for no benefit.
+            cam:   el('iframe', { className: 'pc-camera-frame', allow: 'autoplay; fullscreen', allowFullscreen: true }),
+        };
+        refs.camWrap = el('div', { className: 'pc-camera-wrap' }, refs.cam);
+
+        const card = el('div', { className: 'player-card', dataset: { charId } },
+            el('div', { className: 'pc-header' },
+                refs.dot,
+                el('div', { style: { flex: '1', minWidth: '0' } }, refs.name, refs.cls),
+                refs.spot,
+                el('button', { className: 'pc-btn details', textContent: '≡', title: 'Voir la fiche', onclick: () => openPlayerDetails(charId) })),
+            el('div', { className: 'pc-body' },
+                refs.camWrap,
+                el('div', { className: 'pc-hp-row' },
+                    el('div', null, refs.hpNum, refs.hpMax),
+                    el('div', { className: 'pc-hp-bar-wrap' }, refs.hpBar)),
+                refs.prot,
+                refs.stats,
+                el('div', { className: 'pc-actions' },
+                    dmgInput,
+                    el('button', { className: 'pc-btn dmg', textContent: '−', onclick: () => applyPlayerDamage(charId) }),
+                    healInput,
+                    el('button', { className: 'pc-btn heal', textContent: '+', onclick: () => applyPlayerHeal(charId) })),
+                el('div', { className: 'pc-karma-row' },
+                    el('span', { className: 'pc-karma-label', textContent: 'Karma' }),
+                    el('button', { className: 'pc-karma-btn minus', textContent: '−', onclick: () => setPlayerKarma(charId, -1) }),
+                    refs.karma,
+                    el('button', { className: 'pc-karma-btn plus', textContent: '+', onclick: () => setPlayerKarma(charId, 1) }))));
+        card._refs = refs;
+        return card;
+    }, (card, p, charId) => {
+        const s = _playerCardState(p, charId);
+        const r = card._refs;
+        card.className = `player-card ${s.online ? 'online' : 'offline'}${s.stateCls}`;
+        r.dot.className = `pc-online-dot${s.online ? ' online' : ''}`;
+        r.name.textContent = p.name || charId;
+        r.cls.textContent = p.charClass || '';
+        r.spot.classList.toggle('active', gmSpotlightCharId === charId);
+        r.hpNum.textContent = s.hp;
+        r.hpNum.className = `pc-hp-num${s.hpClass ? ' ' + s.hpClass : ''}`;
+        r.hpMax.textContent = `/ ${s.maxHP} PV`;
+        r.hpBar.style.width = `${Math.round(s.pct * 100)}%`;
+        r.hpBar.style.background = s.hpColor;
+        fill(r.stats, Object.entries(s.stats).filter(([k]) => k !== 'PV').map(([k, v]) =>
+            el('span', { className: 'pc-stat', textContent: k + ' ' }, el('span', { textContent: String(v) }))));
+        r.prot.style.display = p.protection ? '' : 'none';
+        if (p.protection) {
+            fill(r.prot,
+                el('span', { className: 'pc-prot-label', textContent: 'Prot.' }),
+                ' ',
+                el('span', { style: { color: 'var(--parchment-dim)' }, textContent: p.protection.nom || '' }),
+                p.protection.valeur && el('span', { style: { color: 'var(--gold)', fontWeight: '600' }, textContent: ' ' + p.protection.valeur }));
         }
+        r.karma.textContent = `${s.karma > 0 ? '+' : ''}${s.karma}`;
+        r.karma.className = `pc-karma-val${s.karma > 0 ? ' positive' : s.karma < 0 ? ' negative' : ''}`;
+        // Hide rather than detach: removing the wrapper would kill the WebRTC
+        // connection, and blanking the src reloads the frame on the way back.
+        r.camWrap.style.display = s.camSrc ? '' : 'none';
+        if (s.camSrc) setFrameSrc(r.cam, s.camSrc);
+        else if (r.cam.src && r.cam.src !== 'about:blank') r.cam.src = 'about:blank';
     });
+
     if (focusedId) document.getElementById(focusedId)?.focus();
 }
 // Open the player details modal with character info, tab toggles, and file/potion grants.
@@ -1881,122 +1369,100 @@ function openPlayerDetails(charId) {
     const tabs = p.tabs || { cards: false, alchemy: false };
     const grantedRecipeIds = new Set(p.potionRecipeIds || []);
 
-    let html = '';
+    // Every field below comes from a remote presence payload. Built as elements, so
+    // the values are text by construction rather than by remembering to escape.
+    const section = (title, body) => body && el('div', { className: 'pdm-section' },
+        el('div', { className: 'pdm-section-title', textContent: title }), body);
+    const toggles = (...kids) => el('div', { className: 'pdm-tab-toggles' }, ...kids);
+    const listRow = (name, val, nameStyle) => el('div', { className: 'pdm-list-row' },
+        el('span', { className: 'pdm-list-name', style: nameStyle, textContent: name }),
+        el('span', { className: 'pdm-list-val', textContent: val }));
+    const statBlock = (key, val) => el('div', { className: 'pdm-stat-block' },
+        el('span', { className: 'pdm-stat-key', textContent: key }),
+        el('span', { className: 'pdm-stat-val', textContent: val }));
 
-    // Tab access toggles
-    html += `<div class="pdm-section">`;
-    html += `<div class="pdm-section-title">Accès aux onglets</div>`;
-    html += `<div class="pdm-tab-toggles">`;
-    html += `<button class="pdm-tab-toggle${tabs.cards ? ' active' : ''}" onclick="sendTabConfig('${charId}','cards',${!tabs.cards})">🂠 Cartes</button>`;
-    html += `<button class="pdm-tab-toggle${tabs.alchemy ? ' active' : ''}" onclick="sendTabConfig('${charId}','alchemy',${!tabs.alchemy})">Alchimie</button>`;
-    html += `</div></div>`;
-
-    // Files
-    if (gmFiles.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Documents</div><div class="pdm-tab-toggles">`;
-        for (const f of gmFiles) {
-            const isAll = f.grantedTo === 'all';
-            const hasAccess = isAll || (Array.isArray(f.grantedTo) && f.grantedTo.includes(charId));
-            const icon = _fileIcon(f.type);
-            const disabledAttr = isAll ? ' disabled title="Accès accordé à tous"' : '';
-            const clickAttr = isAll ? '' : ` onclick="grantFileToPlayer('${f.id}','${charId}')"`;
-            html += `<button class="pdm-tab-toggle${hasAccess ? ' active' : ''}"${disabledAttr}${clickAttr}>${icon} ${_escHtml(f.name)}</button>`;
-        }
-        html += `</div></div>`;
-    }
-
-    // Alchemy — only show recipe grants if alchemy tab is enabled for this player
-    if (tabs.alchemy && gmPotions.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Recettes alchimiques</div><div class="pdm-tab-toggles">`;
-        for (const pot of gmPotions) {
-            const granted = grantedRecipeIds.has(pot.id);
-            html += `<button class="pdm-tab-toggle${granted ? ' active' : ''}" onclick="sendPotionGrant('${charId}','${pot.id}')" title="${_escHtml(pot.desc || '')}">${_escHtml(pot.name)}</button>`;
-        }
-        html += `</div></div>`;
-    }
-
-    // Stats + HP row
-    html += `<div class="pdm-section">`;
-    html += `<div class="pdm-section-title">Attributs</div>`;
-    html += `<div class="pdm-stats-row">`;
-    html += `<div class="pdm-hp-block"><span class="pdm-hp-num" style="color:${hpColor}">${hp}</span><span class="pdm-hp-sep">/</span><span class="pdm-hp-max">${maxHP} PV</span></div>`;
-    const statOrder = ['FOR','DEX','END','INT','CHA'];
-    for (const k of statOrder) {
-        if (stats[k] !== undefined) html += `<div class="pdm-stat-block"><span class="pdm-stat-key">${k}</span><span class="pdm-stat-val">${_escHtml(stats[k])}</span></div>`;
-    }
-    if (p.protection?.nom) html += `<div class="pdm-stat-block"><span class="pdm-stat-key">Armure</span><span class="pdm-stat-val">${_escHtml(p.protection.nom)}${p.protection.valeur ? ' '+_escHtml(p.protection.valeur) : ''}</span></div>`;
-    html += `</div></div>`;
-
-    // Weapons
     const realWeapons = weapons.filter(w => w.nom);
-    if (realWeapons.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Armes</div><div class="pdm-list">`;
-        for (const w of realWeapons) {
-            html += `<div class="pdm-list-row"><span class="pdm-list-name">${_escHtml(w.nom)}</span><span class="pdm-list-val">${w.degats ? _escHtml(w.degats) : '—'}</span></div>`;
-        }
-        html += `</div></div>`;
-    }
-
-    // Skills
-    if (skills.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Compétences</div><div class="pdm-skills-grid">`;
-        for (const s of skills) {
-            html += `<div class="pdm-skill-row"><span class="pdm-skill-name">${_escHtml(s.name)}</span><span class="pdm-skill-pct">${_pdmSkillPct(s)}</span></div>`;
-        }
-        html += `</div></div>`;
-    }
-
-    // Specials
-    if (specials.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Compétences spéciales</div><div class="pdm-list">`;
-        for (const s of specials) {
-            html += `<div class="pdm-special-row"><div class="pdm-special-header"><span class="pdm-skill-name">${_escHtml(s.name)}</span><span class="pdm-skill-pct">${_pdmSkillPct(s)}</span></div>${s.desc ? `<div class="pdm-special-desc">${_escHtml(s.desc)}</div>` : ''}</div>`;
-        }
-        html += `</div></div>`;
-    }
-
-    // Money
+    const realInv = inventory.filter(i => i.name);
+    const realPotions = potions.filter(x => x.name);
     const money = p.money || {};
-    html += `<div class="pdm-section"><div class="pdm-section-title">Monnaie</div><div class="pdm-money-row">`;
-    if ((p.ariaType || 'ancient') === 'contemporary') {
-        html += `<div class="pdm-coin-block"><span class="pdm-coin-label">Francs</span><span class="pdm-coin-val">${_escHtml(money.francs ?? 0)}</span></div>`;
-    } else {
-        const MONEY_COINS = [
-            { key: 'couronne', label: 'Couronne', color: '#eca456' },
-            { key: 'orbe',     label: 'Orbe',     color: '#b8c4cc' },
-            { key: 'sceptre',  label: 'Sceptre',  color: '#c87533' },
-            { key: 'sou',      label: 'Sou',      color: '#8a8a94' },
-        ];
-        for (const c of MONEY_COINS) {
-            html += `<div class="pdm-coin-block"><span class="pdm-coin-dot" style="color:${c.color}">●</span><span class="pdm-coin-label">${c.label}</span><span class="pdm-coin-val">${_escHtml(money[c.key] ?? 0)}</span></div>`;
-        }
-    }
-    html += `</div></div>`;
-
-    // Inventory
     const vials = _finiteNum(p.vials) ?? 0;
     const showVials = tabs.alchemy && vials > 0;
-    const realInv = inventory.filter(i => i.name);
-    if (showVials || realInv.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Inventaire</div><div class="pdm-list">`;
-        if (showVials) html += `<div class="pdm-list-row"><span class="pdm-list-name" style="font-style:italic;">Fioles vides</span><span class="pdm-list-val">×${vials}</span></div>`;
-        for (const i of realInv) {
-            html += `<div class="pdm-list-row"><span class="pdm-list-name">${_escHtml(i.name)}</span><span class="pdm-list-val">×${_escHtml(i.qty ?? 1)}</span></div>`;
-        }
-        html += `</div></div>`;
-    }
+    const MONEY_COINS = [
+        { key: 'couronne', label: 'Couronne', color: '#eca456' },
+        { key: 'orbe',     label: 'Orbe',     color: '#b8c4cc' },
+        { key: 'sceptre',  label: 'Sceptre',  color: '#c87533' },
+        { key: 'sou',      label: 'Sou',      color: '#8a8a94' },
+    ];
 
-    // Potions
-    const realPotions = potions.filter(p => p.name);
-    if (realPotions.length) {
-        html += `<div class="pdm-section"><div class="pdm-section-title">Potions</div><div class="pdm-list">`;
-        for (const p of realPotions) {
-            html += `<div class="pdm-list-row"><span class="pdm-list-name">${_escHtml(p.name)}${p.desc ? ` <span class="pdm-list-desc">— ${_escHtml(p.desc)}</span>` : ''}${p.ingredients ? ` <span class="pdm-list-desc pdm-list-ing">${_escHtml(p.ingredients)}</span>` : ''}</span><span class="pdm-list-val">×${_escHtml(p.qty ?? 1)}</span></div>`;
-        }
-        html += `</div></div>`;
-    }
+    fill(document.getElementById('pdm-body'),
+        section('Accès aux onglets', toggles(
+            el('button', { className: 'pdm-tab-toggle' + (tabs.cards ? ' active' : ''), textContent: '🂠 Cartes',
+                onclick: () => sendTabConfig(charId, 'cards', !tabs.cards) }),
+            el('button', { className: 'pdm-tab-toggle' + (tabs.alchemy ? ' active' : ''), textContent: 'Alchimie',
+                onclick: () => sendTabConfig(charId, 'alchemy', !tabs.alchemy) }))),
 
-    document.getElementById('pdm-body').innerHTML = html;
+        gmFiles.length && section('Documents', toggles(gmFiles.map(f => {
+            const isAll = f.grantedTo === 'all';
+            const hasAccess = isAll || (Array.isArray(f.grantedTo) && f.grantedTo.includes(charId));
+            return el('button', {
+                className: 'pdm-tab-toggle' + (hasAccess ? ' active' : ''),
+                textContent: `${_fileIcon(f.type)} ${f.name}`,
+                disabled: isAll,
+                title: isAll ? 'Accès accordé à tous' : null,
+                onclick: isAll ? null : () => grantFileToPlayer(f.id, charId),
+            });
+        }))),
+
+        // Recipe grants only make sense once the Alchimie tab is enabled.
+        tabs.alchemy && gmPotions.length && section('Recettes alchimiques', toggles(gmPotions.map(pot =>
+            el('button', { className: 'pdm-tab-toggle' + (grantedRecipeIds.has(pot.id) ? ' active' : ''),
+                textContent: pot.name, title: pot.desc || '',
+                onclick: () => sendPotionGrant(charId, pot.id) })))),
+
+        section('Attributs', el('div', { className: 'pdm-stats-row' },
+            el('div', { className: 'pdm-hp-block' },
+                el('span', { className: 'pdm-hp-num', style: { color: hpColor }, textContent: hp }),
+                el('span', { className: 'pdm-hp-sep', textContent: '/' }),
+                el('span', { className: 'pdm-hp-max', textContent: `${maxHP} PV` })),
+            ['FOR', 'DEX', 'END', 'INT', 'CHA'].filter(k => stats[k] !== undefined).map(k => statBlock(k, stats[k])),
+            p.protection?.nom && statBlock('Armure', p.protection.nom + (p.protection.valeur ? ' ' + p.protection.valeur : '')))),
+
+        realWeapons.length && section('Armes', el('div', { className: 'pdm-list' },
+            realWeapons.map(w => listRow(w.nom, w.degats || '—')))),
+
+        skills.length && section('Compétences', el('div', { className: 'pdm-skills-grid' },
+            skills.map(s => el('div', { className: 'pdm-skill-row' },
+                el('span', { className: 'pdm-skill-name', textContent: s.name }),
+                el('span', { className: 'pdm-skill-pct' }, _pdmSkillPct(s)))))),
+
+        specials.length && section('Compétences spéciales', el('div', { className: 'pdm-list' },
+            specials.map(s => el('div', { className: 'pdm-special-row' },
+                el('div', { className: 'pdm-special-header' },
+                    el('span', { className: 'pdm-skill-name', textContent: s.name }),
+                    el('span', { className: 'pdm-skill-pct' }, _pdmSkillPct(s))),
+                s.desc && el('div', { className: 'pdm-special-desc', textContent: s.desc }))))),
+
+        section('Monnaie', el('div', { className: 'pdm-money-row' },
+            (p.ariaType || 'ancient') === 'contemporary'
+                ? el('div', { className: 'pdm-coin-block' },
+                    el('span', { className: 'pdm-coin-label', textContent: 'Francs' }),
+                    el('span', { className: 'pdm-coin-val', textContent: money.francs ?? 0 }))
+                : MONEY_COINS.map(c => el('div', { className: 'pdm-coin-block' },
+                    el('span', { className: 'pdm-coin-dot', style: { color: c.color }, textContent: '●' }),
+                    el('span', { className: 'pdm-coin-label', textContent: c.label }),
+                    el('span', { className: 'pdm-coin-val', textContent: money[c.key] ?? 0 }))))),
+
+        (showVials || realInv.length) && section('Inventaire', el('div', { className: 'pdm-list' },
+            showVials && listRow('Fioles vides', `×${vials}`, { fontStyle: 'italic' }),
+            realInv.map(i => listRow(i.name, `×${i.qty ?? 1}`)))),
+
+        realPotions.length && section('Potions', el('div', { className: 'pdm-list' },
+            realPotions.map(pot => el('div', { className: 'pdm-list-row' },
+                el('span', { className: 'pdm-list-name', textContent: pot.name },
+                    pot.desc && el('span', { className: 'pdm-list-desc', textContent: ` — ${pot.desc}` }),
+                    pot.ingredients && el('span', { className: 'pdm-list-desc pdm-list-ing', textContent: ` ${pot.ingredients}` })),
+                el('span', { className: 'pdm-list-val', textContent: `×${pot.qty ?? 1}` }))))));
+
     document.getElementById('details-scrim').classList.add('show');
     document.getElementById('player-details-modal').classList.add('show');
 }
@@ -2100,26 +1566,30 @@ function removeMonster(id) {
     renderMonsters();
     refreshMonsterSelect();
 }
+// One attack row of the add-monster form, bound to newMonsterAttacks[i].
+function _amfAttackRow(a, i) {
+    return el('div', { className: 'atk-row' },
+        el('input', { placeholder: 'Nom', value: a.name || '',
+            oninput: e => { newMonsterAttacks[i].name = e.target.value; } }),
+        el('input', { type: 'text', inputMode: 'numeric', placeholder: '%', value: a.pct ?? '',
+            oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); newMonsterAttacks[i].pct = +e.target.value || 0; } }),
+        el('input', { placeholder: '1d6', value: a.dmg || '',
+            oninput: e => { newMonsterAttacks[i].dmg = e.target.value; } }),
+        el('button', { className: 'del-btn', textContent: '✕', onclick: () => removeAmfAttack(i) }));
+}
 // Add an attack row to the add-monster form.
 function addAmfAttack() {
-    const idx = newMonsterAttacks.length;
     newMonsterAttacks.push({ name: '', pct: 50, dmg: '' });
-    const list = document.getElementById('amf-attacks-list');
-    const row = document.createElement('div'); row.className = 'atk-row'; row.id = `amf-atk-${idx}`;
-    row.innerHTML = `<input placeholder="Nom" oninput="newMonsterAttacks[${idx}].name=this.value" /><input type="text" inputmode="numeric" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');newMonsterAttacks[${idx}].pct=+this.value||0" /><input placeholder="1d6" oninput="newMonsterAttacks[${idx}].dmg=this.value" /><button class="del-btn" onclick="removeAmfAttack(${idx})">✕</button>`;
-    list.appendChild(row);
+    _renderAmfAttacks();
 }
 // Remove an attack by index from the add-monster form and re-render the rows.
+// Every row is rebuilt because the closures capture the index, which shifts.
 function removeAmfAttack(idx) {
     newMonsterAttacks.splice(idx, 1);
-    // re-render amf attacks
-    const list = document.getElementById('amf-attacks-list');
-    list.innerHTML = '';
-    newMonsterAttacks.forEach((a, i) => {
-        const row = document.createElement('div'); row.className = 'atk-row';
-        row.innerHTML = `<input value="${_escHtml(a.name)}" placeholder="Nom" oninput="newMonsterAttacks[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${a.pct}" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');newMonsterAttacks[${i}].pct=+this.value||0" /><input value="${_escHtml(a.dmg)}" placeholder="1d6" oninput="newMonsterAttacks[${i}].dmg=this.value" /><button class="del-btn" onclick="removeAmfAttack(${i})">✕</button>`;
-        list.appendChild(row);
-    });
+    _renderAmfAttacks();
+}
+function _renderAmfAttacks() {
+    fill(document.getElementById('amf-attacks-list'), newMonsterAttacks.map(_amfAttackRow));
 }
 // Apply damage to the selected monster in the GM roll panel.
 function doGMMonsterDamage() {
@@ -2370,7 +1840,6 @@ function assignFileToGroup(fId, groupId) {
 function renderMonsters() {
     const grid = document.getElementById('monsters-grid');
     const noM = document.getElementById('no-monsters');
-    grid.innerHTML = '';
     // Drop a stale active filter (e.g. group deleted elsewhere), then render chips.
     if (activeMonsterGroupId && !monsterGroups.some(g => g.id === activeMonsterGroupId)) activeMonsterGroupId = null;
     _renderGroupBar('monster');
@@ -2378,6 +1847,7 @@ function renderMonsters() {
         ? monsters.filter(m => monsterGroupAssign[m.id] === activeMonsterGroupId)
         : monsters;
     if (!list.length) {
+        clearKeyed(grid);
         if (noM) {
             noM.textContent = monsters.length ? 'Aucun monstre dans ce groupe' : 'Aucun monstre actif';
             noM.style.display = ''; grid.appendChild(noM);
@@ -2385,57 +1855,92 @@ function renderMonsters() {
         return;
     }
     if (noM) noM.style.display = 'none';
-    list.forEach(m => {
-        const pct = m.maxPV > 0 ? m.pv / m.maxPV : 0;
-        const hpColor = pct > 0.5 ? 'var(--ok)' : pct > 0.25 ? 'var(--warn)' : 'var(--bad)';
-        const safeId = String(m.id).replace(/[^a-zA-Z0-9_-]/g, '-');
-        const mDead = m.pv <= 0;
-        const mCritical = !mDead && pct >= 0 && pct <= 0.25;
-        const card = document.createElement('div');
-        card.className = 'monster-card' + (mDead ? ' is-dead' : (mCritical ? ' hp-critical' : ''));
-        card.dataset.monsterId = m.id;
-        const gName = monsterGroupAssign[m.id] ? (monsterGroups.find(g => g.id === monsterGroupAssign[m.id]) || {}).name : '';
-        card.innerHTML = `
-          <div class="mc-header">
-            <span class="group-grip" draggable="true" title="Glisser vers un groupe" ondragstart="_groupDragStart(event,'${m.id}','monster')" ondragend="_groupDragEnd(event)">⠿</span>
-            <div class="mc-name">${_escHtml(m.name)}</div>
-            ${gName ? `<span class="group-badge">${_escHtml(gName)}</span>` : ''}
-            <button class="mc-del" onclick="removeMonster('${m.id}')">✕</button>
-          </div>
-          <div class="mc-body">
-            <div class="mc-hp-row">
-              <div><div class="mc-hp-num" style="color:${hpColor}">${m.pv}</div><div style="font-family:'Cormorant Garamond',serif;font-size:9px;color:rgba(255,150,150,.5);">/ ${m.maxPV} PV</div></div>
-              <div class="mc-hp-bar-wrap"><div class="mc-hp-bar" style="width:${Math.round(pct * 100)}%;background:${hpColor};"></div></div>
-              <div style="font-family:ui-monospace,Menlo,monospace;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,150,150,.5);">Arm. ${m.armor}</div>
-            </div>
-            <div class="mc-inline-actions">
-              <input class="mc-inline-input" id="mc-dmg-${safeId}" type="text" inputmode="numeric" placeholder="Dégâts" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')monsterInlineDamage('${m.id}')" />
-              <button class="mc-inline-btn dmg" onclick="monsterInlineDamage('${m.id}')">−</button>
-              <input class="mc-inline-input" id="mc-heal-${safeId}" type="text" inputmode="numeric" placeholder="Soins" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')monsterInlineHeal('${m.id}')" />
-              <button class="mc-inline-btn heal" onclick="monsterInlineHeal('${m.id}')">♥</button>
-            </div>
-            <div class="mc-stats">
-              ${Object.entries(m.stats).map(([k, v]) => `<span class="mc-stat">${k} <span>${v}</span></span>`).join('')}
-            </div>
-            <div class="mc-atk-section">
-              <div class="mc-atk-hdr">
-                <span class="mc-atk-col-label">Nom</span>
-                <span class="mc-atk-col-label center">%</span>
-                <span class="mc-atk-col-label center">Dégâts</span>
-                <span></span>
-              </div>
-              ${m.attacks.map((a, i) => `
-              <div class="mc-atk-edit-row">
-                <input class="mc-atk-input" value="${_escHtml(a.name)}" placeholder="Nom" oninput="updateMonsterAttack('${m.id}',${i},'name',this.value)" />
-                <input class="mc-atk-input center" type="text" inputmode="numeric" value="${a.pct}" placeholder="%" oninput="this.value=this.value.replace(/[^0-9]/g,'');updateMonsterAttack('${m.id}',${i},'pct',+this.value||0)" />
-                <input class="mc-atk-input center" value="${_escHtml(a.dmg || '')}" placeholder="1d6" oninput="updateMonsterAttack('${m.id}',${i},'dmg',this.value)" />
-                <button class="del-btn" onclick="removeMonsterAttack('${m.id}',${i})">✕</button>
-              </div>`).join('')}
-              <button class="add-atk-btn mc-add-atk" onclick="addMonsterAttack('${m.id}')">+ Attaque</button>
-            </div>
-          </div>`;
-        grid.appendChild(card);
-    });
+    reconcile(grid, list.map(m => [String(m.id), m]), (id, m) => _monsterCard(id, m), (card, m) => _updateMonsterCard(card, m));
+}
+
+// Build one monster card. Handlers are closures over the monster id, so the id never
+// has to survive a trip through the HTML parser and then the JS parser — hence no
+// escaping here, and no `safeId` scrubbing to make it selector-safe.
+function _monsterCard(id, m) {
+    const numeric = { type: 'text', inputMode: 'numeric', oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); } };
+    const dmgInput = el('input', { ...numeric, className: 'mc-inline-input', placeholder: 'Dégâts',
+        onkeydown: e => { if (e.key === 'Enter') monsterInlineDamage(id); } });
+    const healInput = el('input', { ...numeric, className: 'mc-inline-input', placeholder: 'Soins',
+        onkeydown: e => { if (e.key === 'Enter') monsterInlineHeal(id); } });
+
+    const refs = {
+        name:   el('div', { className: 'mc-name' }),
+        badge:  el('span', { className: 'group-badge' }),
+        hpNum:  el('div', { className: 'mc-hp-num' }),
+        hpMax:  el('div', { style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '9px', color: 'rgba(255,150,150,.5)' } }),
+        hpBar:  el('div', { className: 'mc-hp-bar' }),
+        armor:  el('div', { style: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: '9px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'rgba(255,150,150,.5)' } }),
+        stats:  el('div', { className: 'mc-stats' }),
+        atks:   el('div', { className: 'mc-atk-section' }),
+        dmgInput, healInput,
+    };
+    const card = el('div', { className: 'monster-card', dataset: { monsterId: id } },
+        el('div', { className: 'mc-header' },
+            el('span', { className: 'group-grip', draggable: true, title: 'Glisser vers un groupe', textContent: '⠿',
+                ondragstart: e => _groupDragStart(e, id, 'monster'), ondragend: e => _groupDragEnd(e) }),
+            refs.name, refs.badge,
+            el('button', { className: 'mc-del', textContent: '✕', onclick: () => removeMonster(id) })),
+        el('div', { className: 'mc-body' },
+            el('div', { className: 'mc-hp-row' },
+                el('div', null, refs.hpNum, refs.hpMax),
+                el('div', { className: 'mc-hp-bar-wrap' }, refs.hpBar),
+                refs.armor),
+            el('div', { className: 'mc-inline-actions' },
+                dmgInput,
+                el('button', { className: 'mc-inline-btn dmg', textContent: '−', onclick: () => monsterInlineDamage(id) }),
+                healInput,
+                el('button', { className: 'mc-inline-btn heal', textContent: '♥', onclick: () => monsterInlineHeal(id) })),
+            refs.stats,
+            refs.atks));
+    card._refs = refs;
+    return card;
+}
+
+// Refresh a monster card in place. Attack rows are rebuilt only when their count
+// changes or nothing inside them has focus — the node identity is preserved, so
+// typing in an attack field is no longer interrupted by a re-render.
+function _updateMonsterCard(card, m) {
+    const r = card._refs;
+    const id = String(m.id);
+    const pct = m.maxPV > 0 ? m.pv / m.maxPV : 0;
+    const hpColor = pct > 0.5 ? 'var(--ok)' : pct > 0.25 ? 'var(--warn)' : 'var(--bad)';
+    const dead = m.pv <= 0;
+    card.className = 'monster-card' + (dead ? ' is-dead' : (!dead && pct >= 0 && pct <= 0.25 ? ' hp-critical' : ''));
+    r.name.textContent = m.name;
+    const gName = monsterGroupAssign[m.id] ? (monsterGroups.find(g => g.id === monsterGroupAssign[m.id]) || {}).name : '';
+    r.badge.textContent = gName || '';
+    r.badge.style.display = gName ? '' : 'none';
+    r.hpNum.textContent = m.pv;
+    r.hpNum.style.color = hpColor;
+    r.hpMax.textContent = `/ ${m.maxPV} PV`;
+    r.hpBar.style.width = `${Math.round(pct * 100)}%`;
+    r.hpBar.style.background = hpColor;
+    r.armor.textContent = `Arm. ${m.armor}`;
+    fill(r.stats, Object.entries(m.stats).map(([k, v]) =>
+        el('span', { className: 'mc-stat', textContent: k + ' ' }, el('span', { textContent: String(v) }))));
+
+    const rows = r.atks.querySelectorAll('.mc-atk-edit-row');
+    if (rows.length === m.attacks.length && r.atks.contains(document.activeElement)) return;
+    fill(r.atks,
+        el('div', { className: 'mc-atk-hdr' },
+            el('span', { className: 'mc-atk-col-label', textContent: 'Nom' }),
+            el('span', { className: 'mc-atk-col-label center', textContent: '%' }),
+            el('span', { className: 'mc-atk-col-label center', textContent: 'Dégâts' }),
+            el('span')),
+        m.attacks.map((a, i) => el('div', { className: 'mc-atk-edit-row' },
+            el('input', { className: 'mc-atk-input', value: a.name || '', placeholder: 'Nom',
+                oninput: e => updateMonsterAttack(id, i, 'name', e.target.value) }),
+            el('input', { className: 'mc-atk-input center', type: 'text', inputMode: 'numeric', value: a.pct, placeholder: '%',
+                oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); updateMonsterAttack(id, i, 'pct', +e.target.value || 0); } }),
+            el('input', { className: 'mc-atk-input center', value: a.dmg || '', placeholder: '1d6',
+                oninput: e => updateMonsterAttack(id, i, 'dmg', e.target.value) }),
+            el('button', { className: 'del-btn', textContent: '✕', onclick: () => removeMonsterAttack(id, i) }))),
+        el('button', { className: 'add-atk-btn mc-add-atk', textContent: '+ Attaque', onclick: () => addMonsterAttack(id) }));
 }
 // Add a new empty attack to an existing monster and re-render.
 function addMonsterAttack(mId) {
@@ -2497,12 +2002,6 @@ function handleIncomingRoll(data) {
     localStorage.setItem(rollsKey(), JSON.stringify(rollFeed));
     insertRoll(data);
     renderRollFeed();
-}
-// Classify a d100 roll as success, fail, crit-success, or crit-fail.
-function classify(roll, threshold, success) {
-    if (roll <= 10 && success) return 'crit-success';
-    if (roll >= 91 && !success) return 'crit-fail';
-    return success ? 'success' : 'fail';
 }
 // Render the GM roll feed with player pills, filters, and day-grouped entries.
 function renderRollFeed() {
@@ -2575,18 +2074,19 @@ function renderRollFeed() {
             const roll = _finiteNum(d.roll) ?? 0;
             const threshold = _finiteNum(d.threshold) ?? 0;
             const bm = _finiteNum(d.bonusMalus) ?? 0;
-            const row = document.createElement('div'); row.className = `roll-entry ${type}${d.hidden ? ' hidden-roll' : ''}`;
-            row.innerHTML = `
-              <div class="re-char">${d.hidden ? '<span class="re-hidden-badge" title="Jet caché — visible uniquement par le MJ">MJ</span>' : ''}${_escHtml(d.char || d.playerId || '?')}</div>
-              <div class="re-context">
-                <div class="re-skill">${_escHtml(d.skillName)}</div>
-                ${isDie ? '' : `<div class="re-threshold">Seuil : ${threshold}%${bm ? ` · BM : ${bm > 0 ? '+' : ''}${bm}` : ''}</div>`}
-              </div>
-              <div class="re-result">
-                <div class="re-roll">${roll}</div>
-                ${isDie ? '' : `<div class="re-verdict ${vcls[type]}">${verdicts[type]}</div>`}
-              </div>`;
-            feed.appendChild(row);
+            // char / skillName arrive over Ably from any holder of the key.
+            feed.append(el('div', { className: `roll-entry ${type}${d.hidden ? ' hidden-roll' : ''}` },
+                el('div', { className: 're-char' },
+                    d.hidden && el('span', { className: 're-hidden-badge', textContent: 'MJ',
+                        title: 'Jet caché — visible uniquement par le MJ' }),
+                    d.char || d.playerId || '?'),
+                el('div', { className: 're-context' },
+                    el('div', { className: 're-skill', textContent: d.skillName }),
+                    !isDie && el('div', { className: 're-threshold',
+                        textContent: `Seuil : ${threshold}%${bm ? ` · BM : ${bm > 0 ? '+' : ''}${bm}` : ''}` })),
+                el('div', { className: 're-result' },
+                    el('div', { className: 're-roll', textContent: roll }),
+                    !isDie && el('div', { className: `re-verdict ${vcls[type]}`, textContent: verdicts[type] }))));
         });
     });
 }
@@ -2615,7 +2115,7 @@ function toggleGMRollFilter(key) {
         const allBtn = document.getElementById('gm-rfp-all');
         if (allBtn) allBtn.classList.add('active');
     } else {
-        rollFilter.forEach(k => { const el = document.getElementById('gm-rfp-' + k); if (el) el.classList.add('active'); });
+        rollFilter.forEach(k => { const node = document.getElementById('gm-rfp-' + k); if (node) node.classList.add('active'); });
     }
     renderRollFeed();
 }
@@ -2699,24 +2199,21 @@ function showGMRollResult(name, threshold, roll, success, dmgResult) {
     const type = classify(roll, threshold, success);
     const verdicts = { success: 'SUCCÈS', fail: 'ÉCHEC', 'crit-success': 'SUCCÈS CRITIQUE', 'crit-fail': 'ÉCHEC CRITIQUE' };
     const colors = { success: 'var(--success)', fail: 'var(--fail)', 'crit-success': '#a8ff78', 'crit-fail': '#ff4444' };
-    const dmgHtml = dmgResult
-        ? `<div class="gm-rr-dmg">Dégâts : <strong>${dmgResult.total}</strong>${dmgResult.breakdown && dmgResult.breakdown !== String(dmgResult.total) ? ` <span class="gm-rr-breakdown">${dmgResult.breakdown}</span>` : ''}</div>`
-        : '';
-    let targetHtml = '';
-    if (dmgResult) {
-        const online = [...players.entries()].filter(([, p]) => p.online !== false);
-        if (online.length) {
-            const btns = online.map(([id, p]) => `<button class="gm-target-btn" data-pid="${id}" onclick="applyDamageToPlayer('${id}',${dmgResult.total})">${_escHtml(p.name || id.slice(-4))}</button>`).join('');
-            targetHtml = `<div class="gm-target-section"><div class="gm-target-label">Appliquer à :</div><div class="gm-target-btns">${btns}</div></div>`;
-        }
-    }
-    const el = document.getElementById('gm-roll-result');
-    el.innerHTML = `
-        <div class="gm-rr-name">${_escHtml(name)}</div>
-        <div class="gm-rr-roll">${roll}</div>
-        <div class="gm-rr-detail">Seuil : ${threshold}%</div>
-        <div class="gm-rr-verdict" style="color:${colors[type]};">${verdicts[type]}</div>
-        ${dmgHtml}${targetHtml}`;
+    const online = dmgResult ? [...players.entries()].filter(([, p]) => p.online !== false) : [];
+    fill(document.getElementById('gm-roll-result'),
+        el('div', { className: 'gm-rr-name', textContent: name }),
+        el('div', { className: 'gm-rr-roll', textContent: roll }),
+        el('div', { className: 'gm-rr-detail', textContent: `Seuil : ${threshold}%` }),
+        el('div', { className: 'gm-rr-verdict', style: { color: colors[type] }, textContent: verdicts[type] }),
+        dmgResult && el('div', { className: 'gm-rr-dmg', textContent: 'Dégâts : ' },
+            el('strong', { textContent: dmgResult.total }),
+            dmgResult.breakdown && dmgResult.breakdown !== String(dmgResult.total)
+                && el('span', { className: 'gm-rr-breakdown', textContent: ' ' + dmgResult.breakdown })),
+        online.length && el('div', { className: 'gm-target-section' },
+            el('div', { className: 'gm-target-label', textContent: 'Appliquer à :' }),
+            el('div', { className: 'gm-target-btns' }, online.map(([id, p]) =>
+                el('button', { className: 'gm-target-btn', dataset: { pid: id }, textContent: p.name || id.slice(-4),
+                    onclick: () => applyDamageToPlayer(id, dmgResult.total) })))));
 }
 // Apply a damage amount to a player from the GM roll result panel, with armor reduction.
 function applyDamageToPlayer(charId, amount) {
@@ -2737,8 +2234,8 @@ function applyDamageToPlayer(charId, amount) {
 // Roll a standard GM die (shown in the die tray) and add it to the roll feed.
 function gmRollDie(sides) {
     const result = Math.floor(Math.random() * sides) + 1;
-    const el = document.getElementById('gm-die-result');
-    if (el) { el.textContent = `d${sides} → ${result}`; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = 'fadeIn .3s ease'; }
+    const out = document.getElementById('gm-die-result');
+    if (out) { out.textContent = `d${sides} → ${result}`; out.style.animation = 'none'; void out.offsetWidth; out.style.animation = 'fadeIn .3s ease'; }
     handleIncomingRoll({ skillName: `d${sides}`, threshold: null, roll: result, success: null, char: 'MJ', bonusMalus: 0, playerId: 'gm' });
 }
 
@@ -2794,8 +2291,7 @@ function setPlayerKarma(charId, delta) {
 // Apply damage (with armor reduction) from the monster card inline input.
 function monsterInlineDamage(id) {
     const m = monsters.find(m => String(m.id) === String(id)); if (!m) return;
-    const safeId = String(id).replace(/[^a-zA-Z0-9_-]/g, '-');
-    const inp = document.getElementById(`mc-dmg-${safeId}`);
+    const inp = monsterCardEl(id)?._refs.dmgInput;
     const dmg = parseInt(inp?.value); if (!dmg || dmg <= 0) return;
     const effective = Math.max(0, dmg - (m.armor || 0));
     m.pv = Math.max(0, m.pv - effective);
@@ -2807,8 +2303,7 @@ function monsterInlineDamage(id) {
 // Apply heal from the monster card inline input, capping at maxPV.
 function monsterInlineHeal(id) {
     const m = monsters.find(m => String(m.id) === String(id)); if (!m) return;
-    const safeId = String(id).replace(/[^a-zA-Z0-9_-]/g, '-');
-    const inp = document.getElementById(`mc-heal-${safeId}`);
+    const inp = monsterCardEl(id)?._refs.healInput;
     const amt = parseInt(inp?.value); if (!amt || amt <= 0) return;
     m.pv = Math.min(m.maxPV, m.pv + amt);
     if (inp) inp.value = '';
@@ -2817,13 +2312,6 @@ function monsterInlineHeal(id) {
     setTimeout(() => triggerCardFx(monsterCardEl(m.id), 'heal'), 70);
 }
 
-// ═══════════════════════════════════════════
-//  CONFIG
-// ═══════════════════════════════════════════
-// Toggle light mode on the document body.
-function applyTheme(light) {
-    document.body.classList.toggle('light-mode', !!light);
-}
 window.addEventListener('storage', e => {
     if (e.key === 'aria-config') {
         const newCfg = JSON.parse(e.newValue || '{}');
@@ -2889,28 +2377,7 @@ function saveConfig() {
     renderPlayerCards();
     toggleConfig();
 }
-// Toggle the config modal and scrim visibility.
-function toggleConfig() {
-    document.getElementById('config-modal').classList.toggle('show');
-    document.getElementById('config-scrim').classList.toggle('show');
-}
 
-// ═══════════════════════════════════════════
-//  CARD DISPLAY (player draws only)
-// ═══════════════════════════════════════════
-// Return a Promise that resolves after ms milliseconds.
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-// Render the face of a playing card into the player-view drawn-card element.
-function renderCardContent(card) {
-    const el = document.getElementById('drawn-card');
-    if (card.isJoker) {
-        el.className = `flip-face ${card.jokerColor === 'red' ? 'c-red' : 'c-black'}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div><div class="card-center" style="flex-direction:column;gap:6px;"><span style="font-size:50px;line-height:1;color:var(--card-purple)">★</span><span style="font-family:'Cormorant Garamond',serif;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--card-purple)">${card.label.toUpperCase()}</span></div><div class="card-corner br"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div>`;
-    } else {
-        el.className = `flip-face ${card.suit.cls}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div><div class="card-center">${card.suit.sym}</div><div class="card-corner br"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div>`;
-    }
-}
 // Render the card draw history feed.
 function renderCardHistory() {
     const feed = document.getElementById('card-history-feed');
@@ -2921,13 +2388,11 @@ function renderCardHistory() {
         const label = card ? (card.isJoker ? card.label : `${card.rank} de ${SUIT_FR[card.suit.name] || card.suit.name}`) : entry.cardId;
         const colorCls = card ? (card.isJoker ? 'c-purple' : card.suit.cls) : '';
         const sym = card ? (card.isJoker ? '★' : card.suit.sym) : '?';
-        const row = document.createElement('div');
-        row.className = 'card-history-row';
-        row.innerHTML = `
-          <div class="chr-player">${_escHtml(entry.playerName || '?')}</div>
-          <div class="chr-card ${colorCls}">${sym} ${_escHtml(label)}</div>
-          <div class="chr-time">${new Date(entry.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>`;
-        feed.appendChild(row);
+        feed.append(el('div', { className: 'card-history-row' },
+            el('div', { className: 'chr-player', textContent: entry.playerName || '?' }),
+            el('div', { className: `chr-card ${colorCls}`, textContent: `${sym} ${label}` }),
+            el('div', { className: 'chr-time',
+                textContent: new Date(entry.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) })));
     });
 }
 // Clear the card draw history from memory and localStorage.
@@ -3070,24 +2535,17 @@ function gmUpdateClearBtn() { const btn = document.getElementById('gm-clear-excl
 
 // Show a temporary card status message in the GM card tab.
 function gmShowCardStatus(msg) {
-    const el = document.getElementById('gm-card-status');
-    if (!el) return;
-    el.textContent = msg;
+    const node = document.getElementById('gm-card-status');
+    if (!node) return;
+    node.textContent = msg;
     clearTimeout(gmCardStatusTimer);
-    gmCardStatusTimer = setTimeout(() => el.textContent = '', 2200);
+    gmCardStatusTimer = setTimeout(() => node.textContent = '', 2200);
 }
 
 // Render the face of a playing card into the GM private deck drawn-card element.
+// Same face as the shared renderer, different target element.
 function gmRenderCardContent(card) {
-    const el = document.getElementById('gm-drawn-card');
-    if (!el) return;
-    if (card.isJoker) {
-        el.className = `flip-face ${card.jokerColor === 'red' ? 'c-red' : 'c-black'}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div><div class="card-center" style="flex-direction:column;gap:6px;"><span style="font-size:50px;line-height:1;color:var(--card-purple)">★</span><span style="font-family:'Cormorant Garamond',serif;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--card-purple)">${card.label.toUpperCase()}</span></div><div class="card-corner br"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div>`;
-    } else {
-        el.className = `flip-face ${card.suit.cls}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div><div class="card-center">${card.suit.sym}</div><div class="card-corner br"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div>`;
-    }
+    renderCardFace(document.getElementById('gm-drawn-card'), card);
 }
 
 // Render and flip a card into view on the GM deck stage.
@@ -3185,10 +2643,11 @@ function openGmFileViewer(fileId) {
         body.appendChild(pre);
         fetch(url).then(r => r.text()).then(t => { pre.textContent = t; }).catch(() => { pre.textContent = 'Erreur de chargement.'; });
     } else {
-        const wrap = document.createElement('div');
-        wrap.className = 'fv-unsupported';
-        wrap.innerHTML = `<div class="fv-unsupported-icon">${_fileIcon(f.type)}</div><div class="fv-unsupported-name">${_escHtml(f.name)}</div>${url ? `<a class="fv-download-link" href="${_escHtml(url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>` : ''}`;
-        body.appendChild(wrap);
+        body.append(el('div', { className: 'fv-unsupported' },
+            el('div', { className: 'fv-unsupported-icon', textContent: _fileIcon(f.type) }),
+            el('div', { className: 'fv-unsupported-name', textContent: f.name }),
+            url && el('a', { className: 'fv-download-link', href: url, target: '_blank', rel: 'noopener',
+                textContent: 'Ouvrir dans un nouvel onglet' })));
     }
     document.getElementById('gm-file-viewer-scrim').classList.add('show');
     document.getElementById('gm-file-viewer-modal').classList.add('show');
@@ -3201,34 +2660,6 @@ function closeGmFileViewer() {
     document.getElementById('gm-fv-body').innerHTML = '';
 }
 
-// Wire wheel-zoom (toward cursor), drag-to-pan and double-click reset onto a file-viewer image.
-// The img is recreated on every open (body.innerHTML = ''), so no explicit teardown is needed.
-function wireImageZoom(img) {
-    let scale = 1, tx = 0, ty = 0;
-    const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
-    img.addEventListener('wheel', e => {
-        e.preventDefault();
-        const ns = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-        const rect = img.getBoundingClientRect();
-        const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-        tx -= cx * (ns / scale - 1);
-        ty -= cy * (ns / scale - 1);
-        scale = ns;
-        if (scale === 1) { tx = 0; ty = 0; }
-        apply();
-    }, { passive: false });
-    img.addEventListener('mousedown', e => {
-        if (scale === 1) return;
-        e.preventDefault();
-        const sx = e.clientX - tx, sy = e.clientY - ty;
-        img.classList.add('panning');
-        const move = ev => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); };
-        const up = () => { img.classList.remove('panning'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
-    });
-    img.addEventListener('dblclick', e => { e.preventDefault(); scale = 1; tx = 0; ty = 0; apply(); });
-}
 
 // ═══════════════════════════════════════════
 //  GM ALCHEMY
@@ -3246,7 +2677,7 @@ function addGMPotion() {
     const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
     gmPotions.push({ id, name, desc, ingredients, successChance });
     saveGMPotions();
-    ['apf-name', 'apf-desc', 'apf-ingredients', 'apf-chance'].forEach(eid => { const el = document.getElementById(eid); if (el) el.value = ''; });
+    ['apf-name', 'apf-desc', 'apf-ingredients', 'apf-chance'].forEach(eid => { const node = document.getElementById(eid); if (node) node.value = ''; });
     renderGMPotions();
 }
 
@@ -3277,27 +2708,25 @@ function renderGMPotions() {
         return;
     }
     if (empty) empty.style.display = 'none';
+    const field = (icon, value, placeholder, key) => el('div', { className: 'gm-pot-field-row' },
+        el('span', { className: 'gm-pot-field-icon', textContent: icon }),
+        el('input', { className: 'gm-pot-text-input', value, placeholder,
+            oninput: e => updateGMPotion(key.id, key.field, e.target.value) }));
     gmPotions.forEach(p => {
-        const card = document.createElement('div');
-        card.className = 'gm-pot-card';
-        card.innerHTML = `
-            <div class="gm-pot-card-header">
-                <span class="gm-pot-card-icon">◆</span>
-                <input class="gm-pot-name-input" value="${_escHtml(p.name)}" placeholder="Nom" oninput="updateGMPotion('${p.id}','name',this.value)" />
-                <div class="gm-pot-chance-wrap"><input class="gm-pot-chance-badge" type="text" inputmode="numeric" value="${p.successChance || ''}" placeholder="—" oninput="this.value=this.value.replace(/[^0-9]/g,'');updateGMPotion('${p.id}','successChance',+this.value||0)" /><span class="gm-pot-chance-suffix">%</span></div>
-            </div>
-            <div class="gm-pot-card-body">
-                <div class="gm-pot-field-row">
-                    <span class="gm-pot-field-icon">✦</span>
-                    <input class="gm-pot-text-input" value="${_escHtml(p.desc||'')}" placeholder="Description / Effet" oninput="updateGMPotion('${p.id}','desc',this.value)" />
-                </div>
-                <div class="gm-pot-field-row">
-                    <span class="gm-pot-field-icon">◈</span>
-                    <input class="gm-pot-text-input" value="${_escHtml(p.ingredients||'')}" placeholder="Ingrédients" oninput="updateGMPotion('${p.id}','ingredients',this.value)" />
-                </div>
-            </div>
-            <button class="gm-pot-del-btn" onclick="removeGMPotion('${p.id}')">✕</button>`;
-        list.appendChild(card);
+        list.append(el('div', { className: 'gm-pot-card' },
+            el('div', { className: 'gm-pot-card-header' },
+                el('span', { className: 'gm-pot-card-icon', textContent: '◆' }),
+                el('input', { className: 'gm-pot-name-input', value: p.name, placeholder: 'Nom',
+                    oninput: e => updateGMPotion(p.id, 'name', e.target.value) }),
+                el('div', { className: 'gm-pot-chance-wrap' },
+                    el('input', { className: 'gm-pot-chance-badge', type: 'text', inputMode: 'numeric',
+                        value: p.successChance || '', placeholder: '—',
+                        oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); updateGMPotion(p.id, 'successChance', +e.target.value || 0); } }),
+                    el('span', { className: 'gm-pot-chance-suffix', textContent: '%' }))),
+            el('div', { className: 'gm-pot-card-body' },
+                field('✦', p.desc || '', 'Description / Effet', { id: p.id, field: 'desc' }),
+                field('◈', p.ingredients || '', 'Ingrédients', { id: p.id, field: 'ingredients' })),
+            el('button', { className: 'gm-pot-del-btn', textContent: '✕', onclick: () => removeGMPotion(p.id) })));
     });
 }
 
@@ -3365,36 +2794,15 @@ function sendVialGrant(charId, qty) {
     ablyDamage.publish('vial-grant', { charId: p.charId, qty });
 }
 
-// ═══════════════════════════════════════════
-//  GM FILES
-// ═══════════════════════════════════════════
-// Escape HTML special characters for safe injection into innerHTML.
-function _escHtml(s) {
-    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-// Escape a string for embedding inside a single-quoted JS literal in an inline
-// handler attribute. Always wrap the result in _escHtml too, since the HTML
-// parser decodes the attribute before the JS engine sees it.
-function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
-// Allow only http(s) URLs from remote-controlled records (file rows live in Supabase
-// and travel over Ably) — a javascript: URL assigned to iframe.src would execute here.
-function _safeUrl(u) { const s = String(u ?? '').trim(); return /^https?:\/\//i.test(s) ? s : ''; }
-// Coerce a remote value to a finite number, or null. Presence payloads are
-// attacker-controllable (anyone with the Ably key) — numbers interpolated into
-// innerHTML must never pass through as strings.
-function _finiteNum(v) { if (v === null || v === undefined || v === '') return null; const n = +v; return Number.isFinite(n) ? n : null; }
-// charId / playerId end up in element ids, CSS selectors and single-quoted inline
-// handlers, so only UUID-shaped tokens are ever accepted. Shared by handlePresence
-// (live payloads) and loadCampaignState (the persisted known-players snapshot) —
-// both feed the same `players` Map and the same renders.
-function _isIdToken(v) { return /^[A-Za-z0-9_-]{1,64}$/.test(String(v)); }
 // Render a skill/special percentage for the player-details modal, folding in the
 // player's per-skill permanent modifier (s.bonus) and annotating it when non-zero.
+// Returns nodes, not markup — the caller appends them, so the values stay text.
 function _pdmSkillPct(s) {
     const pct = +s.pct || 0;
     const b = +s.bonus || 0;
-    if (!b) return _escHtml(pct) + '%';
-    return `${_escHtml(pct + b)}% <span class="pdm-skill-mod" title="Modificateur permanent">${b > 0 ? '+' : ''}${b}</span>`;
+    if (!b) return `${pct}%`;
+    return [`${pct + b}% `, el('span', { className: 'pdm-skill-mod', title: 'Modificateur permanent',
+        textContent: `${b > 0 ? '+' : ''}${b}` })];
 }
 // Return a short uppercase type tag for a file MIME type (mono label, no emoji).
 function _fileIcon(type) {
@@ -3415,16 +2823,7 @@ function saveGMMusic() {
     debouncedSyncMusic();
 }
 
-// ═══════════════════════════════════════════
-//  MUSIC AUDIO ENGINE
-// ═══════════════════════════════════════════
-let musicMasterVolume = parseInt(localStorage.getItem('aria-music-volume') || '80');
-let musicFadeDuration = 3000;
 let musicLoop         = false;
-let musicCurrentIndex = -1;
-let musicIsPlaying    = false;
-let _musicCurrentSlot = 'A'; // 'A' or 'B'
-let _musicFadeRaf     = null;
 let _musicProgressRaf = null;
 
 // ─── Playlist accessors ───
@@ -3477,143 +2876,6 @@ function _normalizeMusicData(raw) {
     return playlists;
 }
 
-// Slot descriptors
-const _musicSlots = {
-    A: { audio: null, ytEndedCb: null },
-    B: { audio: null, ytEndedCb: null },
-};
-
-// YouTube IFrame API state
-let _ytAPIReady       = false;
-let _ytPendingCbs     = [];
-let _ytSlotA          = null; // YT.Player instance
-let _ytSlotB          = null;
-
-// Lazily create and return the Audio element for a given slot (A or B).
-function _getAudio(slot) {
-    if (!_musicSlots[slot].audio) _musicSlots[slot].audio = new Audio();
-    return _musicSlots[slot].audio;
-}
-
-// Set the volume (0–100) on a music slot's Audio element and YouTube player.
-function _setSlotVol(slot, vol) {
-    const v = Math.max(0, Math.min(100, vol));
-    const audio = _musicSlots[slot].audio;
-    if (audio) audio.volume = v / 100;
-    const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-    if (yt) { try { yt.setVolume(v); } catch(_) {} }
-}
-
-// Stop and clear a music slot: pause audio, stop YouTube, clear ended callback.
-function _stopSlot(slot) {
-    const audio = _musicSlots[slot].audio;
-    if (audio) { audio.pause(); audio.onended = null; audio.src = ''; }
-    const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-    if (yt) { try { yt.stopVideo(); } catch(_) {} }
-    _musicSlots[slot].ytEndedCb = null;
-}
-
-// Lazily load the YouTube IFrame API script and call back when it is ready.
-function _ensureYTAPI(cb) {
-    if (_ytAPIReady) { cb(); return; }
-    _ytPendingCbs.push(cb);
-    if (document.getElementById('yt-iframe-api')) return;
-    window.onYouTubeIframeAPIReady = () => {
-        _ytAPIReady = true;
-        _ytPendingCbs.splice(0).forEach(fn => fn());
-    };
-    const s = document.createElement('script');
-    s.id = 'yt-iframe-api';
-    s.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(s);
-}
-
-// Ensure both YouTube player slots A and B are initialized, then call back.
-function _ensureYTSlots(cb) {
-    _ensureYTAPI(() => {
-        if (_ytSlotA && _ytSlotB) { cb(); return; }
-        let readyCount = 0;
-        const onSlotReady = () => { readyCount++; if (readyCount === 2) cb(); };
-        _ytSlotA = new YT.Player('yt-player-a', {
-            width: '1', height: '1',
-            playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0 },
-            events: {
-                onReady: onSlotReady,
-                onStateChange: e => { if (e.data === YT.PlayerState.ENDED && _musicSlots.A.ytEndedCb) _musicSlots.A.ytEndedCb(); },
-            },
-        });
-        _ytSlotB = new YT.Player('yt-player-b', {
-            width: '1', height: '1',
-            playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0 },
-            events: {
-                onReady: onSlotReady,
-                onStateChange: e => { if (e.data === YT.PlayerState.ENDED && _musicSlots.B.ytEndedCb) _musicSlots.B.ytEndedCb(); },
-            },
-        });
-    });
-}
-
-// Load a track into a slot at volume 0 and call onStarted once playback begins.
-function _loadSlotAtZeroVol(track, slot, onStarted) {
-    _setSlotVol(slot, 0);
-    if (track.type === 'file') {
-        const audio = _getAudio(slot);
-        audio.onended = null;
-        audio.src = track.url;
-        audio.volume = 0;
-        const p = audio.play();
-        if (p) p.then(onStarted).catch(() => _showMusicUnlockPrompt(() => audio.play().then(onStarted)));
-        else onStarted();
-    } else {
-        _ensureYTSlots(() => {
-            const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-            _musicSlots[slot].ytEndedCb = null;
-            yt.loadVideoById(track.youtubeId);
-            yt.setVolume(0);
-            setTimeout(() => { try { yt.playVideo(); } catch(_) {} onStarted(); }, 800);
-        });
-    }
-}
-
-// Cross-fade volume from one audio slot to another over musicFadeDuration ms.
-function _runCrossfade(fromSlot, toSlot, onDone) {
-    if (_musicFadeRaf) { cancelAnimationFrame(_musicFadeRaf); _musicFadeRaf = null; }
-    const start = performance.now();
-    const fromStart = musicMasterVolume;
-    function tick(now) {
-        const t = Math.min(1, (now - start) / musicFadeDuration);
-        _setSlotVol(fromSlot, (1 - t) * fromStart);
-        _setSlotVol(toSlot, t * musicMasterVolume);
-        if (t < 1) { _musicFadeRaf = requestAnimationFrame(tick); }
-        else { _musicFadeRaf = null; _stopSlot(fromSlot); onDone(); }
-    }
-    _musicFadeRaf = requestAnimationFrame(tick);
-}
-
-// Register the "track ended" callback for a slot (audio onended or YouTube state change).
-function _setSlotEndedCallback(slot, track, cb) {
-    if (track.type === 'file') {
-        const audio = _musicSlots[slot].audio;
-        if (audio) audio.onended = cb;
-    } else {
-        _musicSlots[slot].ytEndedCb = cb;
-    }
-}
-
-// Show a "click to enable audio" banner for browsers that block autoplay.
-function _showMusicUnlockPrompt(onUnlock) {
-    let el = document.getElementById('music-unlock-prompt');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = 'music-unlock-prompt';
-        el.className = 'music-unlock-prompt';
-        el.textContent = '▶ Cliquer pour activer le son';
-        document.body.appendChild(el);
-    }
-    el.style.display = 'flex';
-    const handler = () => { el.style.display = 'none'; el.removeEventListener('click', handler); onUnlock(); };
-    el.addEventListener('click', handler);
-}
 
 // Advance to the next track when the current ends; loops or stops based on musicLoop flag.
 // Operates on the PLAYING playlist (not whichever the GM is currently viewing).
@@ -3633,28 +2895,6 @@ function _musicAutoAdvance() {
     publishMusicPlay(tracks[nextIdx]);
 }
 
-// Start playing a track on the inactive slot and cross-fade in from the current slot.
-function _musicTriggerPlay(track, index) {
-    if (_musicFadeRaf) { cancelAnimationFrame(_musicFadeRaf); _musicFadeRaf = null; }
-    // Disable auto-advance on current slot before transition
-    const currentSlot = _musicCurrentSlot;
-    const nextSlot = currentSlot === 'A' ? 'B' : 'A';
-    _musicSlots[currentSlot].ytEndedCb = null;
-    if (_musicSlots[currentSlot].audio) _musicSlots[currentSlot].audio.onended = null;
-
-    musicCurrentIndex = index;
-    musicIsPlaying    = true;
-    renderMusicTab();
-
-    _loadSlotAtZeroVol(track, nextSlot, () => {
-        _runCrossfade(currentSlot, nextSlot, () => {
-            _musicCurrentSlot = nextSlot;
-            _setSlotEndedCallback(nextSlot, track, _musicAutoAdvance);
-            renderMusicTab();
-            _startMusicProgress();
-        });
-    });
-}
 
 // Start the rAF loop that updates the music progress bar for file-based tracks.
 function _startMusicProgress() {
@@ -3722,21 +2962,16 @@ function renderMusicTab() {
         return;
     }
 
-    playlist.innerHTML = '';
-    tracks.forEach((t, i) => {
+    // Track names come from YouTube API responses and uploaded filenames.
+    fill(playlist, tracks.map((t, i) => {
         const isCurrent = viewingPlaying && i === musicCurrentIndex;
-        const row = document.createElement('div');
-        row.className = 'music-track-row' + (isCurrent ? ' active' : '');
-        const indicator = (isCurrent && musicIsPlaying) ? '▶' : '○';
-        const badge = t.type === 'youtube' ? 'youtube' : 'fichier';
-        row.innerHTML =
-            `<span class="music-track-indicator">${indicator}</span>` +
-            `<span class="music-track-name" onclick="musicSelectTrack(${i})">${_escHtml(t.name)}</span>` +
-            `<span class="music-track-badge">${badge}</span>` +
-            `<button class="music-track-rename" onclick="musicRenameTrack(${i})" title="Renommer">✎</button>` +
-            `<button class="music-track-delete" onclick="musicDeleteTrack(${i})">✕</button>`;
-        playlist.appendChild(row);
-    });
+        return el('div', { className: 'music-track-row' + (isCurrent ? ' active' : '') },
+            el('span', { className: 'music-track-indicator', textContent: (isCurrent && musicIsPlaying) ? '▶' : '○' }),
+            el('span', { className: 'music-track-name', textContent: t.name, onclick: () => musicSelectTrack(i) }),
+            el('span', { className: 'music-track-badge', textContent: t.type === 'youtube' ? 'youtube' : 'fichier' }),
+            el('button', { className: 'music-track-rename', title: 'Renommer', textContent: '✎', onclick: () => musicRenameTrack(i) }),
+            el('button', { className: 'music-track-delete', textContent: '✕', onclick: () => musicDeleteTrack(i) }));
+    }));
 }
 
 // ─── Playlist management ───
@@ -3806,30 +3041,21 @@ function musicLaunchPlaylist(id) {
 function renderPlaylistBar() {
     const bar = document.getElementById('music-playlist-bar');
     if (!bar) return;
-    bar.innerHTML = '';
-    gmPlaylists.forEach(pl => {
-        const isActive  = pl.id === activePlaylistId;
-        const isPlaying = pl.id === musicPlayingPlaylistId && musicIsPlaying;
-        const chip = document.createElement('div');
-        chip.className = 'music-pl-chip' + (isActive ? ' active' : '') + (isPlaying ? ' playing' : '');
-        let html =
-            `<span class="music-pl-launch" onclick="musicLaunchPlaylist('${pl.id}')" title="Lancer cette playlist">▶</span>` +
-            `<span class="music-pl-name" onclick="musicSelectPlaylist('${pl.id}')">${_escHtml(pl.name)}</span>` +
-            `<span class="music-pl-count">${pl.tracks.length}</span>`;
-        if (isActive) {
-            html +=
-                `<button class="music-pl-edit" onclick="musicRenamePlaylist('${pl.id}')" title="Renommer">✎</button>` +
-                `<button class="music-pl-del" onclick="musicDeletePlaylist('${pl.id}')" title="Supprimer"${gmPlaylists.length <= 1 ? ' disabled' : ''}>✕</button>`;
-        }
-        chip.innerHTML = html;
-        bar.appendChild(chip);
-    });
-    const add = document.createElement('button');
-    add.className = 'music-pl-add';
-    add.title = 'Nouvelle playlist';
-    add.textContent = '＋';
-    add.onclick = musicAddPlaylist;
-    bar.appendChild(add);
+    fill(bar,
+        gmPlaylists.map(pl => {
+            const isActive = pl.id === activePlaylistId;
+            const isPlaying = pl.id === musicPlayingPlaylistId && musicIsPlaying;
+            return el('div', { className: 'music-pl-chip' + (isActive ? ' active' : '') + (isPlaying ? ' playing' : '') },
+                el('span', { className: 'music-pl-launch', title: 'Lancer cette playlist', textContent: '▶',
+                    onclick: () => musicLaunchPlaylist(pl.id) }),
+                el('span', { className: 'music-pl-name', textContent: pl.name, onclick: () => musicSelectPlaylist(pl.id) }),
+                el('span', { className: 'music-pl-count', textContent: pl.tracks.length }),
+                isActive && el('button', { className: 'music-pl-edit', title: 'Renommer', textContent: '✎',
+                    onclick: () => musicRenamePlaylist(pl.id) }),
+                isActive && el('button', { className: 'music-pl-del', title: 'Supprimer', textContent: '✕',
+                    disabled: gmPlaylists.length <= 1, onclick: () => musicDeletePlaylist(pl.id) }));
+        }),
+        el('button', { className: 'music-pl-add', title: 'Nouvelle playlist', textContent: '＋', onclick: musicAddPlaylist }));
 }
 
 // Select and play a track (by index within the ACTIVE playlist) locally and
@@ -4385,21 +3611,19 @@ function renderGmFiles() {
         const isAll = f.grantedTo === 'all';
         const count = isAll ? 'Tous' : (Array.isArray(f.grantedTo) ? f.grantedTo.length : 0);
         const grantLabel = isAll ? 'Tous les joueurs' : (count > 0 ? `${count} joueur(s)` : 'Aucun accès');
-        const card = document.createElement('div');
-        card.className = 'gm-file-card';
         const gName = fileGroupAssign[f.id] ? (fileGroups.find(g => g.id === fileGroupAssign[f.id]) || {}).name : '';
-        card.innerHTML = `
-            <span class="group-grip" draggable="true" title="Glisser vers un groupe" ondragstart="_groupDragStart(event,'${f.id}','file')" ondragend="_groupDragEnd(event)">⠿</span>
-            <div class="gm-file-icon">${_fileIcon(f.type)}</div>
-            <div class="gm-file-info">
-                <div class="gm-file-name">${_escHtml(f.name)}</div>
-                <div class="gm-file-grant-status">${grantLabel}${gName ? ` <span class="group-badge">${_escHtml(gName)}</span>` : ''}</div>
-            </div>
-            <div class="gm-file-actions">
-                <button class="gm-file-open-btn" onclick="openGmFileViewer('${f.id}')" title="Ouvrir">Ouvrir</button>
-                <button class="gm-file-btn${isAll ? ' active' : ''}" onclick="grantFileToAll('${f.id}')" title="${isAll ? 'Révoquer accès global' : 'Accorder à tous'}">Tous</button>
-                <button class="gm-file-del-btn" onclick="removeGmFile('${f.id}')" title="Supprimer">✕</button>
-            </div>`;
-        list.appendChild(card);
+        list.append(el('div', { className: 'gm-file-card' },
+            el('span', { className: 'group-grip', draggable: true, title: 'Glisser vers un groupe', textContent: '⠿',
+                ondragstart: e => _groupDragStart(e, f.id, 'file'), ondragend: e => _groupDragEnd(e) }),
+            el('div', { className: 'gm-file-icon', textContent: _fileIcon(f.type) }),
+            el('div', { className: 'gm-file-info' },
+                el('div', { className: 'gm-file-name', textContent: f.name }),
+                el('div', { className: 'gm-file-grant-status', textContent: grantLabel },
+                    gName && el('span', { className: 'group-badge', textContent: ' ' + gName }))),
+            el('div', { className: 'gm-file-actions' },
+                el('button', { className: 'gm-file-open-btn', title: 'Ouvrir', textContent: 'Ouvrir', onclick: () => openGmFileViewer(f.id) }),
+                el('button', { className: 'gm-file-btn' + (isAll ? ' active' : ''), textContent: 'Tous',
+                    title: isAll ? 'Révoquer accès global' : 'Accorder à tous', onclick: () => grantFileToAll(f.id) }),
+                el('button', { className: 'gm-file-del-btn', title: 'Supprimer', textContent: '✕', onclick: () => removeGmFile(f.id) }))));
     });
 }

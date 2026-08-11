@@ -1,35 +1,19 @@
 // ═══════════════════════════════════════════
-//  CONSTANTS
+//  PANEL WIRING
 // ═══════════════════════════════════════════
-const SUITS = [
-    { name: 'spades', sym: '♠', cls: 'c-black', pillCls: '' },
-    { name: 'clubs', sym: '♣', cls: 'c-black', pillCls: '' },
-    { name: 'hearts', sym: '♥', cls: 'c-red', pillCls: 'c-red' },
-    { name: 'diamonds', sym: '♦', cls: 'c-red', pillCls: 'c-red' },
-];
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const SUIT_FR = { spades: 'Pique', clubs: 'Trèfle', hearts: 'Cœur', diamonds: 'Carreau' };
-const ALL_CARDS = [];
-for (const s of SUITS) for (const r of RANKS) ALL_CARDS.push({ id: `${r}-${s.name}`, rank: r, suit: s });
-ALL_CARDS.push({ id: 'joker-red', isJoker: true, jokerColor: 'red', label: 'Joker Rouge' });
-ALL_CARDS.push({ id: 'joker-black', isJoker: true, jokerColor: 'black', label: 'Joker Noir' });
-// Look up a card in ALL_CARDS by its ID string.
-function cardById(id) { return ALL_CARDS.find(c => c.id === id); }
-// Fisher-Yates shuffle of an array, returning a new array.
-function shuffle(a) { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } return b; }
-// Build a freshly shuffled deck of all 54 cards.
-function buildDeck() { return shuffle([...ALL_CARDS]); }
-
-// Escape user-supplied strings before injecting into innerHTML (XSS guard).
-function _escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-// Escape a string for embedding inside a single-quoted JS literal in an inline
-// handler attribute. Always wrap the result in _escHtml too, since the HTML
-// parser decodes the attribute before the JS engine sees it.
-function _escJs(s) { return String(s ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
-// Allow only http(s) URLs from remote-controlled records. File grants travel over
-// Ably and file rows live in Supabase — a javascript: URL assigned to iframe.src
-// would execute in this origin.
-function _safeUrl(u) { const s = String(u ?? '').trim(); return /^https?:\/\//i.test(s) ? s : ''; }
+// Everything the two panels share lives in aria-shared.js, loaded before this file.
+// The differences between them are these hooks, not forked copies of the functions.
+ARIA.configure({
+    role:         'player',
+    tag:          'PLAYER',
+    splitKey:     'aria-split-layout',
+    defaultPane:  'tab-skills',
+    joinCode:     () => character?.campaignKey || '',
+    syncAll:      () => _syncAllPlayerData(),
+    clearLocal:   () => _clearLocalPlayerData(),
+    afterRestore: () => restoreLastCharacter(),
+    onMusicPhase: (phase, track) => { if (phase === 'start') _updatePlayerMusicBar(track); },
+});
 
 // ═══════════════════════════════════════════
 //  STATE
@@ -106,8 +90,6 @@ let currentCharId = null;
 let playerId = sessionStorage.getItem('aria-player-id');
 if (!playerId) { playerId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('aria-player-id', playerId); }
 
-let config = JSON.parse(localStorage.getItem('aria-config') || '{}');
-if (config.lightMode) document.body.classList.add('light-mode');
 let bonusMalus = 0;
 // Temporary bonus/malus that auto-expires after a set number of rolls (#11).
 // bmNextValue is the modifier; bmNextCount is how many upcoming threshold rolls it
@@ -269,18 +251,8 @@ let playerFiles = [];
 // pending craft recipe index — set before a roll, cleared by handleResult
 let pendingCraft = null;
 
-let saveKey        = localStorage.getItem('aria-save-key') || null;
-let _pendingNewKey = null;
 let syncTimer      = null;
 
-// ═══════════════════════════════════════════
-//  CLOUD SAVE — per-entity sync
-// ═══════════════════════════════════════════
-// Check whether Supabase sync is configured and a save key is available.
-function _supabaseReady() { return !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !!saveKey; }
-
-// Return the current UTC time as an ISO 8601 string.
-function _nowISO() { return new Date().toISOString(); }
 
 // Convert a character object into a Supabase characters table row.
 function _charToRow(char) {
@@ -404,13 +376,22 @@ async function deleteCharacterFile(fileId) {
     await sbDelete('character_files', 'id=eq.' + encodeURIComponent(fileId));
 }
 
-// Per-character localStorage key prefixes (everything scoped by charId).
-const _CHAR_KEY_PREFIXES = ['aria-current-hp-', 'aria-cards-', 'aria-notes-', 'aria-player-files-', 'aria-player-rolls-', 'aria-player-tabs-'];
+// Per-character localStorage key prefixes (everything scoped by charId). This list
+// is the ONLY place they are enumerated — every path that drops a character routes
+// through _dropCharacterKeys() below. Two hand-written copies of this list used to
+// exist (here and in deleteCharacter), and both had drifted: neither removed
+// 'aria-camera-off-', so a deleted character leaked its camera kill switch forever.
+const _CHAR_KEY_PREFIXES = ['aria-current-hp-', 'aria-cards-', 'aria-notes-', 'aria-player-files-', 'aria-player-rolls-', 'aria-player-tabs-', 'aria-camera-off-'];
+
+// Remove every scoped key belonging to one character.
+function _dropCharacterKeys(id) {
+    _CHAR_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + id));
+}
 
 // Remove all locally stored characters and their scoped keys (used when switching
 // to a different save key, so the old key's data never merges into the new one).
 function _clearLocalPlayerData() {
-    getCharacters().forEach(c => _CHAR_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id)));
+    getCharacters().forEach(c => _dropCharacterKeys(c.id));
     localStorage.removeItem('aria-characters');
 }
 
@@ -479,106 +460,6 @@ async function loadFromSupabase() {
     } catch(e) { console.warn('[ARIA] Supabase load failed:', e); return false; }
 }
 
-// Show the two-panel gateway (new key + existing key, side by side) with a freshly generated key.
-function showGateway() {
-    _pendingNewKey = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-    document.getElementById('gateway-key-display').textContent = _pendingNewKey;
-    const cancel = document.getElementById('gateway-cancel');
-    if (cancel) cancel.style.display = saveKey ? '' : 'none';
-    document.getElementById('file-gateway').style.display = 'flex';
-}
-
-// Both panels are always visible; just focus the existing-key input.
-function showGatewayExisting() {
-    document.getElementById('file-gateway').style.display = 'flex';
-    const input = document.getElementById('gateway-key-input');
-    if (input) { input.value = ''; input.focus(); }
-}
-
-// Hide the file-gateway panel.
-function hideGateway() {
-    document.getElementById('file-gateway').style.display = 'none';
-}
-
-// Copy the displayed save key to the clipboard.
-function copyGatewayKey() {
-    const key = document.getElementById('gateway-key-display').textContent;
-    navigator.clipboard.writeText(key).catch(() => {});
-    const btn = document.getElementById('gateway-copy-btn');
-    if (btn) { btn.textContent = 'Copié !'; setTimeout(() => { btn.textContent = 'Copier'; }, 2000); }
-}
-
-// Confirm new save key creation: persist it, create the Supabase row, and sync data.
-async function confirmNewKey() {
-    if (!_pendingNewKey) return;
-    saveKey = _pendingNewKey;
-    localStorage.setItem('aria-save-key', saveKey);
-    await sbUpsert('saves', { save_key: saveKey, type: 'player' });
-    await _syncAllPlayerData();
-    hideGateway();
-    showSelectionScreen();
-}
-
-// Load data from Supabase using an existing save key entered by the user.
-async function submitExistingKey() {
-    const input = document.getElementById('gateway-key-input');
-    const key = input ? input.value.trim() : '';
-    if (!key) return;
-    // Verify the key exists before adopting it — a typo would otherwise push the
-    // previous key's local data under a brand-new key on the next sync.
-    const rows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(key) + '&select=save_key');
-    if (!rows.length) { alert('Clé introuvable. Vérifiez la clé saisie.'); return; }
-    // Switching keys: drop the old key's local data so it never merges into the new one.
-    if (saveKey && key !== saveKey) _clearLocalPlayerData();
-    saveKey = key;
-    localStorage.setItem('aria-save-key', key);
-    await loadFromSupabase();
-    hideGateway();
-    showSelectionScreen();
-}
-
-// Update the save-key status label on the character selection screen.
-function updateSaveKeyStatus() {
-    const label = document.getElementById('sel-save-label');
-    if (!label) return;
-    label.textContent = saveKey ? saveKey.slice(0, 8) + '…' : '—';
-    label.className = 'sel-save-label' + (saveKey ? ' connected' : '');
-}
-
-// Show the existing-key form so the user can switch to a different save key.
-function changeSaveKey() {
-    showGateway();
-    const input = document.getElementById('gateway-key-input');
-    if (input) input.focus();
-}
-
-// Copy the current save key to the clipboard.
-function copySaveKey() {
-    if (!saveKey) return;
-    navigator.clipboard.writeText(saveKey).catch(() => {});
-    const btns = document.querySelectorAll('.sel-save-btn');
-    const copyBtn = [...btns].find(b => b.textContent === 'Copier');
-    if (copyBtn) { copyBtn.textContent = 'Copié !'; setTimeout(() => { copyBtn.textContent = 'Copier'; }, 2000); }
-}
-
-// Cancel key entry: return to gateway if no key exists, else just hide it.
-function cancelGateway() {
-    if (saveKey) { hideGateway(); } else { showGateway(); }
-}
-
-// On load: restore from Supabase if a save key exists, otherwise show the gateway.
-async function tryRestoreSupabase() {
-    if (!saveKey) { showGateway(); return; }
-    const ok = await loadFromSupabase();
-    hideGateway();
-    showSelectionScreen();
-    // Only push local data back up if the load succeeded — after a failed (offline)
-    // load, syncing would overwrite newer remote data with stale local state.
-    if (ok) _syncAllPlayerData();
-    // After showSelectionScreen so the screen stays the fallback when nothing is
-    // remembered, and the place "changer de personnage" returns to.
-    restoreLastCharacter();
-}
 
 // ═══════════════════════════════════════════
 //  CHARACTER MANAGEMENT
@@ -668,15 +549,20 @@ function renderSelectionScreen() {
         return;
     }
     chars.forEach(c => {
-        const card = document.createElement('div');
-        card.className = 'sel-card';
-        const campBadge = c.campaignKey ? `<div class="sel-card-campaign">Code · ${_escHtml(c.campaignKey)}</div>` : `<div class="sel-card-campaign no-campaign">Sans campagne</div>`;
-        const typeBadge = (c.ariaType || 'ancient') === 'contemporary'
-            ? `<span class="sel-card-type contemporary">Contemporain</span>`
-            : `<span class="sel-card-type">Médiéval</span>`;
-        card.innerHTML = `<button class="sel-card-delete" onclick="event.stopPropagation();deleteCharacter('${_escHtml(_escJs(c.id))}')" title="Supprimer">&times;</button><div class="sel-card-head"><span class="sel-card-diamond"></span>${typeBadge}</div><div><div class="sel-card-name">${_escHtml(c.name || '—')}</div><div class="sel-card-class">${_escHtml(c.class || '')}</div></div>${campBadge}<div class="sel-card-cta">Incarner &rarr;</div>`;
-        card.addEventListener('click', () => selectCharacter(c.id));
-        grid.appendChild(card);
+        const contemporary = (c.ariaType || 'ancient') === 'contemporary';
+        grid.append(el('div', { className: 'sel-card', onclick: () => selectCharacter(c.id) },
+            el('button', { className: 'sel-card-delete', title: 'Supprimer', textContent: '×',
+                onclick: e => { e.stopPropagation(); deleteCharacter(c.id); } }),
+            el('div', { className: 'sel-card-head' },
+                el('span', { className: 'sel-card-diamond' }),
+                el('span', { className: 'sel-card-type' + (contemporary ? ' contemporary' : ''),
+                    textContent: contemporary ? 'Contemporain' : 'Médiéval' })),
+            el('div', null,
+                el('div', { className: 'sel-card-name', textContent: c.name || '—' }),
+                el('div', { className: 'sel-card-class', textContent: c.class || '' })),
+            el('div', { className: 'sel-card-campaign' + (c.campaignKey ? '' : ' no-campaign'),
+                textContent: c.campaignKey ? `Code · ${c.campaignKey}` : 'Sans campagne' }),
+            el('div', { className: 'sel-card-cta', textContent: 'Incarner →' })));
     });
 }
 
@@ -750,12 +636,7 @@ function deleteCharacter(id) {
     sbDelete('character_rolls', 'character_id=eq.' + encodeURIComponent(id));
     const chars = getCharacters().filter(c => c.id !== id);
     saveCharacters(chars);
-    localStorage.removeItem('aria-current-hp-' + id);
-    localStorage.removeItem('aria-cards-' + id);
-    localStorage.removeItem('aria-notes-' + id);
-    localStorage.removeItem('aria-player-files-' + id);
-    localStorage.removeItem('aria-player-rolls-' + id);
-    localStorage.removeItem('aria-player-tabs-' + id);
+    _dropCharacterKeys(id);
     renderSelectionScreen();
 }
 
@@ -892,338 +773,17 @@ function updateOverlayEditorBtn() {
     btn.onclick = () => window.open('../views/aria-overlay-editor.html?type=player&id=' + currentCharId, '_blank');
 }
 
-// ═══════════════════════════════════════════
-//  TABS — MULTI-PANE SPLIT VIEW (design frames 22-24)
-//  openPanes lists the open tabs left → right; paneWeights holds their relative
-//  widths (normalized to sum 100). Panes are the existing .tab-content divs
-//  (classes + inline grid placement only — never reparented, so camera iframes
-//  and per-tab JS are untouched). No pane-count limit.
-// ═══════════════════════════════════════════
-let openPanes = ['tab-skills'];
-let paneWeights = [100];
-let focusIdx = 0;
 
-// Restore the persisted pane layout (hidden tabs are pruned in renderTabLayout).
-try {
-    const _sl = JSON.parse(localStorage.getItem('aria-split-layout') || 'null');
-    if (_sl && Array.isArray(_sl.panes) && _sl.panes.length) {
-        openPanes = [...new Set(_sl.panes)];
-        paneWeights = (Array.isArray(_sl.weights) && _sl.weights.length === openPanes.length)
-            ? _sl.weights.slice() : openPanes.map(() => 1);
-    }
-} catch(_) {}
-
-function _persistSplit() {
-    localStorage.setItem('aria-split-layout', JSON.stringify({ panes: openPanes, weights: paneWeights.map(w => Math.round(w * 100) / 100) }));
-}
-function _normWeights() {
-    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
-    paneWeights = paneWeights.map(w => w * 100 / sum);
-}
-// Back to a single default pane (character switch).
-function resetSplitState() {
-    openPanes = ['tab-skills']; paneWeights = [100]; focusIdx = 0;
-}
-
-// Click on a tab button: classic tab switch — but only in single-pane mode.
-// Once a split is open, panes change through drag-to-dock only. Exception:
-// under the 900px breakpoint the split collapses to the single tab bar
-// (pane headers hidden), so clicks must keep working there.
-function switchTab(id, _btn) {
-    if (openPanes.length > 1) {
-        if (window.innerWidth > 900) return;
-        const j = openPanes.indexOf(id);
-        if (j > 0) {           // move the clicked pane to the visible front slot
-            openPanes.unshift(openPanes.splice(j, 1)[0]);
-            paneWeights.unshift(paneWeights.splice(j, 1)[0]);
-        } else if (j < 0) {
-            openPanes[0] = id; // replace the visible pane, keep the others
-        }
-    } else {
-        openPanes[0] = id;
-    }
-    focusIdx = 0;
-    renderTabLayout();
-}
-
-// Apply classes + grid placement to tab buttons and content panes.
+// Apply the shared layout pass, then the player-specific pane work.
 function renderTabLayout() {
-    // Drop panes whose tab was hidden (conditional tabs set display:none on the button).
-    for (let i = openPanes.length - 1; i >= 0; i--) {
-        const btn = document.querySelector(`.tab-btn[data-tab="${openPanes[i]}"]`);
-        if (!btn || btn.style.display === 'none' || !document.getElementById(openPanes[i])) {
-            openPanes.splice(i, 1); paneWeights.splice(i, 1);
-            if (focusIdx > i) focusIdx--;
-        }
-    }
-    if (!openPanes.length) { openPanes = ['tab-skills']; paneWeights = [100]; }
-    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
-    _normWeights();
-    const split = openPanes.length > 1;
-    const content = document.querySelector('.content');
-    content?.classList.toggle('split-mode', split);
-    document.querySelectorAll('.tab-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.tab === openPanes[focusIdx]);
-        b.classList.toggle('open', b.dataset.tab !== openPanes[focusIdx] && openPanes.includes(b.dataset.tab));
-    });
-    document.querySelectorAll('.tab-content').forEach(t => {
-        const i = openPanes.indexOf(t.id);
-        t.classList.toggle('active', i >= 0);
-        t.classList.toggle('split-primary', i === 0);
-        if (i >= 0 && split) { t.style.gridColumn = String(2 * i + 1); t.style.gridRow = '3'; }
-        else { t.style.gridColumn = ''; t.style.gridRow = ''; }
-    });
-    // Fill the cameras grid as soon as its pane opens (renders in place —
-    // heartbeats would otherwise leave a freshly docked pane empty for up to 5s).
+    applyTabLayout();
+    // Fill the cameras grid as soon as its pane opens (renders in place).
     if (openPanes.includes('tab-cameras')) renderCamerasTab();
-    renderPresenceUI(); // the rail hides while the Caméras pane is open — see below
-    updateSplitChrome();
-    _persistSplit();
+    renderPresenceUI(); // the rail hides while the Cameras pane is open
+    finishTabLayout();
 }
 
-// ═══════════════════════════════════════════
-//  DRAG-TO-DOCK SPLIT VIEW (design frames 22-24)
-//  Drag a tab button — or an open pane's header — over the content region:
-//  the targeted half of the hovered pane darkens; dropping inserts the tab
-//  at that slot (left or right of any open pane).
-// ═══════════════════════════════════════════
-let _dockDrag = null;          // { tabId, label, started, startX, startY, insert }
-let _dockSuppressClick = false;
-let _dividerDrag = null;       // { idx } — divider between panes idx and idx+1
 
-// Human label for a tab (the button's text).
-function tabLabel(id) {
-    const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
-    return btn ? btn.textContent.trim() : '';
-}
-
-// Rebuild the split chrome (pane headers + dividers) to match the pane list.
-function updateSplitChrome() {
-    const content = document.querySelector('.content');
-    if (!content) return;
-    content.querySelectorAll('.split-pane-hdr, .split-divider').forEach(el => el.remove());
-    if (openPanes.length < 2) { content.style.gridTemplateColumns = ''; return; }
-    _applySplitColumns();
-    openPanes.forEach((id, i) => {
-        const hdr = document.createElement('div');
-        hdr.className = 'split-pane-hdr';
-        hdr.title = 'Glisser pour ré-ancrer';
-        hdr.style.gridColumn = String(2 * i + 1);
-        hdr.innerHTML = '<span class="sph-grip">⋮⋮</span><span class="sph-label"></span><span class="sph-spacer"></span><span class="sph-focus">Focus</span><button class="sph-close" title="Fermer le panneau">×</button>';
-        hdr.querySelector('.sph-label').textContent = tabLabel(id);
-        hdr.addEventListener('mousedown', e => startPaneDrag(e, i));
-        const close = hdr.querySelector('.sph-close');
-        close.addEventListener('mousedown', e => e.stopPropagation());
-        close.addEventListener('click', () => closePane(i));
-        content.appendChild(hdr);
-        if (i < openPanes.length - 1) {
-            const div = document.createElement('div');
-            div.className = 'split-divider';
-            div.title = 'Glisser pour répartir — double-clic : répartition égale';
-            div.style.gridColumn = String(2 * i + 2);
-            div.innerHTML = '<span></span><span></span><span></span>';
-            div.addEventListener('mousedown', e => startDividerDrag(e, i));
-            div.addEventListener('dblclick', resetSplitRatio);
-            content.appendChild(div);
-        }
-    });
-    updateSplitFocus();
-}
-// Set the grid column template from the pane weights (light path for divider drag).
-function _applySplitColumns() {
-    const content = document.querySelector('.content');
-    if (content) content.style.gridTemplateColumns = paneWeights.map(w => `minmax(0,${w.toFixed(2)}fr)`).join(' 9px ');
-}
-// Cosmetic "Focus" chip — marks the focused pane (frames 22/24).
-function updateSplitFocus() {
-    document.querySelectorAll('.content > .split-pane-hdr').forEach((h, i) =>
-        h.querySelector('.sph-focus')?.classList.toggle('on', i === focusIdx));
-}
-
-// Close pane i; the remaining panes share the freed width.
-function closePane(i) {
-    if (openPanes.length <= 1) return;
-    openPanes.splice(i, 1); paneWeights.splice(i, 1);
-    if (focusIdx > i) focusIdx--;
-    if (focusIdx >= openPanes.length) focusIdx = openPanes.length - 1;
-    renderTabLayout();
-}
-
-// Dock a tab at insertion slot k (0..N, between existing panes). A panel never
-// opens twice — if the tab is already open, its pane moves to the new slot.
-function dockTab(id, k) {
-    const j = openPanes.indexOf(id);
-    if (j >= 0) {
-        const w = paneWeights[j];
-        openPanes.splice(j, 1); paneWeights.splice(j, 1);
-        if (k > j) k--;
-        openPanes.splice(k, 0, id); paneWeights.splice(k, 0, w);
-    } else {
-        openPanes.splice(k, 0, id);
-        paneWeights.splice(k, 0, 100 / Math.max(1, openPanes.length - 1));
-    }
-    focusIdx = k;
-    renderTabLayout();
-}
-
-// The dockable region: the content area below the tab strip (viewport coords).
-function _dockRegion() {
-    const content = document.querySelector('.content');
-    if (!content) return null;
-    const cr = content.getBoundingClientRect();
-    const tabs = content.querySelector('.tabs');
-    const top = tabs ? tabs.getBoundingClientRect().bottom : cr.top;
-    if (cr.bottom - top < 60) return null;
-    return { left: cr.left, right: cr.right, top, bottom: cr.bottom };
-}
-
-// Pane pixel edges across the dock region (accounts for the 9px dividers) — n+1 values.
-function _paneEdges(region) {
-    const n = openPanes.length;
-    const inner = (region.right - region.left) - 9 * (n - 1);
-    const sum = paneWeights.reduce((a, b) => a + b, 0) || 1;
-    const edges = [region.left];
-    let x = region.left;
-    for (let i = 0; i < n; i++) {
-        x += inner * paneWeights[i] / sum + (i < n - 1 ? 9 : 0);
-        edges.push(i === n - 1 ? region.right : x);
-    }
-    return edges;
-}
-
-// Begin a potential drag from a tab button (starts after a 6px move threshold).
-function _dockBegin(tabId, e) {
-    _dockDrag = { tabId, label: tabLabel(tabId), started: false, startX: e.clientX, startY: e.clientY, insert: null };
-}
-// Begin re-anchoring an open pane by its header (frame 24: drag header to re-dock).
-function startPaneDrag(e, idx) {
-    if (e.button !== 0) return;
-    const id = openPanes[idx];
-    if (!id) return;
-    e.preventDefault();
-    focusIdx = idx;
-    updateSplitFocus();
-    _dockBegin(id, e);
-}
-
-function _dockMove(e) {
-    if (!_dockDrag) return;
-    if (!_dockDrag.started) {
-        if (Math.abs(e.clientX - _dockDrag.startX) + Math.abs(e.clientY - _dockDrag.startY) < 6) return;
-        _dockDrag.started = true;
-        document.body.classList.add('dock-dragging');
-        const ghost = document.getElementById('drag-ghost');
-        const gl = document.getElementById('drag-ghost-label');
-        if (gl) gl.textContent = _dockDrag.label;
-        if (ghost) ghost.style.display = 'flex';
-    }
-    const ghost = document.getElementById('drag-ghost');
-    if (ghost) { ghost.style.left = (e.clientX + 14) + 'px'; ghost.style.top = (e.clientY + 12) + 'px'; }
-    const region = _dockRegion();
-    const overlay = document.getElementById('dock-overlay');
-    let insert = null, zone = null;
-    if (region && e.clientX >= region.left && e.clientX <= region.right && e.clientY >= region.top && e.clientY <= region.bottom) {
-        const edges = _paneEdges(region);
-        let i = 0;
-        while (i < openPanes.length - 1 && e.clientX >= edges[i + 1]) i++;
-        const mid = (edges[i] + edges[i + 1]) / 2;
-        insert = e.clientX < mid ? i : i + 1;
-        zone = e.clientX < mid ? { left: edges[i], right: mid } : { left: mid, right: edges[i + 1] };
-    }
-    _dockDrag.insert = insert;
-    if (overlay) {
-        if (zone) {
-            overlay.style.display = 'flex';
-            overlay.style.left = zone.left + 'px';
-            overlay.style.top = region.top + 'px';
-            overlay.style.width = (zone.right - zone.left) + 'px';
-            overlay.style.height = (region.bottom - region.top) + 'px';
-            const lbl = document.getElementById('dock-label');
-            if (lbl) lbl.textContent = _dockDrag.label;
-        } else {
-            overlay.style.display = 'none';
-        }
-    }
-}
-
-function _dockEnd() {
-    if (!_dockDrag) return;
-    const { tabId, started, insert } = _dockDrag;
-    _dockDrag = null;
-    if (!started) return; // plain click on the tab button — let it through
-    _dockSuppressClick = true;
-    // The click (if any) fires synchronously after mouseup; clear the flag right
-    // after so an unrelated later click is never swallowed.
-    setTimeout(() => { _dockSuppressClick = false; }, 0);
-    document.body.classList.remove('dock-dragging');
-    const ghost = document.getElementById('drag-ghost');
-    if (ghost) ghost.style.display = 'none';
-    const overlay = document.getElementById('dock-overlay');
-    if (overlay) overlay.style.display = 'none';
-    if (insert !== null) dockTab(tabId, insert);
-}
-
-// Divider drag (frame 22/23): resize the two panes around divider idx;
-// double-click redistributes all panes equally.
-function startDividerDrag(e, idx) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    _dividerDrag = { idx };
-    document.body.classList.add('dock-dragging');
-}
-function _dividerMove(e) {
-    if (!_dividerDrag) return;
-    const region = _dockRegion();
-    if (!region) return;
-    const i = _dividerDrag.idx;
-    if (i >= openPanes.length - 1) return;
-    const edges = _paneEdges(region);
-    const span = edges[i + 2] - edges[i] - 9;   // px shared by the two panes
-    if (span <= 0) return;
-    const px = Math.min(Math.max(e.clientX - edges[i], span * 0.15), span * 0.85);
-    const pairW = paneWeights[i] + paneWeights[i + 1];
-    paneWeights[i] = pairW * px / span;
-    paneWeights[i + 1] = pairW - paneWeights[i];
-    _applySplitColumns();
-}
-function _dividerEnd() {
-    if (!_dividerDrag) return;
-    _dividerDrag = null;
-    document.body.classList.remove('dock-dragging');
-    _persistSplit();
-}
-function resetSplitRatio() {
-    paneWeights = openPanes.map(() => 100 / openPanes.length);
-    _applySplitColumns();
-    _persistSplit();
-}
-
-// Global listeners for the dock/divider engines (registered once at load).
-window.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('mousedown', e => {
-            if (e.button !== 0) return;
-            _dockBegin(btn.dataset.tab, e);
-        });
-    });
-    document.addEventListener('mousemove', e => { _dockMove(e); _dividerMove(e); });
-    // Chromium suppresses the compat mouseup after a preventDefault'd mousedown
-    // drag (pane headers) — listen to pointerup too; both enders are idempotent.
-    document.addEventListener('mouseup', () => { _dockEnd(); _dividerEnd(); });
-    document.addEventListener('pointerup', () => { _dockEnd(); _dividerEnd(); });
-    // After a real drag, swallow the click that would otherwise switch tabs.
-    document.addEventListener('click', e => {
-        if (_dockSuppressClick) { e.stopPropagation(); e.preventDefault(); _dockSuppressClick = false; }
-    }, true);
-    // Track which pane holds focus (drives the Focus chip and tab-click target).
-    document.querySelector('.content')?.addEventListener('mousedown', e => {
-        if (openPanes.length < 2) return;
-        const pane = e.target.closest('.tab-content');
-        if (!pane) return;
-        const i = openPanes.indexOf(pane.id);
-        if (i >= 0) { focusIdx = i; updateSplitFocus(); }
-    });
-});
 // ═══════════════════════════════════════════
 //  NOTES
 // ═══════════════════════════════════════════
@@ -1504,7 +1064,9 @@ function renderPresenceUI() {
         const show = hasAny && presenceMode === 'bandeau' && !camsOpen && !railNarrowMQ.matches;
         rail.style.display = show ? '' : 'none';
         if (show) renderPresenceRail();
-        else { const g = document.getElementById('presence-rail-grid'); if (g) g.innerHTML = ''; } // viewer iframes only — safe to drop
+        // Viewer iframes only — safe to drop. clearKeyed, not innerHTML, so the
+        // reconciler forgets the tiles too rather than holding detached nodes.
+        else clearKeyed(document.getElementById('presence-rail-grid'));
     }
     // The other half of that rule. Nothing else prunes the Caméras grid:
     // renderCamerasTab() is the only function that removes cells, and it is
@@ -1535,31 +1097,22 @@ function renderPresenceRail() {
     if (vdoRoom && selfStreamLive()) expected.set(derivedStreamId(), (character.name || 'Vous'));
     if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
     if (vdoRoom) peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
-    [...grid.querySelectorAll('.pr-tile')].forEach(t => { if (!expected.has(t.dataset.sid)) t.remove(); });
     const spot = spotlightSid();
-    expected.forEach((label, sid) => {
+    // Keyed by stream ID: the tile (and the WebRTC connection inside it) survives
+    // every re-render in which its stream is still expected. The iframe is only
+    // re-src'd when the URL actually changes — re-assigning the same src reloads the
+    // frame and drops the connection.
+    reconcile(grid, expected, () => {
+        const tile = el('div', { className: 'pr-tile' },
+            el('iframe', { allow: 'autoplay' }),          // viewer-only permissions
+            el('div', { className: 'pr-label' }));
+        tile._frame = tile.firstChild;
+        tile._label = tile.lastChild;
+        return tile;
+    }, (tile, label, sid) => {
         const isSelf = vdoRoom && currentCharId && !cameraOff && sid === derivedStreamId();
-        const src = vdoViewSrc(sid, !!isSelf);
-        let tile = grid.querySelector(`.pr-tile[data-sid="${CSS.escape(sid)}"]`);
-        if (!tile) {
-            tile = document.createElement('div');
-            tile.className = 'pr-tile';
-            tile.dataset.sid = sid;
-            const iframe = document.createElement('iframe');
-            iframe.src = src;
-            iframe.allow = 'autoplay';
-            const lab = document.createElement('div');
-            lab.className = 'pr-label';
-            lab.textContent = label;
-            tile.appendChild(iframe);
-            tile.appendChild(lab);
-            grid.appendChild(tile);
-        } else {
-            const iframe = tile.querySelector('iframe');
-            if (iframe && iframe.src !== src) iframe.src = src;
-            const lab = tile.querySelector('.pr-label');
-            if (lab) lab.textContent = label;
-        }
+        setFrameSrc(tile._frame, vdoViewSrc(sid, !!isSelf));
+        tile._label.textContent = label;
         tile.classList.toggle('spotlit', !!spot && sid === spot);
     });
 }
@@ -1850,14 +1403,14 @@ function triggerDamageVFX(dmg, local) {
 function showHealNumber(amt) { spawnDmgNumber(`+${amt}`, true); }
 // Create and animate a floating damage or heal number element on screen.
 function spawnDmgNumber(txt, isHeal) {
-    const el = document.createElement('div');
-    el.textContent = txt;
-    el.style.cssText = `position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);font-family:'Cormorant Garamond',serif;font-size:64px;font-weight:900;color:${isHeal ? '#4cff88' : '#ff4444'};text-shadow:0 0 20px ${isHeal ? 'rgba(76,255,136,.5)' : 'rgba(255,50,50,.6)'};pointer-events:none;z-index:900;transition:all .9s ease-out;`;
-    document.body.appendChild(el);
-    void el.offsetWidth;
-    el.style.transform = 'translate(-50%,-120%)';
-    el.style.opacity = '0';
-    setTimeout(() => el.remove(), 1000);
+    const node = document.createElement('div');
+    node.textContent = txt;
+    node.style.cssText = `position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);font-family:'Cormorant Garamond',serif;font-size:64px;font-weight:900;color:${isHeal ? '#4cff88' : '#ff4444'};text-shadow:0 0 20px ${isHeal ? 'rgba(76,255,136,.5)' : 'rgba(255,50,50,.6)'};pointer-events:none;z-index:900;transition:all .9s ease-out;`;
+    document.body.appendChild(node);
+    void node.offsetWidth;
+    node.style.transform = 'translate(-50%,-120%)';
+    node.style.opacity = '0';
+    setTimeout(() => node.remove(), 1000);
 }
 // Spawn blood splatter particles on the player's damage canvas.
 function spawnBloodParticles() {
@@ -1896,10 +1449,10 @@ let toastTimers = {};
 // Show a toast notification by element ID for 3.5 seconds.
 function showToast(id, msg) {
     clearTimeout(toastTimers[id]);
-    const el = document.getElementById(id);
-    el.textContent = msg;
-    el.classList.add('show');
-    toastTimers[id] = setTimeout(() => el.classList.remove('show'), 3500);
+    const node = document.getElementById(id);
+    node.textContent = msg;
+    node.classList.add('show');
+    toastTimers[id] = setTimeout(() => node.classList.remove('show'), 3500);
 }
 
 // ═══════════════════════════════════════════
@@ -1956,11 +1509,11 @@ function updateHiddenRollBtn() {
 }
 // Render the karma value display with appropriate positive/negative styling.
 function renderKarma() {
-    const el = document.getElementById('karma-display');
-    if (!el) return;
+    const node = document.getElementById('karma-display');
+    if (!node) return;
     const k = character.karma ?? 0;
-    el.textContent = (k > 0 ? '+' : '') + k;
-    el.className = 'karma-display' + (k > 0 ? ' positive' : k < 0 ? ' negative' : '');
+    node.textContent = (k > 0 ? '+' : '') + k;
+    node.className = 'karma-display' + (k > 0 ? ' positive' : k < 0 ? ' negative' : '');
 }
 // Apply a custom ± value from the BM input to the current bonus/malus.
 function addCustomBM(sign) {
@@ -1969,15 +1522,18 @@ function addCustomBM(sign) {
 }
 // Update the BM display label and in-place refresh all affected skill percentages.
 function updateBMDisplay() {
-    const el = document.getElementById('bm-display');
-    el.textContent = (bonusMalus > 0 ? '+' : '') + bonusMalus;
-    el.className = 'bm-display' + (bonusMalus > 0 ? ' positive' : bonusMalus < 0 ? ' negative' : '');
+    const node = document.getElementById('bm-display');
+    node.textContent = (bonusMalus > 0 ? '+' : '') + bonusMalus;
+    node.className = 'bm-display' + (bonusMalus > 0 ? ' positive' : bonusMalus < 0 ? ' negative' : '');
     const bm = liveBM();
     // Render the armed temporary modifier pill (next N rolls).
     const ns = document.getElementById('bm-next-status');
     if (ns) {
         if (bmNextCount > 0) {
-            ns.innerHTML = `<span class="bm-next-mod">${bmNextValue > 0 ? '+' : ''}${bmNextValue}</span><span class="bm-next-cnt">${bmNextCount} jet${bmNextCount > 1 ? 's' : ''}</span><button class="bm-next-clear" onclick="clearBMNext()" title="Annuler">✕</button>`;
+            fill(ns,
+                el('span', { className: 'bm-next-mod', textContent: `${bmNextValue > 0 ? '+' : ''}${bmNextValue}` }),
+                el('span', { className: 'bm-next-cnt', textContent: `${bmNextCount} jet${bmNextCount > 1 ? 's' : ''}` }),
+                el('button', { className: 'bm-next-clear', title: 'Annuler', textContent: '✕', onclick: clearBMNext }));
             ns.className = 'bm-next-status ' + (bmNextValue > 0 ? 'positive' : 'negative');
             ns.style.visibility = 'visible';
         } else {
@@ -2003,9 +1559,9 @@ function updateBMDisplay() {
     });
     // Recipe cards render one .potion-card-chance each, in recipe order (stock
     // cards have no chance span), so the NodeList maps 1:1 onto potionRecipes.
-    document.querySelectorAll('#potion-list .potion-card-chance').forEach((el, i) => {
+    document.querySelectorAll('#potion-list .potion-card-chance').forEach((node, i) => {
         const r = (character.potionRecipes || [])[i];
-        if (r) el.textContent = `Succès ${Math.max(0, Math.min(100, (r.successChance || 0) + bm + (character?.karma ?? 0)))}%`;
+        if (r) node.textContent = `Succès ${Math.max(0, Math.min(100, (r.successChance || 0) + bm + (character?.karma ?? 0)))}%`;
     });
     updateHiddenRollBtn();
     renderStats();          // stat-card thresholds bake in liveBM() + karma at render time
@@ -2016,7 +1572,18 @@ function updateBMDisplay() {
 //  RENDER
 // ═══════════════════════════════════════════
 // Full re-render of all player panel sections.
-function renderAll() {
+// ── RENDER ────────────────────────────────────────────────────────────────────
+// Two tiers, because they have different re-entrancy rules — this is the whole
+// reason the old code hand-picked a different subset of renderers at each of the
+// twenty-odd mutation sites.
+//
+// renderDerived() draws the read-only views of `character`. Nothing in them holds a
+// caret, so it is always safe to run, however often.
+//
+// renderEditors() writes into form fields. Running it while the user is typing in
+// one of those fields resets the caret, so it runs only when the change came from
+// somewhere else: a button, a GM message, a character switch.
+function renderDerived() {
     updateTopbarIdentity();
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     renderSkills();
@@ -2025,10 +1592,30 @@ function renderAll() {
     renderInventorySidebar();
     renderCombatSidebar();
     renderPotions();
-    renderEditorForm();
     renderPlayerFiles();
     renderKarma();
     updateBMDisplay();
+}
+
+// renderEditorForm() fans out to the weapons/inventory/skills/specials editors.
+function renderEditors() {
+    renderEditorForm();
+}
+
+function renderAll() {
+    renderDerived();
+    renderEditors();
+}
+
+// The single commit point after mutating `character`. Persist (which also
+// republishes presence), then refresh the views — instead of every call site
+// remembering which three of a dozen renderers its particular field feeds.
+// Pass { editors: true } when the change did not come from typing inside an editor,
+// i.e. when the form fields themselves need to be rewritten.
+function commitCharacter({ editors = false } = {}) {
+    saveCurrentCharacter();
+    renderDerived();
+    if (editors) renderEditors();
 }
 
 // Render the skills and specials lists (sorted) with effective percentages applied.
@@ -2043,8 +1630,12 @@ function renderSkills() {
         div.className = 'skill-item' + (isSoigner ? ' soigner-skill' : '');
         div.dataset.skillName = skill.name;
         div.dataset.skillIdx = idx; // index into character.skills — survives duplicate names
-        const modBadge = bonus ? `<span class="skill-mod" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `<span class="skill-name">${_escHtml(skill.name)}</span>${modBadge}${skill.link ? `<span class="skill-link">${_escHtml(skill.link)}</span>` : ''}<div class="skill-bar-wrap"><div class="skill-bar-fill" style="width:${eff}%"></div></div><span class="skill-pct">${eff}%</span>`;
+        fill(div,
+            el('span', { className: 'skill-name', textContent: skill.name }),
+            bonus && el('span', { className: 'skill-mod', title: 'Modificateur permanent', textContent: `${bonus > 0 ? '+' : ''}${bonus}` }),
+            skill.link && el('span', { className: 'skill-link', textContent: skill.link }),
+            el('div', { className: 'skill-bar-wrap' }, el('div', { className: 'skill-bar-fill', style: { width: eff + '%' } })),
+            el('span', { className: 'skill-pct', textContent: eff + '%' }));
         if (isSoigner) {
             div.addEventListener('click', () => openSoignerTargetPicker(skill.pct + bonus));
         } else {
@@ -2062,8 +1653,13 @@ function renderSkills() {
         div.dataset.skillName = sp.name;
         div.dataset.skillIdx = idx;
         div.style.borderColor = 'rgba(236,164,86,.3)';
-        const modBadge = bonus ? `<span class="skill-mod" style="color:var(--ember2)" title="Modificateur permanent">${bonus > 0 ? '+' : ''}${bonus}</span>` : '';
-        div.innerHTML = `<span class="skill-link" style="color:var(--ember2)">Spéciale</span><span class="skill-name">${_escHtml(sp.name)}${sp.desc ? ` <span style="font-size:12px;color:var(--parchment-dim)">— ${_escHtml(sp.desc)}</span>` : ''}</span>${modBadge}<span class="skill-pct" style="color:var(--ember2)">${eff}%</span>`;
+        fill(div,
+            el('span', { className: 'skill-link', style: { color: 'var(--ember2)' }, textContent: 'Spéciale' }),
+            el('span', { className: 'skill-name', textContent: sp.name },
+                sp.desc && el('span', { style: { fontSize: '12px', color: 'var(--parchment-dim)' }, textContent: ` — ${sp.desc}` })),
+            bonus && el('span', { className: 'skill-mod', style: { color: 'var(--ember2)' }, title: 'Modificateur permanent',
+                textContent: `${bonus > 0 ? '+' : ''}${bonus}` }),
+            el('span', { className: 'skill-pct', style: { color: 'var(--ember2)' }, textContent: eff + '%' }));
         div.addEventListener('click', () => doRoll(sp.name, sp.pct + bonus));
         slist.appendChild(div);
     });
@@ -2077,9 +1673,11 @@ function renderStats() {
         return;
     }
     const bar = document.getElementById('mult-bar-btns');
-    bar.innerHTML = [1, 2, 3, 4, 5].map(m =>
-        `<button class="mult-btn${multiplier === m ? ' active' : ''}" onclick="setMult(${m})">${m > 1 ? '×' + m : '×1'}</button>`
-    ).join('');
+    fill(bar, [1, 2, 3, 4, 5].map(m => el('button', {
+        className: 'mult-btn' + (multiplier === m ? ' active' : ''),
+        textContent: m > 1 ? '×' + m : '×1',
+        onclick: () => setMult(m),
+    })));
     const grid = document.getElementById('stat-grid');
     grid.innerHTML = '';
     ['FOR', 'DEX', 'END', 'INT', 'CHA'].forEach(key => {
@@ -2090,9 +1688,10 @@ function renderStats() {
         div.className = 'stat-card';
         div.onclick = () => rollStat(key, val);
         // Big number = the live roll threshold (value × multiplier); updates with the multiplier.
-        div.innerHTML = `<div class="stat-key">${key}</div>
-          <div class="stat-val">${threshold}<span class="stat-val-pct">%</span></div>
-          <div class="stat-preview">valeur ${val} · ×${multiplier}</div>`;
+        fill(div,
+            el('div', { className: 'stat-key', textContent: key }),
+            el('div', { className: 'stat-val', textContent: threshold }, el('span', { className: 'stat-val-pct', textContent: '%' })),
+            el('div', { className: 'stat-preview', textContent: `valeur ${val} · ×${multiplier}` }));
         grid.appendChild(div);
     });
 }
@@ -2141,24 +1740,26 @@ function renderInventorySidebar() {
     const items = character.inventory || [];
     const vials = character.vials ?? 0;
     const showVials = playerTabs.alchemy && vials > 0;
-    if (!items.length && !showVials) { body.innerHTML = `<div style="font-family:'Cormorant Garamond',serif;font-size:13px;color:var(--parchment-dim);font-style:italic;opacity:.5;">Vide</div>`; }
+    if (!items.length && !showVials) { fill(body, el('div', { textContent: 'Vide', style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '13px', color: 'var(--parchment-dim)', fontStyle: 'italic', opacity: '.5' } })); }
     else {
-        let html = showVials ? `<div class="inv-item"><span style="font-style:italic">Fioles vides</span><span style="color:var(--gold-dim);font-family:'Cormorant Garamond',serif;font-size:12px;">×${vials}</span></div>` : '';
-        html += items.map(it => `<div class="inv-item"><span style="font-style:italic">${_escHtml(it.name || '—')}</span><span style="color:var(--gold-dim);font-family:'Cormorant Garamond',serif;font-size:12px;">×${it.qty || 1}</span></div>`).join('');
-        body.innerHTML = html;
+        const qty = n => el('span', { style: { color: 'var(--gold-dim)', fontFamily: "'Cormorant Garamond',serif", fontSize: '12px' }, textContent: '×' + n });
+        const item = (name, n) => el('div', { className: 'inv-item' },
+            el('span', { style: { fontStyle: 'italic' }, textContent: name }), qty(n));
+        fill(body,
+            showVials && item('Fioles vides', vials),
+            items.map(it => item(it.name || '—', it.qty || 1)));
     }
     const moneyEl = document.getElementById('inv-money-display');
     if (moneyEl) {
         const m = character.money || {};
         if (character.ariaType === 'contemporary') {
             const f = m.francs ?? 0;
-            moneyEl.innerHTML = f > 0 ? `<span style="color:var(--parchment-dim);" title="Francs">${f} F</span>` : '';
+            fill(moneyEl, f > 0 && el('span', { style: { color: 'var(--parchment-dim)' }, title: 'Francs', textContent: `${f} F` }));
         } else {
-            const parts = MONEY_COINS.map(c => {
+            fill(moneyEl, MONEY_COINS.map(c => {
                 const v = m[c.key] ?? 0;
-                return v > 0 ? `<span style="color:${c.color};" title="${c.label}">●${v}</span>` : '';
-            }).filter(Boolean);
-            moneyEl.innerHTML = parts.join('');
+                return v > 0 && el('span', { style: { color: c.color }, title: c.label, textContent: '●' + v });
+            }));
         }
     }
 }
@@ -2167,51 +1768,49 @@ function renderInventorySidebar() {
 function renderCombatSidebar() {
     const body = document.getElementById('combat-sidebar-body');
     if (!body) return;
-    let html = '';
+    const karma = character.karma ?? 0;
+    const effOf = sk => Math.max(1, Math.min(100, sk.pct + (+sk.bonus || 0) + liveBM() + karma));
+    const section = (label, ...kids) => el('div', { className: 'sb-section' },
+        el('div', { className: 'sb-label', textContent: label }), ...kids);
 
-    // 1 · Réactions (Parade / Esquive) — two cards
+    // 1 · Reactions (Parade / Esquive) — two cards
     const allSkills = [...(character.skills || []), ...(character.specials || [])];
     const isContemporary = character.ariaType === 'contemporary';
-    const parrySkill = allSkills.find(s => isContemporary ? /tabasser/i.test(s.name) : /combat.rapproch/i.test(s.name));
-    const dodgeSkill = allSkills.find(s => isContemporary ? /réflexes/i.test(s.name) : /esquiv/i.test(s.name));
-    if (parrySkill || dodgeSkill) {
-        html += `<div class="sb-section"><div class="sb-label">Réactions</div><div class="react-btns">`;
-        if (parrySkill) {
-            const pb = +parrySkill.bonus || 0;
-            const eff = Math.max(1, Math.min(100, parrySkill.pct + pb + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${_escHtml(_escJs(parrySkill.name))}',${parrySkill.pct + pb})">Parade<span class="react-pct">${eff}%</span></button>`;
-        }
-        if (dodgeSkill) {
-            const db = +dodgeSkill.bonus || 0;
-            const eff = Math.max(1, Math.min(100, dodgeSkill.pct + db + liveBM() + (character.karma ?? 0)));
-            html += `<button class="react-btn" onclick="doRoll('${_escHtml(_escJs(dodgeSkill.name))}',${dodgeSkill.pct + db})">${_escHtml(dodgeSkill.name)}<span class="react-pct">${eff}%</span></button>`;
-        }
-        html += `</div></div>`;
-    }
+    const parrySkill = allSkills.find(sk => isContemporary ? /tabasser/i.test(sk.name) : /combat.rapproch/i.test(sk.name));
+    const dodgeSkill = allSkills.find(sk => isContemporary ? /réflexes/i.test(sk.name) : /esquiv/i.test(sk.name));
+    const reactBtn = (sk, label) => el('button', { className: 'react-btn', textContent: label,
+        onclick: () => doRoll(sk.name, sk.pct + (+sk.bonus || 0)) },
+        el('span', { className: 'react-pct', textContent: effOf(sk) + '%' }));
 
     // 2 · Protection — name + value badge
     const prot = character.protection || {};
-    if ((prot.nom && prot.nom.trim()) || prot.valeur) {
-        html += `<div class="sb-section"><div class="sb-label">Protection</div><div class="prot-row"><span class="prot-name">${_escHtml(prot.nom || '—')}</span>${prot.valeur ? `<span class="prot-val-badge">${_escHtml(prot.valeur)}</span>` : ''}</div></div>`;
-    }
+    const hasProt = (prot.nom && prot.nom.trim()) || prot.valeur;
 
     // 3 · Armes — favourited weapons, left-border rows
     const weapons = (character.weapons || []).filter(w => w.nom.trim() && w.favourite);
-    html += `<div class="sb-section"><div class="sb-label">Armes</div>`;
-    if (weapons.length) {
-        weapons.forEach(w => {
-            const hasFormula = w.degats && w.degats.trim();
-            const rollAttr = hasFormula ? ` onclick="rollWeaponDamage('${_escHtml(_escJs(w.nom))}','${_escHtml(_escJs(w.degats))}')"` : '';
-            const rollableClass = hasFormula ? ' weap-rollable' : '';
-            const hint = hasFormula ? `<span class="weap-roll-hint">lancer</span>` : '';
-            html += `<div class="weap-row${rollableClass}"${rollAttr}><span class="weap-name">${_escHtml(w.nom)}</span><span class="weap-dmg">${hint}${_escHtml(w.degats || '—')}</span></div>`;
-        });
-    } else {
-        html += `<div class="sb-empty">Aucune arme</div>`;
-    }
-    html += `</div>`;
 
-    body.innerHTML = html;
+    fill(body,
+        (parrySkill || dodgeSkill) && section('Réactions', el('div', { className: 'react-btns' },
+            parrySkill && reactBtn(parrySkill, 'Parade'),
+            dodgeSkill && reactBtn(dodgeSkill, dodgeSkill.name))),
+
+        hasProt && section('Protection', el('div', { className: 'prot-row' },
+            el('span', { className: 'prot-name', textContent: prot.nom || '—' }),
+            prot.valeur && el('span', { className: 'prot-val-badge', textContent: prot.valeur }))),
+
+        section('Armes', weapons.length
+            ? weapons.map(w => {
+                const hasFormula = w.degats && w.degats.trim();
+                return el('div', {
+                    className: 'weap-row' + (hasFormula ? ' weap-rollable' : ''),
+                    onclick: hasFormula ? () => rollWeaponDamage(w.nom, w.degats) : null,
+                },
+                    el('span', { className: 'weap-name', textContent: w.nom }),
+                    el('span', { className: 'weap-dmg' },
+                        hasFormula && el('span', { className: 'weap-roll-hint', textContent: 'lancer' }),
+                        w.degats || '—'));
+            })
+            : el('div', { className: 'sb-empty', textContent: 'Aucune arme' })));
 }
 
 // ═══════════════════════════════════════════
@@ -2484,13 +2083,18 @@ function renderRollHistory() {
             const row = document.createElement('div');
             if (isDie) {
                 row.className = 'rh-row rh-die';
-                row.innerHTML = `<span class="rh-skill">${_escHtml(r.skillName)}</span><span class="rh-roll">${+r.roll || 0}</span>`;
+                fill(row,
+                    el('span', { className: 'rh-skill', textContent: r.skillName }),
+                    el('span', { className: 'rh-roll', textContent: +r.roll || 0 }));
             } else {
                 const type = classify(r.roll, r.threshold, r.success);
                 const cls = { success: 'rh-success', fail: 'rh-fail', 'crit-success': 'rh-crit-success', 'crit-fail': 'rh-crit-fail' }[type] || '';
                 const lbl = { success: 'SUCCÈS', fail: 'ÉCHEC', 'crit-success': 'SUCCÈS CRIT.', 'crit-fail': 'ÉCHEC CRIT.' }[type] || '';
                 row.className = `rh-row ${cls}`;
-                row.innerHTML = `<span class="rh-skill">${_escHtml(r.skillName)}</span><span class="rh-roll">${+r.roll || 0}</span><span class="rh-verdict">${lbl}</span>`;
+                fill(row,
+                    el('span', { className: 'rh-skill', textContent: r.skillName }),
+                    el('span', { className: 'rh-roll', textContent: +r.roll || 0 }),
+                    el('span', { className: 'rh-verdict', textContent: lbl }));
             }
             list.appendChild(row);
         });
@@ -2543,7 +2147,7 @@ function toggleRollFilter(key) {
         const allBtn = document.getElementById('rfp-all');
         if (allBtn) allBtn.classList.add('active');
     } else {
-        rollFilter.forEach(k => { const el = document.getElementById('rfp-' + k); if (el) el.classList.add('active'); });
+        rollFilter.forEach(k => { const node = document.getElementById('rfp-' + k); if (node) node.classList.add('active'); });
     }
     renderRollHistory();
 }
@@ -2647,12 +2251,6 @@ function applySoigner(success) {
         }
     }, 1500);
 }
-// Classify a d100 roll as success, fail, crit-success, or crit-fail.
-function classify(roll, threshold, success) {
-    if (roll <= 10 && success) return 'crit-success';
-    if (roll >= 91 && !success) return 'crit-fail';
-    return success ? 'success' : 'fail';
-}
 let floatCardTimer = null;
 // Show the floating roll result card with verdict text and crit particle effects.
 function showFloatCard(data) {
@@ -2739,19 +2337,6 @@ function drawFcStar(ctx, r) { const spikes = 4, out = r / 2, inn = r / 5; let ro
 // Stop the float card particle animation and clear the canvas.
 function stopFcParticles() { if (fcAnimFrame) { cancelAnimationFrame(fcAnimFrame); fcAnimFrame = null; } fcCtx.clearRect(0, 0, fcCanvas.width, fcCanvas.height); fcParticles = []; }
 
-// ═══════════════════════════════════════════
-//  DDDICE
-// ═══════════════════════════════════════════
-// Extract the dddice room slug from a full URL or return the raw value.
-function extractRoomSlug(val) {
-    if (!val) return '';
-    const m = val.match(/\/room\/([^/?#]+)/);
-    return m ? m[1] : val.trim();
-}
-// Extract a roll UUID from either the sdk.roll() response or a RollFinished payload.
-// RollFinished fires for EVERY roll in the shared room; matching UUIDs stops another
-// participant's dice from being consumed as this tab's pending result.
-function _ddRollUuid(r) { return r?.uuid ?? r?.data?.uuid ?? null; }
 // Initialize the dddice SDK: fetch available themes, create the canvas renderer, and connect to the room.
 async function initDddice() {
     const slug = extractRoomSlug(config.dddiceRoom);
@@ -2851,175 +2436,12 @@ async function rollViaDddice(skillName, threshold) {
         // well before the animation ends. RollFinished handles the clear.
     } catch (e) { console.error('dddice roll:', e); pendingDddiceRoll = null; hideDddiceCanvas(); handleResult(skillName, threshold, Math.floor(Math.random() * 100) + 1); }
 }
-// Update the dddice status dot and text labels in the topbar and config modal.
-function setDddiceStatus(ok, detail) {
-    const d = ['dddice-dot', 'cfg-dddice-dot'], s = ['dddice-status', 'cfg-dddice-status'];
-    d.forEach(id => { const el = document.getElementById(id); if (el) el.className = 'status-dot ' + (ok ? 'connected' : 'error'); });
-    s.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? `dddice: ${detail || 'connecté'}` : `Erreur: ${detail || 'dddice'}`; });
-}
 
 // ═══════════════════════════════════════════
 //  MUSIC ENGINE (PLAYER)
 // ═══════════════════════════════════════════
 let _playerMusicList  = [];
-let musicMasterVolume = parseInt(localStorage.getItem('aria-music-volume') || '80');
-let musicFadeDuration = 3000;
-let musicCurrentIndex = -1;
-let musicIsPlaying    = false;
-let _musicCurrentSlot = 'A';
-let _musicFadeRaf     = null;
-let _musicMuted       = false;
 
-// Effective output volume: 0 when muted, otherwise the master volume.
-// Mute silences playback without moving the volume slider.
-function _musicEffVol() { return _musicMuted ? 0 : musicMasterVolume; }
-
-const _musicSlots = {
-    A: { audio: null, ytEndedCb: null },
-    B: { audio: null, ytEndedCb: null },
-};
-let _ytAPIReady   = false;
-let _ytPendingCbs = [];
-let _ytSlotA      = null;
-let _ytSlotB      = null;
-
-// Lazily create and return the Audio element for a given slot (A or B).
-function _getAudio(slot) {
-    if (!_musicSlots[slot].audio) _musicSlots[slot].audio = new Audio();
-    return _musicSlots[slot].audio;
-}
-
-// Set the volume (0–100) on a music slot's Audio element and YouTube player.
-function _setSlotVol(slot, vol) {
-    const v = Math.max(0, Math.min(100, vol));
-    const audio = _musicSlots[slot].audio;
-    if (audio) audio.volume = v / 100;
-    const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-    if (yt) { try { yt.setVolume(v); } catch(_) {} }
-}
-
-// Stop and clear a music slot: pause audio, stop YouTube, clear ended callback.
-function _stopSlot(slot) {
-    const audio = _musicSlots[slot].audio;
-    if (audio) { audio.pause(); audio.onended = null; audio.src = ''; }
-    const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-    if (yt) { try { yt.stopVideo(); } catch(_) {} }
-    _musicSlots[slot].ytEndedCb = null;
-}
-
-// Lazily load the YouTube IFrame API script and call back when it is ready.
-function _ensureYTAPI(cb) {
-    if (_ytAPIReady) { cb(); return; }
-    _ytPendingCbs.push(cb);
-    if (document.getElementById('yt-iframe-api')) return;
-    window.onYouTubeIframeAPIReady = () => {
-        _ytAPIReady = true;
-        _ytPendingCbs.splice(0).forEach(fn => fn());
-    };
-    const s = document.createElement('script');
-    s.id = 'yt-iframe-api';
-    s.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(s);
-}
-
-// Ensure both YouTube player slots A and B are initialized, then call back.
-function _ensureYTSlots(cb) {
-    _ensureYTAPI(() => {
-        if (_ytSlotA && _ytSlotB) { cb(); return; }
-        let readyCount = 0;
-        const onSlotReady = () => { readyCount++; if (readyCount === 2) cb(); };
-        _ytSlotA = new YT.Player('yt-player-a', {
-            width: '1', height: '1',
-            playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0 },
-            events: {
-                onReady: onSlotReady,
-                onStateChange: e => { if (e.data === YT.PlayerState.ENDED && _musicSlots.A.ytEndedCb) _musicSlots.A.ytEndedCb(); },
-            },
-        });
-        _ytSlotB = new YT.Player('yt-player-b', {
-            width: '1', height: '1',
-            playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0 },
-            events: {
-                onReady: onSlotReady,
-                onStateChange: e => { if (e.data === YT.PlayerState.ENDED && _musicSlots.B.ytEndedCb) _musicSlots.B.ytEndedCb(); },
-            },
-        });
-    });
-}
-
-// Load a track into a slot at volume 0 and call onStarted once playback begins.
-function _loadSlotAtZeroVol(track, slot, onStarted) {
-    _setSlotVol(slot, 0);
-    if (track.type === 'file') {
-        const audio = _getAudio(slot);
-        audio.onended = null;
-        audio.src = track.url;
-        audio.volume = 0;
-        const p = audio.play();
-        if (p) p.then(onStarted).catch(() => _showMusicUnlockPrompt(() => audio.play().then(onStarted)));
-        else onStarted();
-    } else {
-        _ensureYTSlots(() => {
-            const yt = slot === 'A' ? _ytSlotA : _ytSlotB;
-            _musicSlots[slot].ytEndedCb = null;
-            yt.loadVideoById(track.youtubeId);
-            yt.setVolume(0);
-            setTimeout(() => {
-                try { yt.playVideo(); } catch(_) {}
-                onStarted();
-                // Detect autoplay block: state stays unstarted/cued if browser blocked it
-                setTimeout(() => {
-                    try {
-                        const state = yt.getPlayerState();
-                        if (state !== 1 && state !== 3) { // not playing or buffering
-                            _showMusicUnlockPrompt(() => { try { yt.playVideo(); } catch(_) {} });
-                        }
-                    } catch(_) {}
-                }, 1500);
-            }, 800);
-        });
-    }
-}
-
-// Cross-fade volume from one audio slot to another over musicFadeDuration ms.
-function _runCrossfade(fromSlot, toSlot, onDone) {
-    if (_musicFadeRaf) { cancelAnimationFrame(_musicFadeRaf); _musicFadeRaf = null; }
-    const start = performance.now();
-    const fromStart = _musicEffVol();
-    function tick(now) {
-        const t = Math.min(1, (now - start) / musicFadeDuration);
-        _setSlotVol(fromSlot, (1 - t) * fromStart);
-        _setSlotVol(toSlot, t * _musicEffVol());
-        if (t < 1) { _musicFadeRaf = requestAnimationFrame(tick); }
-        else { _musicFadeRaf = null; _stopSlot(fromSlot); onDone(); }
-    }
-    _musicFadeRaf = requestAnimationFrame(tick);
-}
-
-// Register the "track ended" callback for a slot (audio onended or YouTube state change).
-function _setSlotEndedCallback(slot, track, cb) {
-    if (track.type === 'file') {
-        const audio = _musicSlots[slot].audio;
-        if (audio) audio.onended = cb;
-    } else {
-        _musicSlots[slot].ytEndedCb = cb;
-    }
-}
-
-// Show a "click to enable audio" banner for browsers that block autoplay.
-function _showMusicUnlockPrompt(onUnlock) {
-    let el = document.getElementById('music-unlock-prompt');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = 'music-unlock-prompt';
-        el.className = 'music-unlock-prompt';
-        el.textContent = '▶ Cliquer pour activer le son';
-        document.body.appendChild(el);
-    }
-    el.style.display = 'flex';
-    const handler = () => { el.style.display = 'none'; el.removeEventListener('click', handler); onUnlock(); };
-    el.addEventListener('click', handler);
-}
 
 // Advance to the next track when the current one ends; stops if the list is exhausted.
 function _musicAutoAdvance() {
@@ -3029,23 +2451,6 @@ function _musicAutoAdvance() {
     _musicTriggerPlay(_playerMusicList[nextIdx], nextIdx);
 }
 
-// Start playing a track on the inactive slot and cross-fade in from the current slot.
-function _musicTriggerPlay(track, index) {
-    if (_musicFadeRaf) { cancelAnimationFrame(_musicFadeRaf); _musicFadeRaf = null; }
-    const currentSlot = _musicCurrentSlot;
-    const nextSlot    = currentSlot === 'A' ? 'B' : 'A';
-    _musicSlots[currentSlot].ytEndedCb = null;
-    if (_musicSlots[currentSlot].audio) _musicSlots[currentSlot].audio.onended = null;
-    musicCurrentIndex = index;
-    musicIsPlaying    = true;
-    _updatePlayerMusicBar(track);
-    _loadSlotAtZeroVol(track, nextSlot, () => {
-        _runCrossfade(currentSlot, nextSlot, () => {
-            _musicCurrentSlot = nextSlot;
-            _setSlotEndedCallback(nextSlot, track, _musicAutoAdvance);
-        });
-    });
-}
 
 // Update the music bar title and make it visible when a track starts.
 function _updatePlayerMusicBar(track) {
@@ -3081,16 +2486,6 @@ function _updateMusicMuteIcon() {
     }
 }
 
-// ═══════════════════════════════════════════
-//  ABLY
-// ═══════════════════════════════════════════
-// Suffix a base Ably channel name with this character's campaign join code so each
-// campaign runs on its own isolated channels (rolls/cards/damage/music). Empty key →
-// global channel (backward compatible). The GM and overlay derive the same suffix.
-function campaignChannel(base) {
-    const t = (character.campaignKey || '').trim().toUpperCase();
-    return t ? `${base}-${t}` : base;
-}
 // Initialize Ably channels and subscribe to all game events (rolls, damage, music, cards).
 function initAbly() {
     console.log('[PLAYER] initAbly: connecting with key', config.ablyKey?.slice(0, 8) + '...', '| campaign channel suffix:', character.campaignKey || '(global)');
@@ -3360,15 +2755,6 @@ function schedulePresence() {
     _presenceTimer = setTimeout(sendPresence, 250);
 }
 
-// ── Presence: consume ─────────────────────────────────────────────────────────
-// Re-read the whole set on any change. Cheap (the SDK serves it from its local
-// replica) and it removes the entire class of bugs where an incrementally patched
-// copy of the roster drifts from the real one.
-async function refreshPresenceSet() {
-    if (!ablyPresence) return;
-    try { applyPresenceSet(await ablyPresence.presence.get()); }
-    catch (err) { console.error('[PLAYER] presence get:', err); }
-}
 // Collapse members to participants. Several tabs of one person share a clientId and
 // differ by connectionId; so does the ghost of a tab that refreshed, until Ably reaps
 // it 15s later. Newest ts wins, which is always a live tab.
@@ -3415,17 +2801,10 @@ function applyPresenceSet(members) {
 // Update the Ably status dot and text labels in the topbar and config modal.
 function setAblyStatus(ok) {
     // classList (not className=) so extra classes like .tb-conn-dot on the topbar dot survive.
-    ['ably-dot', 'cfg-ably-dot2'].forEach(id => { const el = document.getElementById(id); if (el) { el.classList.add('status-dot'); el.classList.remove('connected', 'error'); el.classList.add(ok ? 'connected' : 'error'); } });
-    ['ably-status', 'cfg-ably-status2'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
+    ['ably-dot', 'cfg-ably-dot2'].forEach(id => { const node = document.getElementById(id); if (node) { node.classList.add('status-dot'); node.classList.remove('connected', 'error'); node.classList.add(ok ? 'connected' : 'error'); } });
+    ['ably-status', 'cfg-ably-status2'].forEach(id => { const node = document.getElementById(id); if (node) node.textContent = ok ? 'Ably connecté' : 'Ably erreur'; });
 }
 
-// ═══════════════════════════════════════════
-//  CONFIG
-// ═══════════════════════════════════════════
-// Toggle light mode on the document body.
-function applyTheme(light) {
-    document.body.classList.toggle('light-mode', !!light);
-}
 window.addEventListener('storage', e => {
     if (e.key === 'aria-config') {
         const newCfg = JSON.parse(e.newValue || '{}');
@@ -3493,11 +2872,6 @@ function saveConfig() {
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
 }
-// Toggle the config modal and scrim visibility.
-function toggleConfig() {
-    document.getElementById('config-modal').classList.toggle('show');
-    document.getElementById('config-scrim').classList.toggle('show');
-}
 
 // ═══════════════════════════════════════════
 //  CHARACTER EDITOR
@@ -3508,8 +2882,8 @@ function renderEditorForm() {
     document.getElementById('ed-class').value = character.class || '';
     const attrsBlock = document.getElementById('cs-attrs-block');
     if (attrsBlock) {
-        attrsBlock.querySelectorAll('.cs-attr:not(.cs-attr-pv)').forEach(el => {
-            el.style.display = character.ariaType === 'contemporary' ? 'none' : '';
+        attrsBlock.querySelectorAll('.cs-attr:not(.cs-attr-pv)').forEach(node => {
+            node.style.display = character.ariaType === 'contemporary' ? 'none' : '';
         });
     }
     if (character.ariaType !== 'contemporary') {
@@ -3544,7 +2918,14 @@ function renderWeaponsEditor() {
     (character.weapons || []).forEach((w, i) => {
         const row = document.createElement('div');
         row.className = 'weap-row';
-        row.innerHTML = `<input class="editor-input" value="${_escHtml(w.nom)}" placeholder="Nom de l'arme" oninput="character.weapons[${i}].nom=this.value;renderCombatSidebar()" /><input class="editor-input weap-dmg" value="${_escHtml(w.degats)}" placeholder="ex: 2d6+2" oninput="character.weapons[${i}].degats=this.value;renderCombatSidebar()" /><button class="weap-fav-btn${w.favourite ? ' active' : ''}" title="Équipée (affichée dans la barre de combat)" onclick="toggleWeaponFavourite(${i})">★</button><button class="del-btn" onclick="removeWeapon(${i})">✕</button>`;
+        fill(row,
+            el('input', { className: 'editor-input', value: w.nom, placeholder: "Nom de l'arme",
+                oninput: e => { character.weapons[i].nom = e.target.value; renderCombatSidebar(); } }),
+            el('input', { className: 'editor-input weap-dmg', value: w.degats, placeholder: 'ex: 2d6+2',
+                oninput: e => { character.weapons[i].degats = e.target.value; renderCombatSidebar(); } }),
+            el('button', { className: 'weap-fav-btn' + (w.favourite ? ' active' : ''), textContent: '★',
+                title: 'Équipée (affichée dans la barre de combat)', onclick: () => toggleWeaponFavourite(i) }),
+            el('button', { className: 'del-btn', textContent: '✕', onclick: () => removeWeapon(i) }));
         list.appendChild(row);
     });
 }
@@ -3552,43 +2933,36 @@ function renderWeaponsEditor() {
 function addWeapon() {
     if (!character.weapons) character.weapons = [];
     character.weapons.push({ nom: '', degats: '', favourite: false });
-    renderWeaponsEditor();
-    saveCurrentCharacter();
+    commitCharacter({ editors: true });
 }
 // Remove a weapon by index and re-render the editor and combat sidebar.
 function removeWeapon(i) {
     character.weapons.splice(i, 1);
-    renderWeaponsEditor();
-    renderCombatSidebar();
-    saveCurrentCharacter();
+    commitCharacter({ editors: true });
 }
 // Toggle a weapon's equipped (favourite) status and refresh both editor and combat sidebar.
 function toggleWeaponFavourite(i) {
     character.weapons[i].favourite = !character.weapons[i].favourite;
-    renderWeaponsEditor();
-    renderCombatSidebar();
-    saveCurrentCharacter();
+    commitCharacter({ editors: true });
 }
 // Render the money editor fields based on character type (ancient coins vs. contemporary francs).
 function renderMoneyEditor() {
-    const el = document.getElementById('inv-money-editor');
-    if (!el) return;
+    const node = document.getElementById('inv-money-editor');
+    if (!node) return;
     const m = character.money || {};
     // Each denomination is its own box: label on the left, − value + on the right (value editable).
-    const coinBox = (key, label, color) => `
-        <div class="money-box">
-            <span class="money-box-label">${color ? `<span class="money-box-dot" style="color:${color}">●</span>` : ''}${label}</span>
-            <div class="money-box-ctrl">
-                <button class="qty-btn" onclick="bumpMoney('${key}',-1)">−</button>
-                <input class="money-box-input" type="text" inputmode="numeric" value="${m[key] ?? 0}" oninput="updateMoney('${key}',this.value)" />
-                <button class="qty-btn" onclick="bumpMoney('${key}',1)">+</button>
-            </div>
-        </div>`;
-    if (character.ariaType === 'contemporary') {
-        el.innerHTML = `<div class="inv-money-grid">${coinBox('francs', 'Francs', '')}</div>`;
-    } else {
-        el.innerHTML = `<div class="inv-money-grid">${MONEY_COINS.map(c => coinBox(c.key, c.label, c.color)).join('')}</div>`;
-    }
+    const coinBox = (key, label, color) => el('div', { className: 'money-box' },
+        el('span', { className: 'money-box-label', textContent: label },
+            color && el('span', { className: 'money-box-dot', style: { color }, textContent: '●' })),
+        el('div', { className: 'money-box-ctrl' },
+            el('button', { className: 'qty-btn', textContent: '−', onclick: () => bumpMoney(key, -1) }),
+            el('input', { className: 'money-box-input', type: 'text', inputMode: 'numeric', value: m[key] ?? 0,
+                oninput: e => updateMoney(key, e.target.value) }),
+            el('button', { className: 'qty-btn', textContent: '+', onclick: () => bumpMoney(key, 1) })));
+    fill(node, el('div', { className: 'inv-money-grid' },
+        character.ariaType === 'contemporary'
+            ? coinBox('francs', 'Francs', '')
+            : MONEY_COINS.map(c => coinBox(c.key, c.label, c.color))));
 }
 // Update a single money denomination value (from the editable field).
 function updateMoney(key, val) {
@@ -3598,8 +2972,7 @@ function updateMoney(key, val) {
             : { couronne: 0, orbe: 0, sceptre: 0, sou: 0 };
     }
     character.money[key] = parseInt(val.replace(/[^0-9]/g, '')) || 0;
-    saveCurrentCharacter();
-    renderInventorySidebar();
+    commitCharacter();   // typed into the money field — leave the editors alone
 }
 // Increment/decrement a money denomination via the +/- buttons.
 function bumpMoney(key, delta) {
@@ -3609,9 +2982,7 @@ function bumpMoney(key, delta) {
             : { couronne: 0, orbe: 0, sceptre: 0, sou: 0 };
     }
     character.money[key] = Math.max(0, (character.money[key] || 0) + delta);
-    saveCurrentCharacter();
-    renderMoneyEditor();
-    renderInventorySidebar();
+    commitCharacter({ editors: true });
 }
 // Render the inventory editor list with item rows and vials counter if alchemy is enabled.
 function renderInventoryEditor() {
@@ -3619,45 +2990,34 @@ function renderInventoryEditor() {
     const list = document.getElementById('inv-editor-list');
     if (!list) return;
     list.innerHTML = '';
-    (character.inventory || []).forEach((it, i) => {
-        const row = document.createElement('div');
-        row.className = 'inv-row';
-        // Name stays editable; quantity is adjusted only via the +/- buttons (not a free input).
-        row.innerHTML = `<input class="inv-name-input" value="${_escHtml(it.name || '')}" placeholder="Nom de l'objet" oninput="character.inventory[${i}].name=this.value" />
-            <div class="inv-qty-ctrl">
-                <button class="qty-btn" onclick="bumpInventoryQty(${i},-1)">−</button>
-                <span class="inv-qty-val">${it.qty || 1}</span>
-                <button class="qty-btn" onclick="bumpInventoryQty(${i},1)">+</button>
-            </div>
-            <button class="del-btn" onclick="removeInventoryRow(${i})">✕</button>`;
-        list.appendChild(row);
-    });
+    // Name stays editable; quantity is adjusted only via the +/- buttons.
+    const qtyCtrl = (value, dec, inc, decDisabled) => el('div', { className: 'inv-qty-ctrl' },
+        el('button', { className: 'qty-btn', textContent: '−', disabled: !!decDisabled, onclick: dec }),
+        el('span', { className: 'inv-qty-val', textContent: value }),
+        el('button', { className: 'qty-btn', textContent: '+', onclick: inc }));
+    fill(list, (character.inventory || []).map((it, i) => el('div', { className: 'inv-row' },
+        el('input', { className: 'inv-name-input', value: it.name || '', placeholder: "Nom de l'objet",
+            oninput: e => { character.inventory[i].name = e.target.value; } }),
+        qtyCtrl(it.qty || 1, () => bumpInventoryQty(i, -1), () => bumpInventoryQty(i, 1)),
+        el('button', { className: 'del-btn', textContent: '✕', onclick: () => removeInventoryRow(i) }))));
     if (playerTabs.alchemy) {
         const v = character.vials ?? 0;
-        const vRow = document.createElement('div');
-        vRow.className = 'inv-row inv-row-vials';
-        vRow.innerHTML = `<span class="inv-vials-name">Fioles vides</span>
-            <div class="inv-qty-ctrl">
-                <button class="qty-btn" onclick="changeVials(-1)" ${v <= 0 ? 'disabled' : ''}>−</button>
-                <span class="inv-qty-val">${v}</span>
-                <button class="qty-btn" onclick="changeVials(1)">+</button>
-            </div>
-            <span></span>`;
-        list.insertBefore(vRow, list.firstChild);
+        list.insertBefore(el('div', { className: 'inv-row inv-row-vials' },
+            el('span', { className: 'inv-vials-name', textContent: 'Fioles vides' }),
+            qtyCtrl(v, () => changeVials(-1), () => changeVials(1), v <= 0),
+            el('span')), list.firstChild);
     }
 }
 // Adjust an inventory item's quantity via the +/- buttons (min 0).
 function bumpInventoryQty(i, delta) {
     if (!character.inventory[i]) return;
     character.inventory[i].qty = Math.max(0, (character.inventory[i].qty || 0) + delta);
-    saveCurrentCharacter();
-    renderInventoryEditor();
-    renderInventorySidebar();
+    commitCharacter({ editors: true });
 }
 // Add a new empty inventory item and refresh the editor and sidebar.
-function addInventoryRow() { character.inventory.push({ name: '', qty: 1 }); renderInventoryEditor(); renderInventorySidebar(); }
+function addInventoryRow() { character.inventory.push({ name: '', qty: 1 }); commitCharacter({ editors: true }); }
 // Remove an inventory item by index and refresh the editor and sidebar.
-function removeInventoryRow(i) { character.inventory.splice(i, 1); renderInventoryEditor(); renderInventorySidebar(); }
+function removeInventoryRow(i) { character.inventory.splice(i, 1); commitCharacter({ editors: true }); }
 
 // ── POTIONS ──────────────────────────────────
 // Render the alchemy tab: vials counter, known recipes, and crafted potions stock.
@@ -3672,16 +3032,12 @@ function renderPotions() {
     container.innerHTML = '';
 
     // Vials counter
-    const vialsDiv = document.createElement('div');
-    vialsDiv.className = 'alchemy-vials';
-    vialsDiv.innerHTML = `
-        <span class="alchemy-vials-label">Fioles vides</span>
-        <div class="alchemy-vials-ctrl">
-            <button class="qty-btn" onclick="changeVials(-1)" ${vials <= 0 ? 'disabled' : ''}>−</button>
-            <span class="vial-count">${vials}</span>
-            <button class="qty-btn" onclick="changeVials(1)">+</button>
-        </div>`;
-    container.appendChild(vialsDiv);
+    container.append(el('div', { className: 'alchemy-vials' },
+        el('span', { className: 'alchemy-vials-label', textContent: 'Fioles vides' }),
+        el('div', { className: 'alchemy-vials-ctrl' },
+            el('button', { className: 'qty-btn', textContent: '−', disabled: vials <= 0, onclick: () => changeVials(-1) }),
+            el('span', { className: 'vial-count', textContent: vials }),
+            el('button', { className: 'qty-btn', textContent: '+', onclick: () => changeVials(1) }))));
 
     // Recipes section — card grid (design frame 09)
     if (recipes.length) {
@@ -3696,18 +3052,14 @@ function renderPotions() {
             const chance = Math.max(0, Math.min(100, (r.successChance || 0) + liveBM() + (character.karma ?? 0)));
             // Recipes arrive from the GM over Ably (potion-grant) — escape everything.
             const meta = [r.ingredients || '', r.desc || ''].filter(Boolean).join(' — ');
-            const card = document.createElement('div');
-            card.className = 'potion-card';
-            card.innerHTML = `
-                <div class="potion-card-top">
-                    <span class="potion-card-name">${_escHtml(r.name)}</span>
-                </div>
-                <div class="potion-card-desc">${meta ? _escHtml(meta) : '&nbsp;'}</div>
-                <div class="potion-card-foot">
-                    <span class="potion-card-chance">Succès ${chance}%</span>
-                    <button class="potion-card-action" onclick="craftPotion(${i})" ${vials <= 0 || isRolling ? 'disabled' : ''}>Créer →</button>
-                </div>`;
-            grid.appendChild(card);
+            grid.append(el('div', { className: 'potion-card' },
+                el('div', { className: 'potion-card-top' },
+                    el('span', { className: 'potion-card-name', textContent: r.name })),
+                el('div', { className: 'potion-card-desc', textContent: meta || '\u00a0' }),
+                el('div', { className: 'potion-card-foot' },
+                    el('span', { className: 'potion-card-chance', textContent: `Succès ${chance}%` }),
+                    el('button', { className: 'potion-card-action', textContent: 'Créer →',
+                        disabled: vials <= 0 || isRolling, onclick: () => craftPotion(i) }))));
         });
         container.appendChild(grid);
     }
@@ -3723,19 +3075,15 @@ function renderPotions() {
         grid.className = 'potion-grid';
         potions.forEach((p, i) => {
             if (!p.name) return;
-            const card = document.createElement('div');
-            card.className = 'potion-card' + (!p.qty ? ' depleted' : '');
-            card.innerHTML = `
-                <div class="potion-card-top">
-                    <span class="potion-card-name">${_escHtml(p.name)}</span>
-                    <span class="potion-card-qty${!p.qty ? ' depleted' : ''}">×${p.qty ?? 0}</span>
-                </div>
-                <div class="potion-card-desc">${p.desc ? _escHtml(p.desc) : '&nbsp;'}</div>
-                <div class="potion-card-foot">
-                    <button class="potion-card-del" onclick="removePotion(${i})" title="Retirer">✕</button>
-                    <button class="potion-card-action use" onclick="usePotion(${i})" ${!p.qty ? 'disabled' : ''}>Utiliser →</button>
-                </div>`;
-            grid.appendChild(card);
+            grid.append(el('div', { className: 'potion-card' + (!p.qty ? ' depleted' : '') },
+                el('div', { className: 'potion-card-top' },
+                    el('span', { className: 'potion-card-name', textContent: p.name }),
+                    el('span', { className: 'potion-card-qty' + (!p.qty ? ' depleted' : ''), textContent: `×${p.qty ?? 0}` })),
+                el('div', { className: 'potion-card-desc', textContent: p.desc || '\u00a0' }),
+                el('div', { className: 'potion-card-foot' },
+                    el('button', { className: 'potion-card-del', title: 'Retirer', textContent: '✕', onclick: () => removePotion(i) }),
+                    el('button', { className: 'potion-card-action use', textContent: 'Utiliser →',
+                        disabled: !p.qty, onclick: () => usePotion(i) }))));
         });
         container.appendChild(grid);
     }
@@ -3748,10 +3096,7 @@ function renderPotions() {
 // Increment or decrement the vials counter and update all related views.
 function changeVials(delta) {
     character.vials = Math.max(0, (character.vials ?? 0) + delta);
-    saveCurrentCharacter();
-    renderInventoryEditor();
-    renderInventorySidebar();
-    renderPotions();
+    commitCharacter({ editors: true });
 }
 // Toggle the custom potion add form visibility.
 function toggleCustomPotionForm() {
@@ -3846,7 +3191,13 @@ function renderSkillsEditor() {
         .forEach(({ sk, i }) => {
             const row = document.createElement('div');
             row.className = 'skill-editor-row';
-            row.innerHTML = `<span class="sname">${_escHtml(sk.name)}</span><input class="spct" type="text" inputmode="numeric" value="${sk.pct}" title="Seuil de base (%)" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.skills[${i}].pct=+this.value||0" /><input class="smod" type="text" inputmode="numeric" value="${sk.bonus ? sk.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.skills[${i}].bonus=parseInt(this.value)||0" />`;
+            fill(row,
+                el('span', { className: 'sname', textContent: sk.name }),
+                el('input', { className: 'spct', type: 'text', inputMode: 'numeric', value: sk.pct, title: 'Seuil de base (%)',
+                    oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); character.skills[i].pct = +e.target.value || 0; } }),
+                el('input', { className: 'smod', type: 'text', inputMode: 'numeric', value: sk.bonus ? sk.bonus : '',
+                    placeholder: 'mod', title: 'Modificateur permanent (±)',
+                    oninput: e => { e.target.value = e.target.value.replace(/[^0-9-]/g, '').replace(/(?!^)-/g, ''); character.skills[i].bonus = parseInt(e.target.value) || 0; } }));
             list.appendChild(row);
         });
 }
@@ -3858,14 +3209,24 @@ function renderSpecialsEditor() {
     (character.specials || []).forEach((sp, i) => {
         const row = document.createElement('div');
         row.className = 'specials-row';
-        row.innerHTML = `<input value="${_escHtml(sp.name || '')}" placeholder="Nom" oninput="character.specials[${i}].name=this.value" /><input type="text" inputmode="numeric" value="${sp.pct || 0}" oninput="this.value=this.value.replace(/[^0-9]/g,'');character.specials[${i}].pct=+this.value||0" /><input type="text" inputmode="numeric" value="${sp.bonus ? sp.bonus : ''}" placeholder="mod" title="Modificateur permanent (±)" oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'');character.specials[${i}].bonus=parseInt(this.value)||0" /><input value="${_escHtml(sp.desc || '')}" placeholder="Description" oninput="character.specials[${i}].desc=this.value" /><button class="del-btn" onclick="removeSpecial(${i})">✕</button>`;
+        fill(row,
+            el('input', { value: sp.name || '', placeholder: 'Nom',
+                oninput: e => { character.specials[i].name = e.target.value; } }),
+            el('input', { type: 'text', inputMode: 'numeric', value: sp.pct || 0,
+                oninput: e => { e.target.value = e.target.value.replace(/[^0-9]/g, ''); character.specials[i].pct = +e.target.value || 0; } }),
+            el('input', { type: 'text', inputMode: 'numeric', value: sp.bonus ? sp.bonus : '', placeholder: 'mod',
+                title: 'Modificateur permanent (±)',
+                oninput: e => { e.target.value = e.target.value.replace(/[^0-9-]/g, '').replace(/(?!^)-/g, ''); character.specials[i].bonus = parseInt(e.target.value) || 0; } }),
+            el('input', { value: sp.desc || '', placeholder: 'Description',
+                oninput: e => { character.specials[i].desc = e.target.value; } }),
+            el('button', { className: 'del-btn', textContent: '✕', onclick: () => removeSpecial(i) }));
         list.appendChild(row);
     });
 }
 // Add a new empty special skill entry and re-render.
-function addSpecialRow() { character.specials.push({ name: '', desc: '', pct: 0 }); renderSpecialsEditor(); }
+function addSpecialRow() { character.specials.push({ name: '', desc: '', pct: 0 }); commitCharacter({ editors: true }); }
 // Remove a special skill by index and re-render.
-function removeSpecial(i) { character.specials.splice(i, 1); renderSpecialsEditor(); }
+function removeSpecial(i) { character.specials.splice(i, 1); commitCharacter({ editors: true }); }
 // Read all character editor form inputs back into the character object.
 function readEditorInputs() {
     character.name = document.getElementById('ed-name').value.trim();
@@ -3914,27 +3275,20 @@ function autoSaveChar() {
         }
         localStorage.setItem(hpKey(), currentHP);
     }
-    saveCurrentCharacter();
-    // Refresh non-editor UI only — avoids rebuilding editor DOM and losing focus
-    updateTopbarIdentity();
-    document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
-    renderSkills();
-    renderStats();
-    updateHPDisplay();
-    renderInventorySidebar();
-    renderCombatSidebar();
-    renderPotions();
-    sendPresence();
+    // Derived views only — the caret is in an editor field right now. That rule used
+    // to be an inlined list of renderers here; it is commitCharacter's default.
+    commitCharacter();
+    sendPresence();   // immediate, rather than the 250ms debounce saveCurrentCharacter arms
     flashSaveStatus();
 }
 let saveStatusTimer = null;
 // Briefly flash the "saved" status indicator in the character editor.
 function flashSaveStatus() {
-    const el = document.getElementById('cs-save-status');
-    if (!el) return;
-    el.classList.add('show');
+    const node = document.getElementById('cs-save-status');
+    if (!node) return;
+    node.classList.add('show');
     clearTimeout(saveStatusTimer);
-    saveStatusTimer = setTimeout(() => el.classList.remove('show'), 2000);
+    saveStatusTimer = setTimeout(() => node.classList.remove('show'), 2000);
 }
 
 // ═══════════════════════════════════════════
@@ -3997,20 +3351,7 @@ function updateDeckCount() {
 // Show or hide the clear-exclusions button based on whether any cards are excluded.
 function updateClearBtn() { document.getElementById('clear-exclusions-btn').classList.toggle('visible', cardExcluded.size > 0); }
 // Show a temporary status message in the card tab for 2.2 seconds.
-function showCardStatus(msg) { const el = document.getElementById('card-status'); el.textContent = msg; clearTimeout(cardStatusTimer); cardStatusTimer = setTimeout(() => el.textContent = '', 2200); }
-// Return a Promise that resolves after ms milliseconds.
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-// Render the face of a playing card into the drawn-card element.
-function renderCardContent(card) {
-    const el = document.getElementById('drawn-card');
-    if (card.isJoker) {
-        el.className = `flip-face ${card.jokerColor === 'red' ? 'c-red' : 'c-black'}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div><div class="card-center" style="flex-direction:column;gap:6px;"><span style="font-size:50px;line-height:1;color:var(--card-purple)">★</span><span style="font-family:'Cormorant Garamond',serif;font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--card-purple)">${card.label.toUpperCase()}</span></div><div class="card-corner br"><span class="rank" style="font-size:14px;color:var(--card-purple)">JKR</span></div>`;
-    } else {
-        el.className = `flip-face ${card.suit.cls}`;
-        el.innerHTML = `<div class="card-corner tl"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div><div class="card-center">${card.suit.sym}</div><div class="card-corner br"><span class="rank">${card.rank}</span><span class="suit-small">${card.suit.sym}</span></div>`;
-    }
-}
+function showCardStatus(msg) { const node = document.getElementById('card-status'); node.textContent = msg; clearTimeout(cardStatusTimer); cardStatusTimer = setTimeout(() => node.textContent = '', 2200); }
 // Restore the last drawn card display after a page reload without animation.
 function restoreCard() {
     const card = cardById(lastCardId); if (!card) return;
@@ -4122,14 +3463,12 @@ function renderPlayerFiles() {
         return;
     }
     if (empty) empty.style.display = 'none';
+    // Files are granted by the GM over Ably — name and id are remote strings.
     playerFiles.forEach(f => {
-        const row = document.createElement('div');
-        row.className = 'player-file-row';
-        row.innerHTML = `
-            <div class="pf-icon">${_pfFileIcon(f.type)}</div>
-            <div class="pf-name">${_escHtml(f.name)}</div>
-            <button class="pf-open-btn" onclick="openFileViewer('${_escHtml(_escJs(f.id))}')">Ouvrir</button>`;
-        list.appendChild(row);
+        list.append(el('div', { className: 'player-file-row' },
+            el('div', { className: 'pf-icon', textContent: _pfFileIcon(f.type) }),
+            el('div', { className: 'pf-name', textContent: f.name }),
+            el('button', { className: 'pf-open-btn', textContent: 'Ouvrir', onclick: () => openFileViewer(f.id) })));
     });
 }
 
@@ -4163,12 +3502,11 @@ function openFileViewer(fileId) {
             .then(text => { pre.textContent = text; })
             .catch(() => { pre.textContent = 'Erreur de chargement.'; });
     } else {
-        const wrap = document.createElement('div');
-        wrap.className = 'fv-unsupported';
-        wrap.innerHTML = `<div class="fv-unsupported-icon">${_pfFileIcon(f.type)}</div>
-            <div class="fv-unsupported-name">${_escHtml(f.name)}</div>
-            ${url ? `<a class="fv-download-link" href="${_escHtml(url)}" target="_blank" rel="noopener">Ouvrir dans un nouvel onglet</a>` : ''}`;
-        body.appendChild(wrap);
+        body.append(el('div', { className: 'fv-unsupported' },
+            el('div', { className: 'fv-unsupported-icon', textContent: _pfFileIcon(f.type) }),
+            el('div', { className: 'fv-unsupported-name', textContent: f.name }),
+            url && el('a', { className: 'fv-download-link', href: url, target: '_blank', rel: 'noopener',
+                textContent: 'Ouvrir dans un nouvel onglet' })));
     }
     document.getElementById('file-viewer-scrim').classList.add('show');
     document.getElementById('file-viewer-modal').classList.add('show');
@@ -4181,31 +3519,3 @@ function closeFileViewer() {
     document.getElementById('fv-body').innerHTML = '';
 }
 
-// Wire wheel-zoom (toward cursor), drag-to-pan and double-click reset onto a file-viewer image.
-// The img is recreated on every open (body.innerHTML = ''), so no explicit teardown is needed.
-function wireImageZoom(img) {
-    let scale = 1, tx = 0, ty = 0;
-    const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; };
-    img.addEventListener('wheel', e => {
-        e.preventDefault();
-        const ns = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-        const rect = img.getBoundingClientRect();
-        const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-        tx -= cx * (ns / scale - 1);
-        ty -= cy * (ns / scale - 1);
-        scale = ns;
-        if (scale === 1) { tx = 0; ty = 0; }
-        apply();
-    }, { passive: false });
-    img.addEventListener('mousedown', e => {
-        if (scale === 1) return;
-        e.preventDefault();
-        const sx = e.clientX - tx, sy = e.clientY - ty;
-        img.classList.add('panning');
-        const move = ev => { tx = ev.clientX - sx; ty = ev.clientY - sy; apply(); };
-        const up = () => { img.classList.remove('panning'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
-    });
-    img.addEventListener('dblclick', e => { e.preventDefault(); scale = 1; tx = 0; ty = 0; apply(); });
-}

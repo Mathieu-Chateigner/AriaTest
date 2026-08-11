@@ -60,6 +60,8 @@ css/
   aria-overlay-editor.css
 js/
   aria-supabase.js          ← shared Supabase helpers (loaded first, before panel scripts)
+  aria-shared.js            ← shared runtime: el() DOM builder, split-pane engine,
+                              music transport, save-key gateway, card deck, utils
   aria-player.js
   aria-gm.js
   aria-overlay.js
@@ -67,6 +69,26 @@ js/
 ```
 
 `aria-control-panel.html` and `aria-dice-roller.html` are **deprecated**.
+
+### `aria-shared.js`
+
+Loaded before the panel script on both panel pages (`aria-supabase.js` → `aria-shared.js` → `aria-player.js`/`aria-gm.js`). It holds everything the two panels used to keep byte-identical copies of — 543 lines across 14 blocks, including the whole 247-line split-pane engine and the 82-line music transport.
+
+Only one panel script ever shares a page with it, so **a name declared in `aria-shared.js` must not also be declared in either panel** (top-level `let`/`const` in classic scripts share one global lexical environment; a duplicate is a SyntaxError that kills the file). Note that top-level `let`/`const` are *not* properties of `window` — they resolve by name from other scripts and from inline HTML handlers, but `window.ARIA` is `undefined`.
+
+Per-panel differences go through the `ARIA` hooks object, not a forked copy of the function. Each panel calls `ARIA.configure({...})` at the very top of its file:
+
+| hook | player | GM |
+|---|---|---|
+| `role` / `tag` | `'player'` / `'PLAYER'` | `'gm'` / `'GM'` |
+| `splitKey` | `aria-split-layout` | `aria-gm-split-layout` |
+| `defaultPane` | `tab-skills` | `tab-players` |
+| `joinCode()` | `character.campaignKey` | `currentJoinCode` |
+| `syncAll()` / `clearLocal()` | `_syncAllPlayerData` / `_clearLocalPlayerData` | `_syncAllGMData` / `_clearLocalGMData` |
+| `afterRestore()` | `restoreLastCharacter` | `restoreLastCampaign` |
+| `onMusicPhase()` | update the music bar | re-render Musique tab, start progress ticker |
+
+`renderTabLayout()` stays in each panel (each does its own post-layout work) and is called by name from shared — resolved at call time. It is `applyTabLayout()` → panel-specific work → `finishTabLayout()`.
 
 ---
 
@@ -164,7 +186,9 @@ All campaign-scoped data uses keys suffixed with `currentCampaignId`:
 | `aria-gm-known-players-{id}` | last-seen presence snapshot per charId (repopulates the Joueurs tab offline) |
 | `aria-gm-camera-off-{id}` | `'1'` when the GM cut their own camera (kill switch, survives refresh) |
 
-Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()`, `gmNotesKey()`, `knownPlayersKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key. (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
+Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()`, `gmNotesKey()`, `knownPlayersKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key.
+
+**`_CAMPAIGN_KEY_PREFIXES` is the only enumeration of the scoped keys**, and every path that drops a campaign goes through `_dropCampaignKeys(id)`. `deleteCampaign()` used to re-type all ten by hand next to the constant that already listed them, and *neither* copy removed `aria-gm-camera-off-`, so it leaked on every delete. Adding a new campaign-scoped key means adding it to that array and nowhere else. `_CHAR_KEY_PREFIXES` / `_dropCharacterKeys(id)` are the player-side equivalent (same bug, same fix). (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
 
 `generateJoinCode()` produces the join code. If a campaign loaded from storage lacks one, it is generated and saved on `loadCampaignState()`.
 
@@ -241,7 +265,7 @@ There is no TTL, no timestamped record, no read-back-after-write, and no "taking
 
 **Push URLs MUST include a blank `&view`** (`?push=SID&room=ROOM&view&...`) — per VDO.ninja docs, an empty `&view` means "no streams will play; only publishing will be allowed". Without it, a push page inside a room acts as a full room client and *renders every other guest's video* next to the self-preview (players appeared inside the GM's "Votre caméra" panel) and silently downloads all remote streams in the player's hidden push iframe.
 
-**Important:** `renderPlayerCards()` in `aria-gm.js` does **in-place DOM updates** (not `grid.innerHTML = ''`) so that camera iframes are never removed from the DOM when the roster changes. Removing an iframe from the DOM kills its WebRTC stream. The same principle applies to `renderCamerasTab()` in `aria-player.js` — it surgically adds/removes cells rather than clearing the grid.
+**Important:** `renderPlayerCards()` in `aria-gm.js` goes through `reconcile()` so camera iframes are never detached when the roster changes — removing an iframe from the DOM kills its WebRTC stream. It used to build the card as a template string on first sight and then maintain a *second, parallel* branch that reached back in with `querySelector` to update each field; there is now one description of the card (`create`) and one updater (`update`), over a node whose identity is preserved. `renderCamerasTab()` in `aria-player.js` still surgically adds/removes cells rather than clearing the grid.
 
 **Auto re-entry.** Both apps remember what they were in — `aria-gm-last-campaign`, `aria-last-character` — and `tryRestoreSupabase()` re-enters it after `showSelectionScreen()`, so a refresh comes straight back rather than parking on the selection screen. This is now a convenience: it used to be the only thing that got the GM broadcasting again inside the players' 12s camera grace period. An unknown id (deleted elsewhere) is refused and the key cleared; `switchCampaign()` / `switchCharacter()` clear it, since leaving on purpose should not be undone on the next load.
 
@@ -388,9 +412,9 @@ Republished by `toggleSpotlight()`, `toggleGMCamera()`, `saveConfig()` (via re-e
 
 There is **no "session over" payload**. Leaving the presence set is the signal, and Ably emits it. `gmSpotlightCharId` is cleared when the spotlighted player is no longer in the set — Ably has already waited out a possible reconnect, so this no longer fires on a refresh or a closed second tab.
 
-**Validation.** Presence data is still remote-controlled (anyone holding the Ably key can enter the set), so the GM's `handlePresence()` rejects members whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match, **validates that `charId` is UUID-shaped** via `_isIdToken()` (`/^[A-Za-z0-9_-]{1,64}$/`) since it ends up in element ids, CSS selectors and inline handlers, and **coerces `hp`/`maxHP`/`vials`/`karma` via `_finiteNum()`** since those are interpolated into `innerHTML` by the card renders.
+**Validation.** Presence data is remote-controlled (anyone holding the Ably key can enter the set), so the GM's `handlePresence()` rejects members whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match, **validates that `charId` is UUID-shaped** via `_isIdToken()` (`/^[A-Za-z0-9_-]{1,64}$/`), and **coerces `hp`/`maxHP`/`vials`/`karma` via `_finiteNum()`**. Both are now *message validation* — a malformed id is a bad message — rather than escaping: since the renders build elements with `el()`, neither is load-bearing for injection any more.
 
-`loadCampaignState()` applies the **same `_isIdToken()` check** when rehydrating the `aria-gm-known-players-{id}` snapshot. That snapshot is written from presence data, but entries persisted before the validation existed can hold anything, and they feed the same `players` Map and the same renders. `renderPlayerCards()` additionally wraps its lookup selector in `CSS.escape` (as `playerCardEl()` already did): an unescaped quote throws out of `players.forEach`, which kills that render and every later one, freezing the Joueurs tab and its camera iframes.
+`loadCampaignState()` applies the **same `_isIdToken()` check** when rehydrating the `aria-gm-known-players-{id}` snapshot. That snapshot is written from presence data, but entries persisted before the validation existed can hold anything, and they feed the same `players` Map and the same renders. Card lookups (`playerCardEl` / `monsterCardEl`) go through `keyedNode()` — a Map lookup, so an id containing a quote is a miss rather than a thrown exception. They used to be `CSS.escape`'d CSS selectors, where a missed escape threw out of `players.forEach` and froze the Joueurs tab and its camera iframes.
 
 ### `aria-damage` / `damage` | `heal`
 ```js
@@ -474,7 +498,7 @@ The GM ♪ Musique tab holds **multiple named playlists** rendered as a chip bar
 
 The **Monstres** and **Fichiers** tabs each have a **group chip bar** (`#monster-group-bar` / `#file-group-bar`) for navigating long lists — a `Tous` chip (always present) plus one chip per group, then `＋`. Clicking a chip name filters the grid to that group; the active group chip carries ✎/✕ (rename/delete). Each card has a `⠿` drag grip; drag a card onto a chip to assign it (drop on `Tous` un-assigns). Adding a monster/file while a group is filtered auto-assigns it to that group. Groups + membership live in a **separate, non-synced** localStorage key (`monsterGroupsKey()` / `fileGroupsKey()`) — see *Monster/file grouping is not synced* under Known pitfalls. The grouping engine is shared by both tabs (`_renderGroupBar(type)`, `_groupChip`, drag helpers `_groupDrag*`, and `assign{Monster,File}ToGroup`).
 
-The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` does **in-place DOM updates** — it never clears the grid entirely — to preserve live camera iframes when the roster changes.
+The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` reconciles by `charId` — it never clears the grid — to preserve live camera iframes when the roster changes. When a player has no stream the wrapper is **hidden, not detached** (detaching kills the connection; blanking the src reloads the frame on the way back).
 
 ### Bonus/Malus bar (player)
 Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected). `doRoll` also adds the character's **karma** to every non-skipBM threshold — all live previews (skills, specials, stat cards, combat reactions, potion chance) must include `liveBM() + (character.karma ?? 0)` so the displayed % matches the rolled threshold.
@@ -490,6 +514,17 @@ The bar also holds the **Jet caché** toggle (`hiddenRollMode`) — while armed,
 - `handlePresence(charId, data)` rejects members whose `campaignKey !== currentJoinCode` or whose `ariaType` doesn't match the campaign
 - Players who leave are marked `online:false`, not deleted — the map doubles as the offline known-players snapshot
 - 📋 modal shows full character data and tab toggles
+
+### Committing a character change (player)
+
+After mutating `character`, call **`commitCharacter()`** — not `saveCurrentCharacter()` plus a hand-picked set of renderers. It persists (which also republishes presence) and then refreshes the views. There are two render tiers, and the split is the whole reason the ~20 mutation sites each used to pick a different subset:
+
+- `renderDerived()` — the read-only views of `character` (skills, stats, HP, sidebars, potions, files, karma, BM). Nothing in them holds a caret, so it is always safe to run.
+- `renderEditors()` — `renderEditorForm()` and the weapons/inventory/skills/specials editors. These write `.value` into form fields, so running one while the user is typing in it resets the caret.
+
+`commitCharacter()` runs the derived tier only. Pass **`commitCharacter({ editors: true })`** when the change did *not* come from typing inside an editor — a button, a GM message, a character switch — i.e. when the form fields themselves need rewriting. `renderAll()` is both tiers, for load and character switch.
+
+`autoSaveChar()` (the 700ms debounce behind the delegated `input` listeners on `#tab-char`/`#tab-inventory`/`#tab-alchemy`) uses the derived tier for exactly this reason; it used to carry an inlined copy of that renderer list with a comment explaining why.
 
 ### Post-roll effect pattern
 Skills with side-effects after a roll use a flag set before `doRoll()` and checked in `handleResult()`:
@@ -536,7 +571,8 @@ Craft and Soigner rolls are **BM-affected** like any skill roll — only the **J
   - Numeric only: `oninput="this.value=this.value.replace(/[^0-9]/g,'')"`
   - Allows minus: `oninput="this.value=this.value.replace(/[^0-9-]/g,'').replace(/(?!^)-/g,'')"`
 - **No `display:none` for layout-shifting elements** — use `visibility:hidden/visible`
-- **Each app = 3 files** — logic in `.js`, styles in `.css`, structure in `.html`
+- **Each app = 3 files** — logic in `.js`, styles in `.css`, structure in `.html`. What both panels share goes in `js/aria-shared.js`, behind an `ARIA` hook if it differs between them — never a second copy.
+- **No inline `on*=` attributes in generated markup** — build the element with `el()` and pass a function. (`views/*.html` still has a few static ones; those are fine.)
 
 ---
 
@@ -549,7 +585,9 @@ card.className = 'float-roll-card'; // not ''
 ```
 
 ### Removing iframes from the DOM kills WebRTC streams
-Never use `parent.innerHTML = ''` on a container that holds camera iframes. The browser immediately terminates the WebRTC connection when an iframe is detached. Always do in-place DOM updates: find existing elements, update only what changed, append new ones, remove stale ones. See `renderPlayerCards()` and `renderCamerasTab()` for the pattern.
+Never use `parent.innerHTML = ''` on a container that holds camera iframes. The browser immediately terminates the WebRTC connection when an iframe is detached. **Use `reconcile()`** — it keys children by id, so `create` runs once and `update` runs on every later pass over the *same* node. `renderPlayerCards()` (GM) and `renderPresenceRail()` (player) go through it; `renderCamerasTab()` still manages its cells by hand. Pair it with `setFrameSrc()`: re-assigning an iframe's existing `src` reloads it and drops the connection just as surely as detaching it.
+
+`reconcile()` decides a node is dead when `node.parentNode !== container` — **not** `isConnected`. A container that is itself detached (a closed pane) has children that are all `!isConnected`, and treating those as dead appends a duplicate on every pass.
 
 ### dddice resize listener accumulation
 Store the handler reference and call `removeEventListener` before re-registering (done in `saveConfig()`).
@@ -575,12 +613,30 @@ Use the accessor helpers (`_activePlaylist`/`_playingPlaylist`/`_activeTracks`/`
 ### Monster/file grouping is not synced
 Monster and file groups (`monsterGroups`/`fileGroups` + the `monsterGroupAssign`/`fileGroupAssign` membership maps) live **only** in `aria-gm-monster-groups-{id}` / `aria-gm-file-groups-{id}` localStorage — the synced `monsters` / `campaign_files` Supabase tables use **explicit column lists** (no group column) and `loadFromSupabase` rebuilds the local objects from those columns. So a `groupId` stored *on the entity* would be wiped on reload; keeping grouping in its own key makes it durable same-device. Like music grouping, it is **not** in the DB, so a fresh device shows everything under `Tous` (the entities themselves are never lost). The membership map is keyed by entity id; deleting a monster/file prunes its key (`removeMonster`/`removeGmFile`), and deleting a group clears all keys pointing to it (members fall back to `Tous`). A stale `activeXGroupId` (group removed elsewhere) is reset to `null` at the top of `renderMonsters`/`renderGmFiles`.
 
-### innerHTML and user-supplied strings
-Always escape user-supplied content before injecting into `innerHTML`. Both `aria-gm.js` and `aria-player.js` define the same helpers:
-- `_escHtml(str)` — for text/attribute contexts.
-- `_escJs(str)` — for strings embedded in a single-quoted JS literal inside an inline handler; **always wrap it in `_escHtml` too** (`onclick="fn('${_escHtml(_escJs(v))}')"`), because the HTML parser decodes the attribute before the JS engine sees it.
+### Build DOM with `el()`, never by concatenating strings
 
-This is not just self-XSS: skill/weapon/character names travel to the **GM panel** via presence and roll payloads, potion recipes travel to **players** via `potion-grant`, and track names come from YouTube API responses — anyone with the Ably key can publish these. When building lists from remote strings, prefer `document.createElement` + `textContent` + `addEventListener` (see the GM roll-feed player pills). `aria-overlay.js` has its own `esc()` — every interpolated field there must go through it (on-stream XSS in OBS otherwise).
+**The panels have no `_escHtml` and no `_escJs`.** They were deleted along with the ~70 call sites that needed them. Data is remote-controlled — skill/weapon/character names arrive at the **GM panel** via presence and roll payloads, potion recipes reach **players** via `potion-grant`, track names come from YouTube API responses, and anyone holding the Ably key can publish any of it — so the rule is that data never becomes markup in the first place:
+
+```js
+el('button', { className: 'pc-btn', textContent: p.name, onclick: () => spotlight(charId) })
+```
+
+`textContent` cannot be XSSed and a function assigned to `onclick` is a reference, so an id never has to survive a trip through the HTML parser and then the JS parser. Four defensive layers disappeared with the string templates: `_escHtml`, `_escJs` (and the rule that its output must be nested inside `_escHtml`), the `CSS.escape` on selectors used to find those nodes again, and the `safeId` scrubbing that made ids selector-safe.
+
+The builders live in `aria-shared.js`:
+
+| helper | use |
+|---|---|
+| `el(tag, props, ...kids)` | build an element; `props` are assigned directly (`className`, `textContent`, `onclick`, `value`, `disabled`…), `style`/`dataset` take an object; falsy children are skipped, so `cond && el(...)` reads naturally |
+| `fill(node, ...kids)` | replace a node's children — the `innerHTML = ...` replacement, without the parse step |
+| `reconcile(container, items, create, update)` | keyed in-place update: `create` runs once per key, `update` on every pass, stale keys are removed |
+| `keyedNode(container, key)` | the element `reconcile` created for a key |
+| `clearKeyed(container)` | drop the children *and* forget the keys |
+| `setFrameSrc(frame, src)` | assign an iframe src only if it differs |
+
+`_isIdToken()` and `_finiteNum()` still exist and are still applied to presence data — but as **message validation** (a malformed id is a bad message) rather than as escaping. They are no longer load-bearing for injection.
+
+`aria-overlay.js` still builds strings and has its own `esc()` — every interpolated field there must go through it (on-stream XSS in OBS otherwise). It has not been converted to `el()`.
 
 ### VDO.ninja push iframe only works on HTTPS
 `getUserMedia` (camera capture) requires a secure context. The push iframe (`#vdo-push-frame`, `#vdo-gm-push-frame`) will silently do nothing when the app is served from `file://`. It works from the GitHub Pages URL.
