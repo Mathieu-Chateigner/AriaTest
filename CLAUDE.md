@@ -72,7 +72,16 @@ js/
 
 ### `aria-shared.js`
 
-Loaded before the panel script on both panel pages (`aria-supabase.js` → `aria-shared.js` → `aria-player.js`/`aria-gm.js`). It holds everything the two panels used to keep byte-identical copies of — 543 lines across 14 blocks, including the whole 247-line split-pane engine and the 82-line music transport.
+Loaded before the panel script on both panel pages (`aria-supabase.js` → `aria-shared.js` → `aria-player.js`/`aria-gm.js`). It holds everything the two panels would otherwise keep byte-identical copies of: the split-pane engine, the music transport, the DOM builder, the save-key gateway, the dddice connection, and two widget factories.
+
+**The two factories are the pattern to follow when a widget exists on both sides.** Each returns an object holding its own state; the panel creates one instance and the HTML calls its methods (`deck.draw()`, `notes.add()`).
+
+| factory | player instance | GM instance |
+|---|---|---|
+| `makeDeck({ prefix, persist, publish, fly, announce })` | `deck` — table deck, persisted and published | `gmDeck` — `prefix:'gm-'`, private, takes no hooks |
+| `makeNotes({ key, ids, sync, syncSoon, remove })` | `notes` — character-scoped | `gmNotes` — campaign-scoped |
+
+Both were previously written out twice (~180 and ~110 lines each), and both copies had drifted — the GM's `gmTogglePill` had lost the `if (drawing) return` guard, and its `gmMakePill` never refreshed the pill it had just created, which a stray `gmRefreshAllPills()` in an unrelated function compensated for. **If you find yourself prefixing a function with `gm`, make it a hook instead.**
 
 Only one panel script ever shares a page with it, so **a name declared in `aria-shared.js` must not also be declared in either panel** (top-level `let`/`const` in classic scripts share one global lexical environment; a duplicate is a SyntaxError that kills the file). Note that top-level `let`/`const` are *not* properties of `window` — they resolve by name from other scripts and from inline HTML handlers, but `window.ARIA` is `undefined`.
 
@@ -140,6 +149,12 @@ Both player and GM use a **save key** (UUID) to sync localStorage to Supabase, e
 
 **Sync architecture** — `js/aria-supabase.js` exposes shared helpers (`sbUpsert`, `sbDelete`, `sbSelect`, `sbInsert`, `runMigration`). Both panels use **per-entity granular sync** — separate debounced functions per data type — rather than one monolithic blob. `localStorage` is always the runtime source of truth; Supabase is only the persistence layer.
 
+**`ENT` is the single description of every table.** The camelCase-object ↔ snake_case-row mapping lives in `ENT` in `js/aria-supabase.js` and nowhere else. `toRow(entity, obj, parentId, extra)` / `fromRow(entity, row)` build rows and objects from it; `sbPut` / `sbPutAll` (which fills `position` from the array index) are the upsert wrappers.
+
+Each mapping used to be hand-written **four times per entity** — in `runMigration`, in the panel's `sync{X}`, again in `_syncAll{X}Data`, and once more reversed in `loadFromSupabase` — roughly thirty copies that drifted. **Adding a column means adding one line to `ENT`.** A field is `jsKey: 'column'`, or `jsKey: { col, to, from, def }` for a write coercion, a read coercion, or a fallback when the column is null (`def` is called if it is a function, so each object gets its own array/object). `entity.stamp` names the timestamp column — `updated_at` by default, `created_at`/`drawn_at`/`ts` for the append-only logs, `null` for tables with none.
+
+**Delete cascades are derived, not listed.** `childTables(parentCol)` returns every `ENT` table hanging off that FK, and `sbDeleteCascade(entity, parentCol, id)` deletes the parent plus all of them. `deleteCampaign()` used to spell out nine `sbDelete` calls and `deleteCharacter()` five; a new child entity is now covered the moment it is added to `ENT`.
+
 - Player: `debouncedSync()` for character data, `debouncedSyncState()` for HP/cards/tabs, `syncCharacterNote` / `deleteCharacterNote` for notes, `syncCharacterFile` / `deleteCharacterFile` for files.
 - GM: `syncCampaign`, `debouncedSyncMonsters`, `insertRoll` / `insertCardHistory` (append-only — `clearRolls()` / `clearCardHistory()` never touch the DB), `debouncedSyncPotions`, `debouncedSyncFiles`, `syncGMNote` / `deleteGMNoteFromDB`, `syncKnownPlayer` (called whenever the presence set changes), `syncMusicTrack` / `debouncedSyncMusic` / `deleteMusicTrackFromDB` (Supabase table `campaign_music`; field `youtube_id` maps to `youtubeId` in JS).
 - `runMigration` is a one-time runner that reads the old JSON blob from `saves` and populates the relational tables. It checks `player_migrated_at` / `gm_migrated_at` flags to skip if already done.
@@ -188,7 +203,9 @@ All campaign-scoped data uses keys suffixed with `currentCampaignId`:
 
 Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`, `filesKey()`, `musicKey()`, `monsterGroupsKey()`, `fileGroupsKey()`, `gmNotesKey()`, `knownPlayersKey()` return the scoped key for the active campaign. Always use these — never hardcode the bare key.
 
-**`_CAMPAIGN_KEY_PREFIXES` is the only enumeration of the scoped keys**, and every path that drops a campaign goes through `_dropCampaignKeys(id)`. `deleteCampaign()` used to re-type all ten by hand next to the constant that already listed them, and *neither* copy removed `aria-gm-camera-off-`, so it leaked on every delete. Adding a new campaign-scoped key means adding it to that array and nowhere else. `_CHAR_KEY_PREFIXES` / `_dropCharacterKeys(id)` are the player-side equivalent (same bug, same fix). (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
+**`CAMP_KEYS` names every campaign-scoped key, and `campKey(which, id)` is the only way to build one** (`id` defaults to the open campaign). `_CAMPAIGN_KEY_PREFIXES` — the list `_dropCampaignKeys(id)` walks — is `Object.values(CAMP_KEYS)`, so a key cannot be added to one and forgotten in the other. `CHAR_KEYS` / `charKey(which, id)` / `_dropCharacterKeys(id)` are the player-side equivalent. The named accessors above (`monstersKey()`, `hpKey()`, …) are thin wrappers over these.
+
+This replaced a prefix literal repeated at every call site plus a hand-typed list inside `deleteCampaign()`; neither copy knew about `aria-gm-camera-off-`, so it leaked on every delete. **Adding a scoped key means adding one line to `CAMP_KEYS` / `CHAR_KEYS` and nothing else.** (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
 
 `generateJoinCode()` produces the join code. If a campaign loaded from storage lacks one, it is generated and saved on `loadCampaignState()`.
 
@@ -281,7 +298,7 @@ A separate drag-and-drop editor opened in a new tab from the player or GM panel.
 
 Loaded at runtime via dynamic `import('https://esm.sh/dddice-js')` — no npm, no build.
 
-- **`ThreeDDice(canvas, apiKey)`** → `.start()` then `.connect(roomSlug)`
+- **`initDddiceSDK(onRollFinished)`** in `aria-shared.js` does the whole connection — import, theme fetch, dropdown fill, `new ThreeDDice(canvas, key)`, `.start()`, `.connect(slug)`, resize listener — and owns `dddiceSDK` / `dddiceAPI` / `dddiceResizeHandler`. The **`RollFinished` handler is the only per-panel part**, and is its sole argument; `teardownDddice()` is the matching disconnect. Each panel's `initDddice()` is now just that handler (plus the player's asset preload). Only the GM used to register the resize listener, so the player's dice rendered at a stale scale after a window resize.
 - A `<canvas id="dddice-canvas">` is positioned fixed/full-screen with `pointer-events:none` and high `z-index` in all three apps
 - `RollFinished` event clears the canvas after 1.5s
 - A 12s safety timer (`dddiceRollSafetyTimer`) forces fallback if the SDK stalls
@@ -501,13 +518,15 @@ The **Monstres** and **Fichiers** tabs each have a **group chip bar** (`#monster
 The Joueurs tab shows a live player card per connected player. Each card displays a VDO.ninja viewer iframe (`?view=STREAMID`) above the HP bar when the player has an active stream. `renderPlayerCards()` reconciles by `charId` — it never clears the grid — to preserve live camera iframes when the roster changes. When a player has no stream the wrapper is **hidden, not detached** (detaching kills the connection; blanking the src reloads the frame on the way back).
 
 ### Bonus/Malus bar (player)
-Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected). `doRoll` also adds the character's **karma** to every non-skipBM threshold — all live previews (skills, specials, stat cards, combat reactions, potion chance) must include `liveBM() + (character.karma ?? 0)` so the displayed % matches the rolled threshold.
+Persistent bar between topbar and content. Buttons: +10/+20/+30/−10/−20/−30 + custom ± + reset. The persistent `bonusMalus` applies to all BM-affected rolls (every `doRoll` with `skipBM=false`; the **Jet libre** free roll passes `skipBM=true` and is unaffected). `doRoll` also adds the character's **karma** to every non-skipBM threshold.
+
+**`rollThreshold(base, { bonus, skipBM })` is the one definition of a threshold.** `doRoll` rolls against it and every live preview (skills, specials, stat cards, combat reactions, potion chance) displays it, so the shown % *is* the rolled threshold. It was previously hand-written at nine call sites which had already drifted: the potion card floored at 0 while `doRoll` floored at 1 — a recipe could advertise `Succès 0%` and then roll against 1 — and the potion preview omitted the per-skill `bonus` the skill list included. **Never re-derive `base + liveBM() + karma` inline.**
 
 The bar also holds the **Jet caché** toggle (`hiddenRollMode`) — while armed, rolls publish to `aria-rolls-hidden` (GM only) instead of `aria-rolls`. Resets on character switch.
 
 **Temporary modifier (next N rolls)** — the `Prochains jets` control arms a one-off modifier (`bmNextValue`) that applies to the next `bmNextCount` BM-affected rolls then auto-expires. `bmNextActive()` returns the value while charges remain; `liveBM() = bonusMalus + bmNextActive()` is used for **all live percentage previews** (skills, specials, stat thresholds, combat reactions, potion chance). `doRoll` stamps the total applied modifier into `_appliedBM` (= `bonusMalus + tempBM`, karma excluded) so the roll payload's `bonusMalus` field, the float card, and the GM/overlay feed report what was actually applied; it then consumes one charge (decrement `bmNextCount`, clearing `bmNextValue` at 0). The armed state shows as a pill (`#bm-next-status`) with a ✕ to cancel (`clearBMNext`). All temp state resets on character switch. This is **player-side only** — no payload/protocol change.
 
-**Per-skill permanent modifier (#12)** — each skill/special carries an optional `bonus` (set via a `mod` input in the **Personnage** editor, next to the `%`). It is part of the character object (a JSON column on the `characters` table, so it round-trips cross-device — no migration). The modifier is **baked into `basePct`** at the roll call site (`doRoll(name, skill.pct + bonus)` for skills/specials/Soigner/parade/esquive), so the rolled threshold already includes it; `bonus` is therefore distinct from `bonusMalus`, the temp modifier, and `karma`. Live previews (`renderSkills`, `updateBMDisplay`, combat sidebar) add it; a `.skill-mod` badge marks non-zero values in the Compétences list. The GM player-details modal folds it in via `_pdmSkillPct(s)` (shows `pct+bonus` with a `+N` note). Because it is baked into the threshold, no Ably payload changes.
+**Per-skill permanent modifier (#12)** — each skill/special carries an optional `bonus` (set via a `mod` input in the **Personnage** editor, next to the `%`). It is part of the character object (a JSON column on the `characters` table, so it round-trips cross-device — no migration). The modifier is **baked into `basePct`** at the roll call site (`doRoll(name, skill.pct + bonus)` for skills/specials/Soigner/parade/esquive), so the rolled threshold already includes it; `bonus` is therefore distinct from `bonusMalus`, the temp modifier, and `karma`. Live previews pass it through as `rollThreshold(skill.pct, { bonus })`; a `.skill-mod` badge marks non-zero values in the Compétences list. The GM player-details modal folds it in via `_pdmSkillPct(s)` (shows `pct+bonus` with a `+N` note). Because it is baked into the threshold, no Ably payload changes.
 
 ### Player presence (GM — Joueurs tab)
 - The `players` Map is rebuilt from the `aria-presence` set on every change — no heartbeat, no sweep. `online` is membership in the set.
@@ -578,6 +597,10 @@ Craft and Soigner rolls are **BM-affected** like any skill roll — only the **J
 
 ## Known pitfalls
 
+### `.flipped` means "face showing" — in both stylesheets
+
+`.flip-face` carries the `rotateY(180deg)`, so a `.flip-wrap` at rest shows `.card-back-face` and adding `.flipped` animates round to the card. `aria-gm.css` used to put that rotation on `.card-back-face` instead, which inverted the meaning of `.flipped` between the two panels, and every reveal in `aria-gm.js` carried inverted logic to compensate (set `.flipped` with the transition off, then remove it). Both stylesheets now share the convention and `makeDeck`'s single `reveal()` drives both stages. If a card shows its back, fix the stylesheet, not the JS.
+
 ### `element.className = ''` strips base CSS classes
 Always reset to the base class string, not `''`:
 ```js
@@ -633,6 +656,7 @@ The builders live in `aria-shared.js`:
 | `keyedNode(container, key)` | the element `reconcile` created for a key |
 | `clearKeyed(container)` | drop the children *and* forget the keys |
 | `setFrameSrc(frame, src)` | assign an iframe src only if it differs |
+| `uid()` | id for a locally created record; falls back off `crypto.randomUUID` outside a secure context. **Never inline the `crypto.randomUUID ? … : …` expression** — it was pasted thirteen times across the two panels, nine of them in `aria-gm.js`, one of which sat below that file's own `_uid()` helper |
 
 `_isIdToken()` and `_finiteNum()` still exist and are still applied to presence data — but as **message validation** (a malformed id is a bad message) rather than as escaping. They are no longer load-bearing for injection.
 

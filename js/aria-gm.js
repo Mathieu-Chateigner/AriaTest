@@ -16,11 +16,8 @@ ARIA.configure({
 });
 
 let ablyInstance = null, ablyRolls = null, ablyCards = null, ablyDamage = null, ablyRollsHidden = null;
-let dddiceSDK = null;            // ThreeDDice SDK instance
-let dddiceAPI = null;            // { theme } once connected
 let pendingGMRoll = null;        // { name, threshold, atk } for GM rolls in progress
 let gmRollSafetyTimer = null;    // fallback timer in case RollFinished never fires
-let dddiceResizeHandler = null;  // stored so we can remove it before re-registering
 
 // Players, keyed by charId (stable UUID) -> presence data + { online }.
 //
@@ -125,87 +122,71 @@ let ablyMusic = null;
 const filesGrantedSessions = new Set();
 
 
+// Every row shape below comes from ENT in aria-supabase.js — see the note there.
+// A debounced "sync the whole list" is the same shape for monsters, potions, files
+// and music, so it is written once too.
+function _debouncedListSync(entity, listFn, positioned = false) {
+    let timer = null;
+    return () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            if (_supabaseReady() && currentCampaignId) sbPutAll(entity, listFn(), currentCampaignId, positioned);
+        }, 800);
+    };
+}
+
 // Upsert campaign metadata (name, join code, VDO room) to Supabase. Returns true if successful.
 async function syncCampaign(camp) {
     if (!_supabaseReady()) return false;
-    return await sbUpsert('campaigns', { id: camp.id, save_key: saveKey, name: camp.name, join_code: camp.joinCode || null, vdo_room: camp.vdoRoom || null, vdo_room_password: camp.vdoRoomPassword || null, aria_type: camp.ariaType || 'ancient', updated_at: _nowISO() });
+    return await sbPut(ENT.campaign, camp, saveKey);
 }
 
 // Upsert a single monster's stats and attacks to Supabase.
 async function syncMonster(m) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    await sbUpsert('monsters', { id: String(m.id), campaign_id: currentCampaignId, name: m.name, pv: m.pv, max_pv: m.maxPV, armor: m.armor || 0, stats: m.stats || null, attacks: m.attacks || null, updated_at: _nowISO() });
+    await sbPut(ENT.monster, m, currentCampaignId);
 }
-
-let _monstersTimer = null;
-// Debounced sync of all monsters for the current campaign.
-function debouncedSyncMonsters() {
-    clearTimeout(_monstersTimer);
-    _monstersTimer = setTimeout(() => { if (_supabaseReady() && currentCampaignId) Promise.all(monsters.map(m => syncMonster(m))); }, 800);
-}
+const debouncedSyncMonsters = _debouncedListSync(ENT.monster, () => monsters);
 
 // Insert a new roll entry into the campaign_rolls table.
 async function insertRoll(data) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    await sbInsert('campaign_rolls', { campaign_id: currentCampaignId, skill_name: data.skillName || '', threshold: data.threshold ?? null, roll: data.roll, success: !!data.success, char_name: data.char || data.playerId || '', bonus_malus: data.bonusMalus || 0, created_at: _nowISO() });
+    await sbInsert(ENT.roll.table, toRow(ENT.roll, data, currentCampaignId));
 }
 
 // Insert a new card draw entry into the campaign_card_history table.
 async function insertCardHistory(cardId) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    await sbInsert('campaign_card_history', { campaign_id: currentCampaignId, card_id: cardId, drawn_at: _nowISO() });
+    await sbInsert(ENT.cardDraw.table, toRow(ENT.cardDraw, { cardId }, currentCampaignId));
 }
 
 // Upsert a GM potion recipe to the campaign_potions table.
 async function syncPotion(p) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    await sbUpsert('campaign_potions', { id: p.id, campaign_id: currentCampaignId, name: p.name, description: p.desc || '', ingredients: p.ingredients || null, success_chance: p.successChance || 0, updated_at: _nowISO() });
+    await sbPut(ENT.potion, p, currentCampaignId);
 }
-
-let _potionsTimer = null;
-// Debounced sync of all GM potion recipes for the current campaign.
-function debouncedSyncPotions() {
-    clearTimeout(_potionsTimer);
-    _potionsTimer = setTimeout(() => { if (_supabaseReady() && currentCampaignId) Promise.all(gmPotions.map(p => syncPotion(p))); }, 800);
-}
+const debouncedSyncPotions = _debouncedListSync(ENT.potion, () => gmPotions);
 
 // Upsert a campaign file record (URL, grants) to Supabase.
 async function syncFile(f) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    await sbUpsert('campaign_files', { id: f.id, campaign_id: currentCampaignId, name: f.name, type: f.type || '', url: f.url || '', path: f.path || '', granted_to: f.grantedTo || [], updated_at: _nowISO() });
+    await sbPut(ENT.campaignFile, f, currentCampaignId);
 }
+const debouncedSyncFiles = _debouncedListSync(ENT.campaignFile, () => gmFiles);
 
-let _filesTimer = null;
-// Debounced sync of all campaign files.
-function debouncedSyncFiles() {
-    clearTimeout(_filesTimer);
-    _filesTimer = setTimeout(() => { if (_supabaseReady() && currentCampaignId) Promise.all(gmFiles.map(f => syncFile(f))); }, 800);
-}
-
-// Upsert a music track record to the campaign_music table.
+// Upsert a music track record. `position` is the track's index in the flattened
+// playlists — campaign_music has no playlist column (see _mergeMusicGrouping).
 async function syncMusicTrack(t) {
     if (!_supabaseReady() || !currentCampaignId) return;
     const pos = _allTracks().findIndex(x => x.id === t.id);
-    await sbUpsert('campaign_music', {
-        id: t.id, campaign_id: currentCampaignId, name: t.name,
-        type: t.type, url: t.url || null, youtube_id: t.youtubeId || null,
-        path: t.path || null, position: pos >= 0 ? pos : 0, updated_at: _nowISO(),
-    });
+    await sbPut(ENT.music, t, currentCampaignId, { position: Math.max(0, pos) });
 }
-
-let _musicSyncTimer = null;
-// Debounced sync of all music tracks for the current campaign.
-function debouncedSyncMusic() {
-    clearTimeout(_musicSyncTimer);
-    _musicSyncTimer = setTimeout(() => {
-        if (_supabaseReady() && currentCampaignId) Promise.all(_allTracks().map(t => syncMusicTrack(t)));
-    }, 800);
-}
+const debouncedSyncMusic = _debouncedListSync(ENT.music, _allTracks, true);
 
 // Delete a music track from the campaign_music table by ID.
 async function deleteMusicTrackFromDB(id) {
     if (!_supabaseReady()) return;
-    await sbDelete('campaign_music', 'id=eq.' + encodeURIComponent(id));
+    await sbDelete(ENT.music.table, 'id=eq.' + encodeURIComponent(id));
 }
 
 // Reconcile flat DB tracks into the existing local playlist grouping for a campaign.
@@ -231,21 +212,21 @@ function _mergeMusicGrouping(lsKey, dbTracks) {
     return playlists;
 }
 
-// Upsert a GM note to the campaign_notes table.
-async function syncGMNote(note) {
+// Upsert a GM note to the campaign_notes table. The notes engine owns the list and
+// passes the note's position in it.
+async function syncGMNote(note, position = 0) {
     if (!_supabaseReady() || !currentCampaignId) return;
-    const pos = gmNotesList.findIndex(n => n.id === note.id);
-    await sbUpsert('campaign_notes', { id: note.id, campaign_id: currentCampaignId, name: note.name || 'Note', content: note.content || '', position: pos >= 0 ? pos : 0, updated_at: _nowISO() });
+    await sbPut(ENT.campaignNote, note, currentCampaignId, { position: Math.max(0, position) });
 }
 
 let _gmNoteTimer = null;
 // Debounced sync of a single GM note.
-function debouncedSyncGMNote(note) { clearTimeout(_gmNoteTimer); _gmNoteTimer = setTimeout(() => syncGMNote(note), 800); }
+function debouncedSyncGMNote(note, position = 0) { clearTimeout(_gmNoteTimer); _gmNoteTimer = setTimeout(() => syncGMNote(note, position), 800); }
 
 // Delete a GM note from Supabase by ID.
 async function deleteGMNoteFromDB(id) {
     if (!_supabaseReady()) return;
-    await sbDelete('campaign_notes', 'id=eq.' + encodeURIComponent(id));
+    await sbDelete(ENT.campaignNote.table, 'id=eq.' + encodeURIComponent(id));
 }
 
 // Upsert a known player record for this campaign to Supabase.
@@ -256,57 +237,35 @@ async function syncKnownPlayer(charId, data) {
         const ok = await syncCampaign(camp);
         if (!ok) return; // campaign FK must exist first; skip to avoid cascade error
     }
-    await sbUpsert('campaign_known_players', { id: charId + ':' + currentCampaignId, campaign_id: currentCampaignId, char_id: charId, data, updated_at: _nowISO() }, 'campaign_id,char_id');
+    await sbPutKnownPlayer(charId, data, currentCampaignId);
 }
 
-// Full sync of ALL GM data across every campaign to Supabase.
+// Read a campaign-scoped JSON key, tolerating absent or corrupt values.
+function _campJSON(which, cid, fallback) {
+    const raw = localStorage.getItem(campKey(which, cid));
+    if (!raw) return fallback;
+    try { return JSON.parse(raw) ?? fallback; } catch (_) { return fallback; }
+}
+
+// Full sync of ALL GM data across every campaign to Supabase. Reads localStorage
+// rather than the in-memory state because it covers every campaign, not just the
+// open one; the row shapes are the same ENT descriptors the per-entity syncs use.
 async function _syncAllGMData() {
     if (!_supabaseReady()) return;
     await sbUpsert('saves', { save_key: saveKey, type: 'gm' });
     const campaigns = getCampaigns();
     await Promise.all(campaigns.map(c => syncCampaign(c)));
-    const now = _nowISO();
-    for (const c of campaigns) {
-        const cid = c.id;
-        const mons = JSON.parse(localStorage.getItem('aria-gm-monsters-' + cid) || '[]');
-        await Promise.all(mons.map(m => sbUpsert('monsters', {
-            id: String(m.id), campaign_id: cid, name: m.name, pv: m.pv, max_pv: m.maxPV,
-            armor: m.armor || 0, stats: m.stats || null, attacks: m.attacks || null, updated_at: now,
-        })));
-        const pots = JSON.parse(localStorage.getItem('aria-gm-potions-' + cid) || '[]');
-        await Promise.all(pots.map(p => sbUpsert('campaign_potions', {
-            id: p.id, campaign_id: cid, name: p.name, description: p.desc || '',
-            ingredients: p.ingredients || null, success_chance: p.successChance || 0, updated_at: now,
-        })));
-        const files = JSON.parse(localStorage.getItem('aria-gm-files-' + cid) || '[]');
-        await Promise.all(files.map(f => sbUpsert('campaign_files', {
-            id: f.id, campaign_id: cid, name: f.name, type: f.type || '',
-            url: f.url || '', path: f.path || '', granted_to: f.grantedTo || [], updated_at: now,
-        })));
-        // Music is stored as playlists locally but synced flat (campaign_music has no
-        // playlist column); flatten across playlists, preserving order.
-        const musicPlaylists = _normalizeMusicData(localStorage.getItem('aria-gm-music-' + cid));
-        const musicTracks = musicPlaylists.flatMap(p => p.tracks);
-        await Promise.all(musicTracks.map((t, i) => sbUpsert('campaign_music', {
-            id: t.id, campaign_id: cid, name: t.name, type: t.type,
-            url: t.url || null, youtube_id: t.youtubeId || null, path: t.path || null,
-            position: i, updated_at: now,
-        })));
-        const rawNotes = localStorage.getItem('aria-gm-notes-' + cid);
-        let notes = [];
-        if (rawNotes) { try { const p = JSON.parse(rawNotes); notes = Array.isArray(p) ? p : []; } catch(e) {} }
-        await Promise.all(notes.map((n, i) => sbUpsert('campaign_notes', {
-            id: n.id, campaign_id: cid, name: n.name || 'Note',
-            content: n.content || '', position: i, updated_at: now,
-        })));
-        const kp = JSON.parse(localStorage.getItem('aria-gm-known-players-' + cid) || '{}');
-        await Promise.all(Object.values(kp).map(p => {
-            if (!p?.charId) return Promise.resolve();
-            return sbUpsert('campaign_known_players', {
-                id: p.charId + ':' + cid, campaign_id: cid, char_id: p.charId,
-                data: p, updated_at: now,
-            }, 'campaign_id,char_id');
-        }));
+    for (const { id: cid } of campaigns) {
+        await sbPutAll(ENT.monster,      _campJSON('monsters', cid, []), cid);
+        await sbPutAll(ENT.potion,       _campJSON('potions',  cid, []), cid);
+        await sbPutAll(ENT.campaignFile, _campJSON('files',    cid, []), cid);
+        // Music is grouped into playlists locally but stored flat — campaign_music
+        // has no playlist column, so position is the index across all playlists.
+        await sbPutAll(ENT.music, _normalizeMusicData(localStorage.getItem(campKey('music', cid))).flatMap(p => p.tracks), cid, true);
+        const notes = _campJSON('notes', cid, []);
+        await sbPutAll(ENT.campaignNote, Array.isArray(notes) ? notes : [], cid, true);
+        const kp = _campJSON('knownPlayers', cid, {});
+        await Promise.all(Object.values(kp).filter(p => p?.charId).map(p => sbPutKnownPlayer(p.charId, p, cid)));
     }
 }
 
@@ -321,9 +280,9 @@ async function loadFromSupabase() {
     if (!_supabaseReady()) return false;
     await runMigration(saveKey, 'gm');
     try {
-        const camps = await sbSelect('campaigns', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=id,name,join_code,vdo_room,vdo_room_password,aria_type');
+        const camps = await sbSelect(ENT.campaign.table, 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=*');
         if (!camps.length) return true;
-        const campaigns = camps.map(c => ({ id: c.id, name: c.name, joinCode: c.join_code, vdoRoom: c.vdo_room || '', vdoRoomPassword: c.vdo_room_password || '', ariaType: c.aria_type || 'ancient' }));
+        const campaigns = camps.map(c => fromRow(ENT.campaign, c));
         localStorage.setItem('aria-gm-campaigns', JSON.stringify(campaigns));
         // Campaigns load concurrently, not one after another: a sequential loop cost
         // one round-trip PER CAMPAIGN before the app was usable. Each iteration writes
@@ -332,34 +291,53 @@ async function loadFromSupabase() {
         // finish inside the players' 12s grace period or a refresh restarted every
         // camera. Presence removed that constraint; the speed is still worth having.)
         await Promise.all(campaigns.map(async c => {
+            const scope = 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*';
+            const byPos = scope + '&order=position.asc';
             const [mons, pots, files, kp, notes, music] = await Promise.all([
-                sbSelect('monsters', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
-                sbSelect('campaign_potions', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
-                sbSelect('campaign_files', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
-                sbSelect('campaign_known_players', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*'),
-                sbSelect('campaign_notes', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*&order=position.asc'),
-                sbSelect('campaign_music', 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*&order=position.asc'),
+                sbSelect(ENT.monster.table, scope),
+                sbSelect(ENT.potion.table, scope),
+                sbSelect(ENT.campaignFile.table, scope),
+                sbSelect(ENT.knownPlayer.table, scope),
+                sbSelect(ENT.campaignNote.table, byPos),
+                sbSelect(ENT.music.table, byPos),
             ]);
-            localStorage.setItem('aria-gm-monsters-' + c.id, JSON.stringify(mons.map(m => ({ id: m.id, name: m.name, pv: m.pv, maxPV: m.max_pv, armor: m.armor || 0, stats: m.stats || {}, attacks: m.attacks || [] }))));
-            localStorage.setItem('aria-gm-potions-' + c.id, JSON.stringify(pots.map(p => ({ id: p.id, name: p.name, desc: p.description, ingredients: p.ingredients, successChance: p.success_chance }))));
-            localStorage.setItem('aria-gm-files-' + c.id, JSON.stringify(files.map(f => ({ id: f.id, name: f.name, type: f.type, url: f.url, path: f.path, grantedTo: f.granted_to || [] }))));
-            const obj = {};
-            kp.forEach(row => { if (row.char_id) obj[row.char_id] = row.data; });
-            localStorage.setItem('aria-gm-known-players-' + c.id, JSON.stringify(obj));
-            localStorage.setItem('aria-gm-notes-' + c.id, JSON.stringify(notes.map(n => ({ id: n.id, name: n.name, content: n.content }))));
-            const dbTracks = music.map(t => ({ id: t.id, name: t.name, type: t.type, url: t.url, youtubeId: t.youtube_id, path: t.path }));
-            localStorage.setItem('aria-gm-music-' + c.id, JSON.stringify(_mergeMusicGrouping('aria-gm-music-' + c.id, dbTracks)));
+            const store = (which, value) => localStorage.setItem(campKey(which, c.id), JSON.stringify(value));
+            store('monsters', mons.map(m => fromRow(ENT.monster, m)));
+            store('potions',  pots.map(p => fromRow(ENT.potion, p)));
+            store('files',    files.map(f => fromRow(ENT.campaignFile, f)));
+            store('notes',    notes.map(n => fromRow(ENT.campaignNote, n)));
+            const known = {};
+            kp.forEach(row => { if (row.char_id) known[row.char_id] = row.data; });
+            store('knownPlayers', known);
+            store('music', _mergeMusicGrouping(campKey('music', c.id), music.map(t => fromRow(ENT.music, t))));
         }));
         return true;
     } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
 }
 
 
-// Per-campaign localStorage key prefixes. As on the player side, this list is the
-// ONLY enumeration of them — every path that drops a campaign routes through
-// _dropCampaignKeys(). deleteCampaign used to re-type all ten by hand, and neither
-// copy removed 'aria-gm-camera-off-', which therefore leaked on every delete.
-const _CAMPAIGN_KEY_PREFIXES = ['aria-gm-monsters-', 'aria-gm-rolls-', 'aria-gm-card-history-', 'aria-gm-potions-', 'aria-gm-known-players-', 'aria-gm-files-', 'aria-gm-notes-', 'aria-gm-music-', 'aria-gm-monster-groups-', 'aria-gm-file-groups-', 'aria-gm-camera-off-'];
+// Every per-campaign localStorage key, named once — the GM-side twin of CHAR_KEYS.
+// campKey(which, id) is the only way to build one and _CAMPAIGN_KEY_PREFIXES, the
+// list every deletion path walks, is derived from the same table. deleteCampaign
+// used to re-type all ten by hand next to a constant that already listed them, and
+// neither copy knew about 'aria-gm-camera-off-', so it leaked on every delete.
+const CAMP_KEYS = {
+    monsters:      'aria-gm-monsters-',
+    rolls:         'aria-gm-rolls-',
+    cardHist:      'aria-gm-card-history-',
+    potions:       'aria-gm-potions-',
+    knownPlayers:  'aria-gm-known-players-',
+    files:         'aria-gm-files-',
+    notes:         'aria-gm-notes-',
+    music:         'aria-gm-music-',
+    monsterGroups: 'aria-gm-monster-groups-',
+    fileGroups:    'aria-gm-file-groups-',
+    camera:        'aria-gm-camera-off-',
+};
+const _CAMPAIGN_KEY_PREFIXES = Object.values(CAMP_KEYS);
+
+// Storage key for one campaign's slice of `which`; defaults to the open campaign.
+function campKey(which, id = currentCampaignId) { return CAMP_KEYS[which] + id; }
 
 // Remove every scoped key belonging to one campaign.
 function _dropCampaignKeys(id) {
@@ -386,25 +364,25 @@ function generateJoinCode() {
 }
 
 // Return the campaign-scoped localStorage key for monsters.
-function monstersKey()      { return 'aria-gm-monsters-'      + currentCampaignId; }
+function monstersKey()      { return campKey('monsters'); }
 // Return the campaign-scoped localStorage key for rolls.
-function rollsKey()         { return 'aria-gm-rolls-'          + currentCampaignId; }
+function rollsKey()         { return campKey('rolls'); }
 // Return the campaign-scoped localStorage key for card history.
-function cardHistKey()      { return 'aria-gm-card-history-'   + currentCampaignId; }
+function cardHistKey()      { return campKey('cardHist'); }
 // Return the campaign-scoped localStorage key for potion recipes.
-function potionsKey()       { return 'aria-gm-potions-'        + currentCampaignId; }
+function potionsKey()       { return campKey('potions'); }
 // Return the campaign-scoped localStorage key for known players.
-function knownPlayersKey()  { return 'aria-gm-known-players-'  + currentCampaignId; }
+function knownPlayersKey()  { return campKey('knownPlayers'); }
 // Return the campaign-scoped localStorage key for files.
-function filesKey()         { return 'aria-gm-files-'          + currentCampaignId; }
+function filesKey()         { return campKey('files'); }
 // Return the campaign-scoped localStorage key for monster groups.
-function monsterGroupsKey() { return 'aria-gm-monster-groups-' + currentCampaignId; }
+function monsterGroupsKey() { return campKey('monsterGroups'); }
 // Return the campaign-scoped localStorage key for file groups.
-function fileGroupsKey()    { return 'aria-gm-file-groups-'    + currentCampaignId; }
+function fileGroupsKey()    { return campKey('fileGroups'); }
 // Return the campaign-scoped localStorage key for GM notes.
-function gmNotesKey()       { return 'aria-gm-notes-'          + currentCampaignId; }
+function gmNotesKey()       { return campKey('notes'); }
 // Return the campaign-scoped localStorage key for the music playlist.
-function musicKey()         { return 'aria-gm-music-'          + currentCampaignId; }
+function musicKey()         { return campKey('music'); }
 
 // Persist the players Map to localStorage as a plain object.
 function saveKnownPlayers() {
@@ -425,11 +403,11 @@ function migrateGMIfNeeded() {
     const oldRolls    = localStorage.getItem('aria-gm-rolls');
     const oldCards    = localStorage.getItem('aria-gm-card-history');
     if (!oldMonsters && !oldRolls && !oldCards) return;
-    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const id = uid();
     saveCampaigns([{ id, name: 'Campagne 1', joinCode: generateJoinCode() }]);
-    if (oldMonsters) localStorage.setItem('aria-gm-monsters-' + id, oldMonsters);
-    if (oldRolls)    localStorage.setItem('aria-gm-rolls-' + id, oldRolls);
-    if (oldCards)    localStorage.setItem('aria-gm-card-history-' + id, oldCards);
+    if (oldMonsters) localStorage.setItem(campKey('monsters', id), oldMonsters);
+    if (oldRolls)    localStorage.setItem(campKey('rolls', id), oldRolls);
+    if (oldCards)    localStorage.setItem(campKey('cardHist', id), oldCards);
 }
 
 // Load a campaign by ID into module state, initializing all scoped data.
@@ -555,20 +533,14 @@ function deleteCampaign(id) {
     // Delete uploaded objects from Supabase Storage first (the DB rows hold the
     // only record of their paths — removing rows first would orphan the files).
     try {
-        const files = JSON.parse(localStorage.getItem('aria-gm-files-' + id) || '[]');
+        const files = JSON.parse(localStorage.getItem(campKey('files', id)) || '[]');
         files.forEach(f => { if (f.path) deleteFileFromStorage(f.path); });
-        const tracks = _normalizeMusicData(localStorage.getItem('aria-gm-music-' + id)).flatMap(p => p.tracks);
+        const tracks = _normalizeMusicData(localStorage.getItem(campKey('music', id))).flatMap(p => p.tracks);
         tracks.forEach(t => { if (t.type === 'file' && t.path) deleteMusicFileFromStorage(t.path); });
     } catch(_) {}
-    sbDelete('campaigns',                'id=eq.'          + encodeURIComponent(id));
-    sbDelete('monsters',                 'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_potions',         'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_files',           'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_music',           'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_notes',           'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_known_players',   'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_rolls',           'campaign_id=eq.' + encodeURIComponent(id));
-    sbDelete('campaign_card_history',    'campaign_id=eq.' + encodeURIComponent(id));
+    // The child tables come from ENT, so adding a campaign-scoped entity cannot
+    // leave rows behind here. This used to be nine hand-written sbDelete calls.
+    sbDeleteCascade(ENT.campaign, 'campaign_id', id);
     const campaigns = getCampaigns().filter(c => c.id !== id);
     saveCampaigns(campaigns);
     _dropCampaignKeys(id);
@@ -586,7 +558,7 @@ function createCampaign() {
 function confirmCreateCampaign() {
     const name = document.getElementById('new-campaign-name').value.trim() || 'Nouvelle campagne';
     const ariaType = document.querySelector('input[name="new-campaign-type"]:checked')?.value || 'ancient';
-    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const id = uid();
     const campaigns = getCampaigns();
     campaigns.push({ id, name, joinCode: generateJoinCode(), ariaType });
     saveCampaigns(campaigns);
@@ -691,7 +663,7 @@ function initApp() {
     renderGMPotions();
     renderGmFiles();
     renderMusicTab();
-    loadGMNotes();
+    gmNotes.load();
     initGmDeck();
     renderTabLayout(); // apply the restored multi-pane layout
     loadConfigInputs();
@@ -812,57 +784,27 @@ function copyOverlayUrl() {
     });
 }
 // Initialize the dddice SDK for GM rolls: fetch themes, create renderer, connect to room.
-async function initDddice() {
-    const slug = extractRoomSlug(config.dddiceRoom);
-    if (!config.dddiceKey || !slug) return;
-    try {
-        const { ThreeDDice, ThreeDDiceRollEvent } = await import('https://esm.sh/dddice-js');
-
-        // Fetch themes for the dropdown
-        const h = { 'Authorization': `Bearer ${config.dddiceKey}`, 'Accept': 'application/json' };
-        const boxRes = await fetch('https://dddice.com/api/1.0/dice-box', { headers: h });
-        if (!boxRes.ok) throw new Error(`Dice box HTTP ${boxRes.status}`);
-        const themes = (await boxRes.json()).data || [];
-        if (!themes.length) throw new Error('Aucun thème.');
-
-        const sel = document.getElementById('cfg-dddice-theme');
-        sel.innerHTML = '';
-        themes.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.name ? `${t.name} (${t.id})` : t.id; sel.appendChild(o); });
-        sel.disabled = false;
-        sel.value = config.dddiceTheme && themes.find(t => t.id === config.dddiceTheme) ? config.dddiceTheme : themes[0].id;
-
-        const canvas = document.getElementById('dddice-canvas');
-        dddiceSDK = new ThreeDDice(canvas, config.dddiceKey);
-        dddiceSDK.start();
-        await dddiceSDK.connect(slug);
-
-        // RollFinished fires for both incoming player rolls and GM rolls initiated locally.
-        // Only act on it when a GM roll is pending.
-        dddiceSDK.on(ThreeDDiceRollEvent.RollFinished, (roll) => {
-            setTimeout(() => dddiceSDK?.clear(), 1500);
-            if (!pendingGMRoll) return;
-            // Another participant's dice landing mid-animation must not be consumed
-            // as the GM's result (only enforced when both UUIDs are known).
-            const finishedUuid = _ddRollUuid(roll);
-            if (pendingGMRoll.uuid && finishedUuid && finishedUuid !== pendingGMRoll.uuid) return;
-            clearTimeout(gmRollSafetyTimer);
-            const { name, threshold, atk } = pendingGMRoll;
-            pendingGMRoll = null;
-            const total = (roll.total_value ?? 0) === 0 ? 100 : (roll.total_value ?? 0);
-            const success = total <= threshold;
-            const dmgResult = (success && atk?.dmg?.trim()) ? rollDiceFormula(atk.dmg) : null;
-            showGMRollResult(name, threshold, total, success, dmgResult);
-        });
-
-        // Keep WebGL viewport in sync with window size
-        if (dddiceResizeHandler) window.removeEventListener('resize', dddiceResizeHandler);
-        dddiceResizeHandler = () => dddiceSDK?.resize();
-        window.addEventListener('resize', dddiceResizeHandler);
-
-        dddiceAPI = { theme: sel.value };
-        setDddiceStatus(true, themes.find(t => t.id === sel.value)?.name || sel.value);
-        sel.onchange = () => { if (dddiceAPI) dddiceAPI.theme = sel.value; config.dddiceTheme = sel.value; localStorage.setItem('aria-config', JSON.stringify(config)); };
-    } catch (e) { console.error('dddice:', e); setDddiceStatus(false, e.message); dddiceSDK = null; dddiceAPI = null; }
+// Connect to dddice and resolve finished rolls against the GM's pending roll. The
+// connection itself is initDddiceSDK() in aria-shared.js.
+//
+// RollFinished fires for incoming player rolls as well as the GM's own, so the
+// canvas is always cleared but only a pending GM roll is consumed.
+function initDddice() {
+    return initDddiceSDK(roll => {
+        setTimeout(() => dddiceSDK?.clear(), 1500);
+        if (!pendingGMRoll) return;
+        // Another participant's dice landing mid-animation must not be taken as the
+        // GM's result (only enforced when both UUIDs are known).
+        const finishedUuid = _ddRollUuid(roll);
+        if (pendingGMRoll.uuid && finishedUuid && finishedUuid !== pendingGMRoll.uuid) return;
+        clearTimeout(gmRollSafetyTimer);
+        const { name, threshold, atk } = pendingGMRoll;
+        pendingGMRoll = null;
+        const total = (roll.total_value ?? 0) === 0 ? 100 : (roll.total_value ?? 0);
+        const success = total <= threshold;
+        const dmgResult = (success && atk?.dmg?.trim()) ? rollDiceFormula(atk.dmg) : null;
+        showGMRollResult(name, threshold, total, success, dmgResult);
+    });
 }
 
 // Initialize Ably channels and subscribe to all game events (rolls, cards, presence).
@@ -1029,7 +971,7 @@ function gmDerivedStreamId() {
 function gmAdvertisedStreamId() {
     return (gmCameraOff || !currentVdoRoom) ? '' : gmDerivedStreamId();
 }
-function gmCameraOffKey() { return 'aria-gm-camera-off-' + currentCampaignId; }
+function gmCameraOffKey() { return campKey('camera'); }
 // Cut / restore the GM camera. Off ⇒ push iframe to about:blank (webcam released),
 // preview dropped, and an immediate gm-presence so players drop the MJ tile now
 // rather than on the next 8s tick.
@@ -1542,7 +1484,7 @@ function addMonster() {
     const added = [];
     for (let n = 0; n < count; n++) {
         const label = count > 1 ? ` ${n + 1}` : '';
-        const monster = { id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2), name: name + label, pv, maxPV: pv, armor, stats, attacks: [...newMonsterAttacks.map(a => ({ ...a }))] };
+        const monster = { id: uid(), name: name + label, pv, maxPV: pv, armor, stats, attacks: [...newMonsterAttacks.map(a => ({ ...a }))] };
         monsters.push(monster);
         added.push(monster.id);
     }
@@ -1673,7 +1615,6 @@ function onAttackSelectChange() {
 // separate from the synced monsters / campaign_files tables (no schema change).
 // See the comment on the state declarations near the top of this file.
 
-function _uid() { return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2); }
 
 // Load monster groups + membership from localStorage into module state.
 function loadMonsterGroups() {
@@ -1776,7 +1717,7 @@ function _renderGroupBar(type) {
 function addMonsterGroup() {
     const name = prompt('Nom du nouveau groupe :', 'Groupe ' + (monsterGroups.length + 1));
     if (name === null) return;
-    const g = { id: _uid(), name: name.trim() || ('Groupe ' + (monsterGroups.length + 1)) };
+    const g = { id: uid(), name: name.trim() || ('Groupe ' + (monsterGroups.length + 1)) };
     monsterGroups.push(g);
     activeMonsterGroupId = g.id;
     saveMonsterGroups();
@@ -1808,7 +1749,7 @@ function assignMonsterToGroup(mId, groupId) {
 function addFileGroup() {
     const name = prompt('Nom du nouveau groupe :', 'Groupe ' + (fileGroups.length + 1));
     if (name === null) return;
-    const g = { id: _uid(), name: name.trim() || ('Groupe ' + (fileGroups.length + 1)) };
+    const g = { id: uid(), name: name.trim() || ('Groupe ' + (fileGroups.length + 1)) };
     fileGroups.push(g);
     activeFileGroupId = g.id;
     saveFileGroups();
@@ -2358,10 +2299,9 @@ function saveConfig() {
         const camp = campaigns.find(c => c.id === currentCampaignId);
         if (camp) { camp.vdoRoom = newVdoRoom; camp.vdoRoomPassword = newVdoRoomPassword; saveCampaigns(campaigns); }
     }
-    if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch (_) {} dddiceSDK = null; }
-    if (dddiceResizeHandler) { window.removeEventListener('resize', dddiceResizeHandler); dddiceResizeHandler = null; }
+    teardownDddice();
     clearTimeout(gmRollSafetyTimer);
-    pendingGMRoll = null; dddiceAPI = null;
+    pendingGMRoll = null;
     // Close the old Ably connection before reinit — nulling the refs without closing
     // leaves the old WebSocket subscribed, duplicating every incoming roll/presence.
     if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
@@ -2413,22 +2353,19 @@ async function handlePlayerCard(data) {
     localStorage.setItem(cardHistKey(), JSON.stringify(cardHistory));
     insertCardHistory(data.cardId);
     renderCardHistory();
+    // `.flipped` = face showing, same as the player panel (see aria-gm.css): show
+    // the back, then flip. This used to be written inverted to match a stylesheet
+    // whose rotation sat on the other face.
     const flipWrap = document.getElementById('flip-wrap');
-    const flipInner = flipWrap.querySelector('.flip-inner');
-    // Reset state
     flipWrap.classList.add('hidden');
     flipWrap.classList.remove('flipped');
     document.getElementById('drawn-card').classList.remove('ready');
     renderCardContent(card);
     document.getElementById('drawn-card').classList.add('ready');
-    // Show back face instantly (no animation), then flip to reveal front
-    flipInner.style.transition = 'none';
-    flipWrap.classList.add('flipped');
     flipWrap.classList.remove('hidden');
     flipWrap.getBoundingClientRect();
-    flipInner.style.transition = '';
-    await delay(400);
-    flipWrap.classList.remove('flipped');
+    await delay(30);
+    flipWrap.classList.add('flipped');
 }
 // Handle a player deck reshuffle: hide the card display and update the info label.
 function handlePlayerReshuffle() {
@@ -2441,180 +2378,14 @@ function handlePlayerReshuffle() {
 // ═══════════════════════════════════════════
 //  GM PRIVATE DECK
 // ═══════════════════════════════════════════
-let gmCardDeck = [];
-let gmCardDrawn = new Set();
-let gmCardExcluded = new Set();
-let gmLastCardId = null;
-let gmCardDrawing = false;
-let gmCardStatusTimer = null;
+// The engine is makeDeck() in aria-shared.js. The GM's deck is private: nothing is
+// persisted and nothing is published, so it takes none of the hooks.
+const gmDeck = makeDeck({ prefix: 'gm-' });
 
-// Initialize the GM private deck to a fresh shuffled state.
+// Reset the GM private deck to a fresh shuffled state and rebuild its tracker.
 function initGmDeck() {
-    gmCardDeck = buildDeck();
-    gmCardDrawn = new Set();
-    gmCardExcluded = new Set();
-    gmLastCardId = null;
-    gmCardDrawing = false;
-    gmBuildTracker();
-    gmUpdateDeckCount();
-}
-
-// Build the GM card tracker grid of suit rows and rank pills.
-function gmBuildTracker() {
-    const container = document.getElementById('gm-tracker-suits');
-    if (!container) return;
-    container.innerHTML = '';
-    for (const suit of SUITS) {
-        const row = document.createElement('div'); row.className = 'suit-row-t';
-        const sym = document.createElement('span'); sym.className = `suit-sym ${suit.cls}`; sym.textContent = suit.sym;
-        row.appendChild(sym);
-        const pills = document.createElement('div'); pills.className = 'rank-pills';
-        for (const rank of RANKS) { pills.appendChild(gmMakePill(`${rank}-${suit.name}`, rank, suit.pillCls)); }
-        row.appendChild(pills); container.appendChild(row);
-    }
-    const jRow = document.createElement('div'); jRow.className = 'suit-row-t';
-    const jSym = document.createElement('span'); jSym.className = 'suit-sym c-purple'; jSym.textContent = '★';
-    jRow.appendChild(jSym);
-    const jPills = document.createElement('div'); jPills.className = 'rank-pills';
-    jPills.appendChild(gmMakePill('joker-red', 'R★', 'is-joker'));
-    jPills.appendChild(gmMakePill('joker-black', 'N★', 'is-joker'));
-    jRow.appendChild(jPills); container.appendChild(jRow);
-}
-
-// Create a rank pill element for the GM card tracker.
-function gmMakePill(id, label, extraCls) {
-    const p = document.createElement('span');
-    p.className = `rank-pill${extraCls ? ' ' + extraCls : ''}`;
-    p.id = `gm-pill-${id}`;
-    p.textContent = label;
-    p.onclick = () => gmTogglePill(id);
-    return p;
-}
-
-// Update a GM tracker pill's drawn/excluded visual state.
-function gmRefreshPill(p, id) {
-    p.classList.toggle('drawn', gmCardDrawn.has(id));
-    p.classList.toggle('excluded', gmCardExcluded.has(id));
-}
-
-// Refresh all GM tracker pills to match the current deck state.
-function gmRefreshAllPills() {
-    ALL_CARDS.forEach(c => { const p = document.getElementById(`gm-pill-${c.id}`); if (p) gmRefreshPill(p, c.id); });
-}
-
-// Cycle a GM tracker card's state: normal → excluded → returned to deck.
-function gmTogglePill(id) {
-    const card = cardById(id);
-    if (!card) return;
-    if (gmCardExcluded.has(id)) { gmCardExcluded.delete(id); gmCardDeck.splice(Math.floor(Math.random() * (gmCardDeck.length + 1)), 0, card); gmUpdateDeckCount(); }
-    else if (gmCardDrawn.has(id)) { gmCardDrawn.delete(id); gmCardDeck.splice(Math.floor(Math.random() * (gmCardDeck.length + 1)), 0, card); gmUpdateDeckCount(); }
-    else { gmCardExcluded.add(id); const idx = gmCardDeck.findIndex(c => c.id === id); if (idx !== -1) { gmCardDeck.splice(idx, 1); gmUpdateDeckCount(); } }
-    const p = document.getElementById(`gm-pill-${id}`); if (p) gmRefreshPill(p, id);
-    gmUpdateClearBtn();
-}
-
-// Remove all GM deck exclusions and put excluded cards back.
-function gmClearExclusions() { if (gmCardDrawing) return; gmCardExcluded.forEach(id => { const c = cardById(id); if (c) gmCardDeck.splice(Math.floor(Math.random() * (gmCardDeck.length + 1)), 0, c); }); gmCardExcluded.clear(); gmUpdateDeckCount(); gmRefreshAllPills(); gmUpdateClearBtn(); gmShowCardStatus('Exclusions effacées'); }
-
-// Update the GM deck count label and toggle reshuffle/clear button visibility.
-function gmUpdateDeckCount() {
-    const n = gmCardDeck.length;
-    const countEl = document.getElementById('gm-deck-count');
-    if (countEl) countEl.textContent = n === 0 ? 'Vide' : `${n} carte${n !== 1 ? 's' : ''}`;
-    const wrap = document.getElementById('gm-deck-wrap');
-    if (wrap) wrap.classList.toggle('empty', n === 0);
-    const rBtn = document.getElementById('gm-reshuffle-btn');
-    if (rBtn) rBtn.classList.toggle('visible', n === 0);
-    const rrBtn = document.getElementById('gm-reshuffle-remaining-btn');
-    if (rrBtn) rrBtn.classList.toggle('visible', n > 1 && n < ALL_CARDS.length - gmCardExcluded.size);
-    gmUpdateClearBtn();
-}
-
-// Show or hide the GM clear-exclusions button based on whether any cards are excluded.
-function gmUpdateClearBtn() { const btn = document.getElementById('gm-clear-exclusions-btn'); if (btn) btn.classList.toggle('visible', gmCardExcluded.size > 0); }
-
-// Show a temporary card status message in the GM card tab.
-function gmShowCardStatus(msg) {
-    const node = document.getElementById('gm-card-status');
-    if (!node) return;
-    node.textContent = msg;
-    clearTimeout(gmCardStatusTimer);
-    gmCardStatusTimer = setTimeout(() => node.textContent = '', 2200);
-}
-
-// Render the face of a playing card into the GM private deck drawn-card element.
-// Same face as the shared renderer, different target element.
-function gmRenderCardContent(card) {
-    renderCardFace(document.getElementById('gm-drawn-card'), card);
-}
-
-// Render and flip a card into view on the GM deck stage.
-async function gmRevealCard(card) {
-    const flipWrap = document.getElementById('gm-flip-wrap');
-    const drawnEl = document.getElementById('gm-drawn-card');
-    gmRenderCardContent(card);
-    drawnEl.classList.add('ready');
-    const flipInner = flipWrap.querySelector('.flip-inner');
-    flipInner.style.transition = 'none';
-    flipWrap.classList.add('flipped');
-    flipWrap.classList.remove('hidden');
-    flipWrap.getBoundingClientRect();
-    flipInner.style.transition = '';
-    await delay(30);
-    flipWrap.classList.remove('flipped');
-}
-
-// Draw the top card from the GM private deck and reveal it with a flip animation.
-async function gmDrawCard() {
-    if (gmCardDrawing || gmCardDeck.length === 0) return;
-    gmCardDrawing = true;
-    const flipWrap = document.getElementById('gm-flip-wrap');
-    if (flipWrap) { flipWrap.classList.remove('flipped'); flipWrap.classList.add('hidden'); }
-    const drawnEl = document.getElementById('gm-drawn-card');
-    if (drawnEl) drawnEl.classList.remove('ready');
-    const drawn = gmCardDeck.pop();
-    gmCardDrawn.add(drawn.id);
-    gmLastCardId = drawn.id;
-    const pill = document.getElementById(`gm-pill-${drawn.id}`); if (pill) gmRefreshPill(pill, drawn.id);
-    gmUpdateDeckCount();
-    await gmRevealCard(drawn);
-    gmShowCardStatus(drawn.isJoker ? drawn.label : `${drawn.rank} de ${SUIT_FR[drawn.suit.name] || drawn.suit.name}`);
-    gmCardDrawing = false;
-}
-
-// Play the GM deck shuffle animation using ghost card elements.
-async function gmAnimateShuffle() {
-    const overlay = document.getElementById('gm-shuffle-overlay');
-    const wrap = document.getElementById('gm-deck-wrap');
-    if (!overlay || !wrap) { await delay(300); return; }
-    const rect = wrap.getBoundingClientRect();
-    const ghosts = [];
-    for (let i = 0; i < 4; i++) {
-        const g = document.createElement('div'); g.className = 'shuffle-ghost';
-        g.appendChild(Object.assign(document.createElement('div'), { className: 'deck-pattern' }));
-        g.style.cssText = `width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;`;
-        overlay.appendChild(g); ghosts.push(g);
-    }
-    const dirs = ['left', 'right', 'left', 'right'];
-    ghosts.forEach((g, i) => { g.style.animation = `shuffle-${dirs[i]} 0.52s ${i * 0.08}s ease-in-out forwards`; });
-    wrap.classList.remove('shuffling'); wrap.getBoundingClientRect(); wrap.classList.add('shuffling');
-    await delay(680); ghosts.forEach(g => g.remove()); wrap.classList.remove('shuffling');
-}
-
-// Reshuffle all or remaining GM deck cards with animation.
-async function gmManualReshuffle(remainingOnly) {
-    if (gmCardDrawing) return;
-    gmCardDrawing = true;
-    const flipWrap = document.getElementById('gm-flip-wrap');
-    if (flipWrap) { flipWrap.classList.remove('flipped'); flipWrap.classList.add('hidden'); }
-    const drawnEl = document.getElementById('gm-drawn-card');
-    if (drawnEl) drawnEl.classList.remove('ready');
-    await gmAnimateShuffle();
-    if (remainingOnly) { gmCardDeck = shuffle(gmCardDeck); }
-    else { gmCardDrawn.clear(); gmCardDeck = shuffle([...ALL_CARDS].filter(c => !gmCardExcluded.has(c.id))); gmLastCardId = null; gmRefreshAllPills(); }
-    gmUpdateDeckCount();
-    gmShowCardStatus(remainingOnly ? '↺ Restant mélangé' : '↺ Mélangé');
-    gmCardDrawing = false;
+    gmDeck.reset();
+    gmDeck.mount();
 }
 
 // ═══════════════════════════════════════════
@@ -2674,7 +2445,7 @@ function addGMPotion() {
     const desc = document.getElementById('apf-desc').value.trim();
     const ingredients = document.getElementById('apf-ingredients').value.trim();
     const successChance = parseInt(document.getElementById('apf-chance').value) || 0;
-    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const id = uid();
     gmPotions.push({ id, name, desc, ingredients, successChance });
     saveGMPotions();
     ['apf-name', 'apf-desc', 'apf-ingredients', 'apf-chance'].forEach(eid => { const node = document.getElementById(eid); if (node) node.value = ''; });
@@ -2753,13 +2524,13 @@ function toggleAlchemyImportPicker(btn) {
 // Replace the current alchemy grimoire with recipes from another campaign.
 function importAlchemyFrom(sourceId, sourceName) {
     document.getElementById('alchemy-import-picker').style.display = 'none';
-    const sourcePotions = JSON.parse(localStorage.getItem('aria-gm-potions-' + sourceId) || '[]');
+    const sourcePotions = JSON.parse(localStorage.getItem(campKey('potions', sourceId)) || '[]');
     if (!sourcePotions.length) { alert(`Aucune recette dans la campagne "${sourceName}".`); return; }
     if (!confirm(`Remplacer le grimoire actuel par les ${sourcePotions.length} recette(s) de "${sourceName}" ?`)) return;
     gmPotions.forEach(p => sbDelete('campaign_potions', 'id=eq.' + encodeURIComponent(p.id)));
     gmPotions = sourcePotions.map(p => ({
         ...p,
-        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)
+        id: uid()
     }));
     saveGMPotions();
     renderGMPotions();
@@ -2831,7 +2602,7 @@ let _musicProgressRaf = null;
 // playback tracks its own playlist (musicPlayingPlaylistId) + index. These helpers
 // resolve the right track array for view vs. playback operations.
 function _newPlaylist(name) {
-    return { id: (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)),
+    return { id: uid(),
              name: name || 'Playlist', tracks: [] };
 }
 function _activePlaylist()  { return gmPlaylists.find(p => p.id === activePlaylistId) || gmPlaylists[0] || null; }
@@ -3243,7 +3014,7 @@ async function _fetchYTPlaylist(playlistId, apiKey) {
                 const videoId = item.snippet?.resourceId?.videoId;
                 const title   = item.snippet?.title;
                 if (videoId && title !== 'Private video' && title !== 'Deleted video') {
-                    tracks.push({ id: crypto.randomUUID(), name: title || videoId, type: 'youtube', url: null, youtubeId: videoId, path: null });
+                    tracks.push({ id: uid(), name: title || videoId, type: 'youtube', url: null, youtubeId: videoId, path: null });
                 }
             }
             pageToken = data.nextPageToken || '';
@@ -3267,7 +3038,7 @@ async function musicAddYoutube() {
         const videoId = _parseYTVideoId(raw);
         if (!videoId) { statusEl.textContent = '⚠ URL invalide.'; return; }
         const name = await _fetchYTTitle(videoId, config.youtubeApiKey);
-        dest.push({ id: crypto.randomUUID(), name, type: 'youtube', url: null, youtubeId: videoId, path: null });
+        dest.push({ id: uid(), name, type: 'youtube', url: null, youtubeId: videoId, path: null });
         statusEl.textContent = '✓ Piste ajoutée. (Les Mix YouTube ne peuvent pas être importés en entier — seule cette vidéo a été ajoutée.)';
     } else if (playlistId) {
         const apiKey = config.youtubeApiKey;
@@ -3283,7 +3054,7 @@ async function musicAddYoutube() {
         const videoId = _parseYTVideoId(raw);
         if (!videoId) { statusEl.textContent = '⚠ URL ou ID invalide.'; return; }
         const name = await _fetchYTTitle(videoId, config.youtubeApiKey);
-        dest.push({ id: crypto.randomUUID(), name, type: 'youtube', url: null, youtubeId: videoId, path: null });
+        dest.push({ id: uid(), name, type: 'youtube', url: null, youtubeId: videoId, path: null });
         statusEl.textContent = '✓ Piste ajoutée.';
     }
 
@@ -3305,7 +3076,7 @@ async function musicUploadFile(input) {
 
     try {
         const ext  = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
-        const id   = crypto.randomUUID();
+        const id   = uid();
         const name = file.name.replace(/\.[^.]+$/, '');
         const path = `${currentCampaignId}/${id}${ext ? '.' + ext : ''}`;
         const res  = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-music/${path}`, {
@@ -3334,131 +3105,19 @@ async function musicUploadFile(input) {
 // ═══════════════════════════════════════════
 //  NOTES MJ
 // ═══════════════════════════════════════════
-let gmNotesList = [];
-let gmCurrentNoteId = null;
-
-// Generate a new UUID for a GM note.
-function _gmNoteId() {
-    return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-
-// Load GM notes from localStorage for the current campaign, migrating plain-string format if needed.
-function loadGMNotes() {
-    const raw = localStorage.getItem(gmNotesKey());
-    if (!raw) {
-        gmNotesList = [];
-    } else {
-        try {
-            const parsed = JSON.parse(raw);
-            gmNotesList = Array.isArray(parsed) ? parsed : [{ id: _gmNoteId(), name: 'Notes', content: raw }];
-        } catch(e) {
-            gmNotesList = [{ id: _gmNoteId(), name: 'Notes', content: raw }];
-        }
-    }
-    gmCurrentNoteId = gmNotesList.length > 0 ? gmNotesList[0].id : null;
-    renderGMNotesList();
-    loadGMNoteContent();
-}
-
-// Save the current GM notes list to localStorage.
-function persistGMNotes() {
-    localStorage.setItem(gmNotesKey(), JSON.stringify(gmNotesList));
-}
-
-// Render the GM notes sidebar list, highlighting the currently selected note.
-function renderGMNotesList() {
-    const list = document.getElementById('gm-notes-list');
-    if (!list) return;
-    list.innerHTML = '';
-    gmNotesList.forEach(note => {
-        const item = document.createElement('div');
-        item.className = 'notes-item' + (note.id === gmCurrentNoteId ? ' active' : '');
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'notes-item-name';
-        nameSpan.textContent = note.name || 'Sans titre';
-        nameSpan.addEventListener('click', () => selectGMNote(note.id));
-        const delBtn = document.createElement('button');
-        delBtn.className = 'notes-item-delete';
-        delBtn.title = 'Supprimer';
-        delBtn.textContent = '✕';
-        delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteGMNote(note.id); });
-        item.appendChild(nameSpan);
-        item.appendChild(delBtn);
-        list.appendChild(item);
-    });
-}
-
-// Load the selected GM note's name and body into the editor fields.
-function loadGMNoteContent() {
-    const nameInput = document.getElementById('gm-notes-name-input');
-    const area = document.getElementById('gm-notes-area');
-    if (!nameInput || !area) return;
-    const note = gmNotesList.find(n => n.id === gmCurrentNoteId);
-    if (note) {
-        nameInput.value = note.name;
-        area.value = note.content;
-        nameInput.disabled = false;
-        area.disabled = false;
-    } else {
-        nameInput.value = '';
-        area.value = '';
-        nameInput.disabled = true;
-        area.disabled = true;
-    }
-}
-
-// Select a GM note by ID and display it in the editor.
-function selectGMNote(id) {
-    gmCurrentNoteId = id;
-    renderGMNotesList();
-    loadGMNoteContent();
-    document.getElementById('gm-notes-area').focus();
-}
-
-// Add a new empty GM note, persist it, sync to Supabase, and select it.
-function addGMNote() {
-    const note = { id: _gmNoteId(), name: 'Nouvelle note', content: '' };
-    gmNotesList.push(note);
-    persistGMNotes();
-    syncGMNote(note);
-    selectGMNote(note.id);
-    const nameInput = document.getElementById('gm-notes-name-input');
-    if (nameInput) { nameInput.focus(); nameInput.select(); }
-}
-
-// Delete a GM note, remove it from Supabase, and select the adjacent note.
-function deleteGMNote(id) {
-    deleteGMNoteFromDB(id);
-    const idx = gmNotesList.findIndex(n => n.id === id);
-    gmNotesList = gmNotesList.filter(n => n.id !== id);
-    gmCurrentNoteId = gmNotesList[Math.min(idx, gmNotesList.length - 1)]?.id || null;
-    persistGMNotes();
-    renderGMNotesList();
-    loadGMNoteContent();
-}
-
-// Save the current GM note's content from the textarea and schedule Supabase sync.
-function saveCurrentGMNote() {
-    const note = gmNotesList.find(n => n.id === gmCurrentNoteId);
-    if (!note) return;
-    note.content = document.getElementById('gm-notes-area').value;
-    persistGMNotes();
-    debouncedSyncGMNote(note);
-}
-
-// Rename the current GM note from the name input and refresh the list.
-function renameCurrentGMNote() {
-    const note = gmNotesList.find(n => n.id === gmCurrentNoteId);
-    if (!note) return;
-    note.name = document.getElementById('gm-notes-name-input').value;
-    persistGMNotes();
-    renderGMNotesList();
-    debouncedSyncGMNote(note);
-}
+// The engine is makeNotes() in aria-shared.js; this is just the campaign-scoped
+// wiring. The HTML calls gmNotes.add() / gmNotes.save() / gmNotes.rename() directly.
+const gmNotes = makeNotes({
+    key: gmNotesKey,
+    ids: { list: 'gm-notes-list', name: 'gm-notes-name-input', area: 'gm-notes-area' },
+    sync:     (note, pos) => syncGMNote(note, pos),
+    syncSoon: (note, pos) => debouncedSyncGMNote(note, pos),
+    remove:   id => deleteGMNoteFromDB(id),
+});
 
 // Upload a file to Supabase Storage (campaign-files bucket) and return its URL and path.
 async function uploadFileToStorage(file) {
-    const fileId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const fileId = uid();
     const parts = file.name.split('.');
     const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
     const storageName = ext ? `${fileId}.${ext}` : fileId;

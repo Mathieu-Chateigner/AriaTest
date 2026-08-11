@@ -1536,6 +1536,10 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .flip-wrap:not(.hidden) { visibility: visible; }
 .flip-inner { width: 100%; height: 100%; transform-style: preserve-3d; transition: transform .55s cubic-bezier(.4,0,.2,1); will-change: transform; }
 .flip-wrap.flipped .flip-inner { transform: rotateY(180deg); }
+/* The face is the pre-rotated one, so `.flipped` means "face showing" — the same
+   convention as aria-player.css. It used to be the back that carried the rotation
+   here, which inverted the meaning of `.flipped` between the two panels, and every
+   reveal in aria-gm.js carried inverted logic to compensate. */
 .flip-face {
     position: absolute; width: 100%; height: 100%;
     backface-visibility: hidden;
@@ -1543,6 +1547,7 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     display: flex; flex-direction: column; justify-content: space-between;
     padding: 10px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    transform: rotateY(180deg);
 }
 .flip-face.c-black { background: var(--card-cream); color: var(--card-black); border: 2px solid #888; }
 .flip-face.c-red   { background: var(--card-cream); color: var(--card-red);   border: 2px solid var(--card-red); }
@@ -1555,7 +1560,6 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     background: linear-gradient(145deg,#120820,#0a0610);
     border: 2px solid var(--gm-accent-dim);
     display: flex; align-items: center; justify-content: center;
-    transform: rotateY(180deg);
 }
 .card-corner { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
 .rank { font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 700; }

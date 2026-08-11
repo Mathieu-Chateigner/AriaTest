@@ -304,13 +304,13 @@
                     <div class="notes-sidebar">
                         <div class="notes-sidebar-header">
                             <span class="notes-sidebar-title">Notes</span>
-                            <button class="notes-add-btn" onclick="addNote()" title="Nouvelle note">+</button>
+                            <button class="notes-add-btn" onclick="notes.add()" title="Nouvelle note">+</button>
                         </div>
                         <div class="notes-list" id="notes-list"></div>
                     </div>
                     <div class="notes-editor">
-                        <input class="notes-name-input" id="notes-name-input" placeholder="Nom de la note…" oninput="renameCurrentNote()" />
-                        <textarea class="notes-area" id="notes-area" placeholder="Contenu…" oninput="saveCurrentNote()"></textarea>
+                        <input class="notes-name-input" id="notes-name-input" placeholder="Nom de la note…" oninput="notes.rename()" />
+                        <textarea class="notes-area" id="notes-area" placeholder="Contenu…" oninput="notes.save()"></textarea>
                     </div>
                 </div>
             </div>
@@ -319,13 +319,13 @@
             <div class="tab-content" id="tab-cards">
                 <div class="card-tab-layout">
                     <div class="card-deck-col">
-                        <div class="deck-wrap" id="deck-wrap" onclick="drawCard()">
+                        <div class="deck-wrap" id="deck-wrap" onclick="deck.draw()">
                             <div class="deck-back"><div class="deck-pattern">♛</div></div>
                         </div>
                         <div class="deck-count" id="deck-count">54 cartes</div>
-                        <button class="card-action-btn" id="reshuffle-btn" onclick="manualReshuffle(false)">↺ Mélanger</button>
-                        <button class="card-action-btn" id="reshuffle-remaining-btn" onclick="manualReshuffle(true)">↺ Restant</button>
-                        <button class="card-action-btn" id="clear-exclusions-btn" onclick="clearExclusions()">✕ Exclusions</button>
+                        <button class="card-action-btn" id="reshuffle-btn" onclick="deck.reshuffle(false)">↺ Mélanger</button>
+                        <button class="card-action-btn" id="reshuffle-remaining-btn" onclick="deck.reshuffle(true)">↺ Restant</button>
+                        <button class="card-action-btn" id="clear-exclusions-btn" onclick="deck.clearExclusions()">✕ Exclusions</button>
                         <div class="card-status" id="card-status"></div>
                     </div>
                     <div class="card-stage">

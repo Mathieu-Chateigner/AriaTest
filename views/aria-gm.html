@@ -304,13 +304,13 @@
                     <div class="section-title" style="margin-bottom:12px;">Deck MJ <span style="font-size:11px;color:var(--parchment-dim);font-family:'Cormorant Garamond',serif;font-style:italic;">(privé)</span></div>
                     <div class="card-tab-layout">
                         <div class="card-deck-col">
-                            <div class="deck-wrap" id="gm-deck-wrap" onclick="gmDrawCard()">
+                            <div class="deck-wrap" id="gm-deck-wrap" onclick="gmDeck.draw()">
                                 <div class="deck-back"><div class="deck-pattern">♛</div></div>
                             </div>
                             <div class="deck-count" id="gm-deck-count">54 cartes</div>
-                            <button class="card-action-btn" id="gm-reshuffle-btn" onclick="gmManualReshuffle(false)">↺ Mélanger</button>
-                            <button class="card-action-btn" id="gm-reshuffle-remaining-btn" onclick="gmManualReshuffle(true)">↺ Restant</button>
-                            <button class="card-action-btn" id="gm-clear-exclusions-btn" onclick="gmClearExclusions()">✕ Exclusions</button>
+                            <button class="card-action-btn" id="gm-reshuffle-btn" onclick="gmDeck.reshuffle(false)">↺ Mélanger</button>
+                            <button class="card-action-btn" id="gm-reshuffle-remaining-btn" onclick="gmDeck.reshuffle(true)">↺ Restant</button>
+                            <button class="card-action-btn" id="gm-clear-exclusions-btn" onclick="gmDeck.clearExclusions()">✕ Exclusions</button>
                             <div class="card-status" id="gm-card-status"></div>
                         </div>
                         <div class="card-stage">
@@ -475,13 +475,13 @@
                     <div class="notes-sidebar">
                         <div class="notes-sidebar-header">
                             <span class="notes-sidebar-title">Notes</span>
-                            <button class="notes-add-btn" onclick="addGMNote()" title="Nouvelle note">+</button>
+                            <button class="notes-add-btn" onclick="gmNotes.add()" title="Nouvelle note">+</button>
                         </div>
                         <div class="notes-list" id="gm-notes-list"></div>
                     </div>
                     <div class="notes-editor">
-                        <input class="notes-name-input" id="gm-notes-name-input" placeholder="Nom de la note…" oninput="renameCurrentGMNote()" />
-                        <textarea class="notes-area" id="gm-notes-area" placeholder="Contenu…" oninput="saveCurrentGMNote()"></textarea>
+                        <input class="notes-name-input" id="gm-notes-name-input" placeholder="Nom de la note…" oninput="gmNotes.rename()" />
+                        <textarea class="notes-area" id="gm-notes-area" placeholder="Contenu…" oninput="gmNotes.save()"></textarea>
                     </div>
                 </div>
             </div>

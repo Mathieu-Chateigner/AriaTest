@@ -72,149 +72,306 @@ async function sbPatch(table, row, filterStr) {
 }
 
 // ═══════════════════════════════════════════
+//  ENTITY MAPPING
+// ═══════════════════════════════════════════
+// The camelCase-object ↔ snake_case-row mapping for each table, written once.
+//
+// It used to be written four times per entity — in runMigration, in the panel's
+// sync{X}, again in the panel's _syncAll{X}Data, and once more reversed inside
+// loadFromSupabase — about thirty hand-maintained copies in all. They drifted, and
+// every compensating mechanism downstream (the "restore child tables
+// unconditionally" rule, the resurrection bug behind it) was paying for that drift.
+// Adding a column now means adding one line here.
+//
+// A field is `jsKey: 'column'`, or `jsKey: { col, to, from, def }` when it needs a
+// coercion on write (`to`), on read (`from`), or a fallback for a null column
+// (`def`, called if it is a function so each object gets its own array/object).
+const _ENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function _fieldSpec(spec) { return typeof spec === 'string' ? { col: spec } : spec; }
+
+// Current UTC time as an ISO 8601 string.
+function _nowISO() { return new Date().toISOString(); }
+
+// Build a Supabase row from a JS object. `parentId` fills the entity's FK column;
+// `extra` adds computed columns the object does not carry (notes/music `position`)
+// and wins over the timestamp, so a replayed row can keep its original one.
+// `entity.stamp` names the timestamp column, or is null for tables without one.
+function toRow(entity, obj, parentId, extra = {}) {
+    const row = {};
+    for (const [key, raw] of Object.entries(entity.fields)) {
+        const f = _fieldSpec(raw);
+        const v = f.to ? f.to(obj[key], obj) : obj[key];
+        row[f.col] = v === undefined ? null : v;
+    }
+    if (entity.parent) row[entity.parent] = parentId;
+    const stamp = entity.stamp === undefined ? 'updated_at' : entity.stamp;
+    return { ...row, ...(stamp ? { [stamp]: _nowISO() } : {}), ...extra };
+}
+
+// Build the JS object back from a Supabase row.
+function fromRow(entity, row) {
+    const obj = {};
+    for (const [key, raw] of Object.entries(entity.fields)) {
+        const f = _fieldSpec(raw);
+        const v = row[f.col];
+        if (f.from) { obj[key] = f.from(v, row); continue; }
+        obj[key] = (v === null || v === undefined)
+            ? (typeof f.def === 'function' ? f.def() : f.def)
+            : v;
+    }
+    return obj;
+}
+
+// Upsert one object, and one array of objects (position = array index).
+function sbPut(entity, obj, parentId, extra) {
+    return sbUpsert(entity.table, toRow(entity, obj, parentId, extra), entity.onConflict);
+}
+function sbPutAll(entity, list, parentId, positioned = false) {
+    return Promise.all((list || []).map((o, i) =>
+        sbPut(entity, o, parentId, positioned ? { position: i } : undefined)));
+}
+
+const _str = v => v ?? '';
+const _orNull = v => v || null;
+const _arr = () => [];
+const _obj = () => ({});
+
+const ENT = {
+    character: {
+        table: 'characters', parent: 'save_key',
+        fields: {
+            id: 'id', name: 'name', class: 'class',
+            campaignKey:   { col: 'campaign_key',   to: _orNull, def: '' },
+            ariaType:      { col: 'aria_type',      to: v => v || 'ancient', def: 'ancient' },
+            stats:         { col: 'stats',          to: _orNull, def: _obj },
+            physical:      { col: 'physical',       to: _orNull, def: _obj },
+            skills:        { col: 'skills',         to: _orNull, def: _arr },
+            specials:      { col: 'specials',       to: _orNull, def: _arr },
+            weapons:       { col: 'weapons',        to: _orNull, def: _arr },
+            protection:    { col: 'protection',     to: _orNull, def: _obj },
+            inventory:     { col: 'inventory',      to: _orNull, def: _arr },
+            potionRecipes: { col: 'potion_recipes', to: _orNull, def: _arr },
+            potions:       { col: 'potions',        to: _orNull, def: _arr },
+            money:         { col: 'money',          to: _orNull, def: null },
+            vials:         { col: 'vials',          to: v => v || 0, def: 0 },
+            karma:         { col: 'karma',          to: v => v ?? 0, def: 0 },
+        },
+    },
+    characterNote: {
+        table: 'character_notes', parent: 'character_id',
+        fields: { id: 'id', name: { col: 'name', to: _str, def: '' }, content: { col: 'content', to: _str, def: '' } },
+    },
+    // Written through _charStateRow() in aria-player.js rather than toRow(), because
+    // its source is three separate localStorage keys rather than one object. Listed
+    // here so the character delete cascade covers it.
+    characterState: {
+        table: 'character_state', parent: 'character_id', fields: {},
+    },
+    characterRoll: {
+        table: 'character_rolls', parent: 'character_id', stamp: null,
+        fields: {
+            skillName:  { col: 'skill_name',  to: _str },
+            threshold:  { col: 'threshold',   to: v => v ?? null },
+            roll: 'roll',
+            success:    { col: 'success',     to: v => v ?? null },
+            bonusMalus: { col: 'bonus_malus', to: v => v || 0, def: 0 },
+            ts: 'ts',
+        },
+    },
+    characterFile: {
+        table: 'character_files', parent: 'character_id',
+        // `id` and `file_id` both carry the file's id; reads take file_id.
+        fields: {
+            id:   { col: 'file_id', to: v => v },
+            name: { col: 'name', to: _str, def: '' }, type: { col: 'type', to: _str, def: '' }, url: { col: 'url', to: _str, def: '' },
+        },
+    },
+    campaign: {
+        table: 'campaigns', parent: 'save_key',
+        fields: {
+            id: 'id', name: 'name',
+            joinCode:         { col: 'join_code',         to: _orNull, def: '' },
+            vdoRoom:          { col: 'vdo_room',          to: _orNull, def: '' },
+            vdoRoomPassword:  { col: 'vdo_room_password', to: _orNull, def: '' },
+            ariaType:         { col: 'aria_type',         to: v => v || 'ancient', def: 'ancient' },
+        },
+    },
+    monster: {
+        table: 'monsters', parent: 'campaign_id',
+        fields: {
+            id:      { col: 'id', to: v => String(v) },
+            name: 'name', pv: 'pv',
+            maxPV:   { col: 'max_pv' },
+            armor:   { col: 'armor',   to: v => v || 0, def: 0 },
+            stats:   { col: 'stats',   to: _orNull, def: _obj },
+            attacks: { col: 'attacks', to: _orNull, def: _arr },
+        },
+    },
+    potion: {
+        table: 'campaign_potions', parent: 'campaign_id',
+        fields: {
+            id: 'id', name: 'name',
+            desc:          { col: 'description',    to: _str, def: '' },
+            ingredients:   { col: 'ingredients',    to: _orNull, def: '' },
+            successChance: { col: 'success_chance', to: v => v || 0, def: 0 },
+        },
+    },
+    campaignFile: {
+        table: 'campaign_files', parent: 'campaign_id',
+        fields: {
+            id: 'id', name: 'name',
+            type:      { col: 'type', to: _str, def: '' }, url: { col: 'url', to: _str, def: '' }, path: { col: 'path', to: _str, def: '' },
+            grantedTo: { col: 'granted_to', to: v => v || [], def: _arr },
+        },
+    },
+    music: {
+        table: 'campaign_music', parent: 'campaign_id',
+        fields: {
+            id: 'id', name: 'name', type: 'type',
+            url:       { col: 'url',        to: _orNull, def: null },
+            youtubeId: { col: 'youtube_id', to: _orNull, def: null },
+            path:      { col: 'path',       to: _orNull, def: null },
+        },
+    },
+    campaignNote: {
+        table: 'campaign_notes', parent: 'campaign_id',
+        fields: {
+            id: 'id',
+            name:    { col: 'name',    to: v => v || 'Note', def: 'Note' },
+            content: { col: 'content', to: _str, def: '' },
+        },
+    },
+    knownPlayer: {
+        table: 'campaign_known_players', parent: 'campaign_id',
+        onConflict: 'campaign_id,char_id',
+        fields: {
+            charId: { col: 'char_id' },
+            data:   { col: 'data' },
+        },
+    },
+    // Append-only log tables: no primary key of ours, stamped created_at.
+    roll: {
+        table: 'campaign_rolls', parent: 'campaign_id', stamp: 'created_at',
+        fields: {
+            skillName:  { col: 'skill_name', to: _str },
+            threshold:  { col: 'threshold',  to: v => v ?? null },
+            roll: 'roll',
+            success:    { col: 'success',    to: v => !!v },
+            char:       { col: 'char_name',  to: (v, o) => v || o.playerId || '' },
+            bonusMalus: { col: 'bonus_malus', to: v => v || 0 },
+        },
+    },
+    cardDraw: {
+        table: 'campaign_card_history', parent: 'campaign_id', stamp: 'drawn_at',
+        fields: { cardId: { col: 'card_id', to: _str } },
+    },
+};
+
+// Every table whose rows hang off `parentCol`. Delete cascades are built from this
+// rather than by listing the tables again — a new child entity is covered the
+// moment it is added to ENT, instead of silently leaking rows until someone
+// notices the delete path never learned about it.
+function childTables(parentCol) {
+    return Object.values(ENT).filter(e => e.parent === parentCol).map(e => e.table);
+}
+
+// Delete a parent row and every child row that references it.
+function sbDeleteCascade(entity, parentCol, id) {
+    const f = 'eq.' + encodeURIComponent(id);
+    return Promise.all([
+        sbDelete(entity.table, 'id=' + f),
+        ...childTables(parentCol).map(t => sbDelete(t, parentCol + '=' + f)),
+    ]);
+}
+
+// character_files needs its own primary key alongside file_id, and known_players a
+// composite one. Both are computed from the object rather than stored on it.
+function sbPutFile(file, charId) {
+    return sbUpsert(ENT.characterFile.table,
+        { ...toRow(ENT.characterFile, file, charId), id: file.id },
+        ENT.characterFile.onConflict);
+}
+function sbPutKnownPlayer(charId, data, campaignId) {
+    if (!_ENT_ID.test(String(charId))) return Promise.resolve(false);
+    return sbUpsert(ENT.knownPlayer.table,
+        { ...toRow(ENT.knownPlayer, { charId, data }, campaignId), id: charId + ':' + campaignId },
+        ENT.knownPlayer.onConflict);
+}
+
+// ═══════════════════════════════════════════
 //  MIGRATION — one-time blob → relational
 // ═══════════════════════════════════════════
-// One-time migration: moves old JSON blob data into the relational schema.
+// One-time migration: moves old JSON blob data into the relational schema. Every
+// mapping here now comes from ENT, so this cannot drift from the live sync path —
+// which is what made the previous hand-written copy dangerous rather than merely
+// verbose (it wrote `character_notes.name` defaulted to 'Note' where the live path
+// defaulted to '', and it never learned about aria_type, potions, money or karma).
 async function runMigration(saveKey, type) {
+    const keyFilter = 'save_key=eq.' + encodeURIComponent(saveKey);
+
+    // Read the blob once, and only if this save key has not been migrated yet.
+    async function pendingBlob(flagCol) {
+        const flagRows = await sbSelect('saves', keyFilter + '&select=' + flagCol);
+        if (flagRows.length && flagRows[0][flagCol]) return null;
+        const blobRows = await sbSelect('saves', keyFilter + '&select=data');
+        return blobRows.length ? (blobRows[0].data || null) : null;
+    }
+
     try {
         if (type === 'player') {
-            const flagRows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=player_migrated_at');
-            if (flagRows.length && flagRows[0].player_migrated_at) return;
-
-            const blobRows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=data');
-            if (!blobRows.length || !blobRows[0].data) return;
-            const blob = blobRows[0].data;
+            const blob = await pendingBlob('player_migrated_at');
+            if (!blob) return;
             const pd = blob.player || (Array.isArray(blob.characters) ? blob : null);
             if (!pd) return;
+            const chars = pd.characters || [];
+            const perChar = pd.perChar || {};
 
-            const chars   = pd.characters || [];
-            const perChar = pd.perChar    || {};
-            const now     = new Date().toISOString();
-
-            await Promise.all(chars.map(c => sbUpsert('characters', {
-                id: c.id, save_key: saveKey, name: c.name, class: c.class,
-                campaign_key: c.campaignKey || null,
-                stats: c.stats || null, physical: c.physical || null,
-                skills: c.skills || null, specials: c.specials || null,
-                weapons: c.weapons || null, protection: c.protection || null,
-                inventory: c.inventory || null, potion_recipes: c.potionRecipes || null,
-                vials: c.vials || 0, updated_at: now,
-            })));
-
+            await sbPutAll(ENT.character, chars, saveKey);
             await Promise.all(chars.map(c => {
                 const s = perChar[c.id] || {};
                 return sbUpsert('character_state', {
                     character_id: c.id,
-                    hp:    s.hp    !== undefined ? s.hp    : null,
+                    hp: s.hp !== undefined ? s.hp : null,
                     cards: s.cards || null,
-                    tabs:  s.tabs  || null,
-                    updated_at: now,
+                    tabs: s.tabs || null,
+                    updated_at: _nowISO(),
                 });
             }));
-
             for (const c of chars) {
-                const s     = perChar[c.id] || {};
-                const notes = Array.isArray(s.notes) ? s.notes : [];
-                await Promise.all(notes.map((n, i) => sbUpsert('character_notes', {
-                    id: n.id, character_id: c.id,
-                    name: n.name || 'Note', content: n.content || '',
-                    position: i, updated_at: now,
-                })));
-                const files = Array.isArray(s.files) ? s.files : [];
-                await Promise.all(files.map(f => sbUpsert('character_files', {
-                    id: f.id, character_id: c.id,
-                    file_id: f.id, name: f.name || '', type: f.type || '', url: f.url || '',
-                    updated_at: now,
-                })));
+                const s = perChar[c.id] || {};
+                await sbPutAll(ENT.characterNote, Array.isArray(s.notes) ? s.notes : [], c.id, true);
+                await Promise.all((Array.isArray(s.files) ? s.files : []).map(f => sbPutFile(f, c.id)));
             }
-
-            await sbPatch('saves', { player_migrated_at: now }, 'save_key=eq.' + encodeURIComponent(saveKey));
+            await sbPatch('saves', { player_migrated_at: _nowISO() }, keyFilter);
 
         } else if (type === 'gm') {
-            const flagRows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=gm_migrated_at');
-            if (flagRows.length && flagRows[0].gm_migrated_at) return;
+            const blob = await pendingBlob('gm_migrated_at');
+            if (!blob?.gm) return;
+            const campaigns = blob.gm.campaigns || [];
+            const perCampaign = blob.gm.perCampaign || {};
 
-            const blobRows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(saveKey) + '&select=data');
-            if (!blobRows.length || !blobRows[0].data) return;
-            const blob = blobRows[0].data;
-            const gd = blob.gm;
-            if (!gd) return;
-
-            const campaigns   = gd.campaigns   || [];
-            const perCampaign = gd.perCampaign || {};
-            const now         = new Date().toISOString();
-
-            await Promise.all(campaigns.map(c => sbUpsert('campaigns', {
-                id: c.id, save_key: saveKey, name: c.name,
-                join_code: c.joinCode || null, updated_at: now,
-            })));
-
+            await sbPutAll(ENT.campaign, campaigns, saveKey);
             for (const c of campaigns) {
                 const s = perCampaign[c.id] || {};
-
-                const monsters = s.monsters || [];
-                await Promise.all(monsters.map(m => sbUpsert('monsters', {
-                    id: String(m.id), campaign_id: c.id, name: m.name,
-                    pv: m.pv, max_pv: m.maxPV, armor: m.armor || 0,
-                    stats: m.stats || null, attacks: m.attacks || null, updated_at: now,
-                })));
-
-                const potions = s.potions || [];
-                await Promise.all(potions.map(p => sbUpsert('campaign_potions', {
-                    id: p.id, campaign_id: c.id, name: p.name,
-                    description: p.desc || '', ingredients: p.ingredients || null,
-                    success_chance: p.successChance || 0, updated_at: now,
-                })));
-
-                const files = s.files || [];
-                await Promise.all(files.map(f => sbUpsert('campaign_files', {
-                    id: f.id, campaign_id: c.id, name: f.name,
-                    type: f.type || '', url: f.url || '', path: f.path || '',
-                    granted_to: f.grantedTo || [], updated_at: now,
-                })));
-
-                const knownPlayers = s.knownPlayers || {};
-                await Promise.all(Object.values(knownPlayers).map(p => {
-                    if (!p?.charId) return Promise.resolve();
-                    return sbUpsert('campaign_known_players', {
-                        id: p.charId + ':' + c.id,
-                        campaign_id: c.id, char_id: p.charId,
-                        data: p, updated_at: now,
-                    }, 'campaign_id,char_id');
-                }));
-
-                const notes = s.notes || [];
-                await Promise.all(notes.map((n, i) => sbUpsert('campaign_notes', {
-                    id: n.id, campaign_id: c.id,
-                    name: n.name || 'Note', content: n.content || '',
-                    position: i, updated_at: now,
-                })));
-
-                const rolls = s.rolls || [];
-                for (const r of rolls) {
-                    await sbInsert('campaign_rolls', {
-                        campaign_id: c.id,
-                        skill_name: r.skillName || '',
-                        threshold: r.threshold ?? null,
-                        roll: r.roll,
-                        success: !!r.success,
-                        char_name: r.char || r.playerId || '',
-                        bonus_malus: r.bonusMalus || 0,
-                        created_at: r.receivedAt ? new Date(r.receivedAt).toISOString() : now,
-                    });
+                await sbPutAll(ENT.monster, s.monsters, c.id);
+                await sbPutAll(ENT.potion, s.potions, c.id);
+                await sbPutAll(ENT.campaignFile, s.files, c.id);
+                await sbPutAll(ENT.campaignNote, s.notes, c.id, true);
+                await Promise.all(Object.values(s.knownPlayers || {})
+                    .filter(p => p?.charId)
+                    .map(p => sbPutKnownPlayer(p.charId, p, c.id)));
+                // Append-only: replayed with their original timestamps.
+                for (const r of (s.rolls || [])) {
+                    await sbInsert(ENT.roll.table, toRow(ENT.roll, r, c.id,
+                        r.receivedAt ? { created_at: new Date(r.receivedAt).toISOString() } : {}));
                 }
-
-                const cardHistory = s.cardHistory || [];
-                for (const entry of cardHistory) {
-                    await sbInsert('campaign_card_history', {
-                        campaign_id: c.id,
-                        card_id: entry.cardId || '',
-                        drawn_at: entry.ts ? new Date(entry.ts).toISOString() : now,
-                    });
+                for (const entry of (s.cardHistory || [])) {
+                    await sbInsert(ENT.cardDraw.table, toRow(ENT.cardDraw, entry, c.id,
+                        entry.ts ? { drawn_at: new Date(entry.ts).toISOString() } : {}));
                 }
             }
-
-            await sbPatch('saves', { gm_migrated_at: now }, 'save_key=eq.' + encodeURIComponent(saveKey));
+            await sbPatch('saves', { gm_migrated_at: _nowISO() }, keyFilter);
         }
     } catch(e) {
         console.warn('[ARIA] Migration failed:', e);

@@ -88,7 +88,7 @@ let currentCharId = null;
 
 // Per-tab unique ID — persists across refreshes (sessionStorage) but differs between tabs
 let playerId = sessionStorage.getItem('aria-player-id');
-if (!playerId) { playerId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('aria-player-id', playerId); }
+if (!playerId) { playerId = uid(); sessionStorage.setItem('aria-player-id', playerId); }
 
 let bonusMalus = 0;
 // Temporary bonus/malus that auto-expires after a set number of rolls (#11).
@@ -105,8 +105,6 @@ let rollFilter = new Set();
 let rollDateFilter = '';   // 'YYYY-MM-DD' local date; empty = no date filter
 let multiplier = 1;
 let isRolling = false;
-let dddiceAPI = null;
-let dddiceSDK = null;            // ThreeDDice SDK instance
 let pendingDddiceRoll = null;    // { skillName, threshold } waiting for RollFinished event
 let pendingSecondaryRoll = null; // { callback, mapFn } for non-d100 dice (d6, d3, weapon formula…)
 let dddiceRollSafetyTimer = null; // fallback timer in case RollFinished never fires
@@ -145,7 +143,7 @@ let localStageSid = '';       // locally chosen big tile in Tablée (clicking a 
 // publish into it at all. Persisted per character so it survives a refresh — a
 // player who opted out must not be re-broadcast by the next page load.
 let cameraOff = false;
-function cameraOffKey() { return 'aria-camera-off-' + currentCharId; }
+function cameraOffKey() { return charKey('camera'); }
 // Toggle the local camera. Off ⇒ push iframe goes to about:blank (webcam released)
 // and presence advertises no stream ID, so no peer opens a viewer on a dead stream.
 function toggleCamera() {
@@ -238,9 +236,6 @@ let soignerTarget = null; // null = self, or { playerId, name }
 let soignerPct = 0;
 
 // Card state — initialized after character selection
-let cardDeck = null, cardDrawn = null, cardExcluded = null, lastCardId = null;
-let cardDrawing = false;
-let cardStatusTimer = null;
 
 // tab access granted by GM — stored per character in localStorage
 let playerTabs = { cards: false, alchemy: false };
@@ -254,56 +249,38 @@ let pendingCraft = null;
 let syncTimer      = null;
 
 
-// Convert a character object into a Supabase characters table row.
-function _charToRow(char) {
+// Read a per-character JSON key, tolerating absent or corrupt values.
+function _charJSON(which, charId, fallback = null) {
+    const raw = localStorage.getItem(charKey(which, charId));
+    if (!raw) return fallback;
+    try { return JSON.parse(raw); } catch (_) { return fallback; }
+}
+
+// HP / cards / tabs live in three separate localStorage keys but one DB row. This
+// is the only place that mapping is written; syncCharacterState and the full sync
+// used to carry a copy each, one of them with the reads inlined as IIFEs.
+function _charStateRow(charId) {
+    const hp = localStorage.getItem(charKey('hp', charId));
     return {
-        id: char.id, save_key: saveKey, name: char.name, class: char.class,
-        campaign_key: char.campaignKey || null,
-        aria_type: char.ariaType || 'ancient',
-        stats: char.stats || null, physical: char.physical || null,
-        skills: char.skills || null, specials: char.specials || null,
-        weapons: char.weapons || null, protection: char.protection || null,
-        inventory: char.inventory || null, potion_recipes: char.potionRecipes || null,
-        vials: char.vials || 0,
-        potions: char.potions || null,
-        money: char.money || null,
-        karma: char.karma ?? 0,
+        character_id: charId,
+        hp:    hp !== null ? parseInt(hp) : null,
+        cards: _charJSON('cards', charId),
+        tabs:  _charJSON('tabs', charId),
         updated_at: _nowISO(),
     };
 }
 
-// Full sync of all characters, states, and notes to Supabase.
+// Full sync of all characters, states, notes and files to Supabase.
 async function _syncAllPlayerData() {
     if (!_supabaseReady()) return;
     const chars = getCharacters();
-    await Promise.all(chars.map(c => sbUpsert('characters', _charToRow(c))));
-    await Promise.all(chars.map(c => sbUpsert('character_state', {
-        character_id: c.id,
-        hp:    (() => { const v = localStorage.getItem('aria-current-hp-'   + c.id); return v !== null ? parseInt(v) : null; })(),
-        cards: (() => { const v = localStorage.getItem('aria-cards-'        + c.id); return v ? JSON.parse(v) : null; })(),
-        tabs:  (() => { const v = localStorage.getItem('aria-player-tabs-'  + c.id); return v ? JSON.parse(v) : null; })(),
-        updated_at: _nowISO(),
-    })));
-    const now = _nowISO();
+    await sbPutAll(ENT.character, chars, saveKey);
+    await Promise.all(chars.map(c => sbUpsert('character_state', _charStateRow(c.id))));
     for (const c of chars) {
-        const rawNotes = localStorage.getItem('aria-notes-' + c.id);
-        if (rawNotes) {
-            let notes = [];
-            try { const p = JSON.parse(rawNotes); notes = Array.isArray(p) ? p : []; } catch(e) {}
-            await Promise.all(notes.map((n, i) => sbUpsert('character_notes', {
-                id: n.id, character_id: c.id, name: n.name || '',
-                content: n.content || '', position: i, updated_at: now,
-            })));
-        }
-        const rawFiles = localStorage.getItem('aria-player-files-' + c.id);
-        if (rawFiles) {
-            let files = [];
-            try { files = JSON.parse(rawFiles) || []; } catch(e) {}
-            await Promise.all(files.map(f => sbUpsert('character_files', {
-                id: f.id, character_id: c.id, file_id: f.id,
-                name: f.name || '', type: f.type || '', url: f.url || '', updated_at: now,
-            })));
-        }
+        const notes = _charJSON('notes', c.id, []);
+        await sbPutAll(ENT.characterNote, Array.isArray(notes) ? notes : [], c.id, true);
+        const files = _charJSON('files', c.id, []);
+        await Promise.all((Array.isArray(files) ? files : []).map(f => sbPutFile(f, c.id)));
     }
 }
 
@@ -323,65 +300,61 @@ function debouncedSyncState() {
 
 let _noteTimer = null;
 // Debounced sync of a single note to Supabase.
-function debouncedSyncNote(note) {
+function debouncedSyncNote(note, position = 0) {
     clearTimeout(_noteTimer);
-    _noteTimer = setTimeout(() => syncCharacterNote(note), 800);
+    _noteTimer = setTimeout(() => syncCharacterNote(note, position), 800);
 }
 
 // Sync HP, cards, and tabs for a character to the character_state table.
 async function syncCharacterState(charId) {
     if (!_supabaseReady() || !charId) return;
-    const hp    = localStorage.getItem('aria-current-hp-'  + charId);
-    const cards = localStorage.getItem('aria-cards-'       + charId);
-    const tabs  = localStorage.getItem('aria-player-tabs-' + charId);
-    await sbUpsert('character_state', {
-        character_id: charId,
-        hp:    hp    !== null ? parseInt(hp) : null,
-        cards: cards ? JSON.parse(cards) : null,
-        tabs:  tabs  ? JSON.parse(tabs)  : null,
-        updated_at: _nowISO(),
-    });
+    await sbUpsert('character_state', _charStateRow(charId));
 }
 
-// Upsert a single note to the character_notes table.
-async function syncCharacterNote(note) {
+// Upsert a single note to the character_notes table. The notes engine owns the list
+// and passes the note's position in it.
+async function syncCharacterNote(note, position = 0) {
     if (!_supabaseReady() || !currentCharId || !note?.id) return;
-    await sbUpsert('character_notes', {
-        id: note.id, character_id: currentCharId,
-        name: note.name || '', content: note.content || '',
-        position: notesList.indexOf(note),
-        updated_at: _nowISO(),
-    });
+    await sbPut(ENT.characterNote, note, currentCharId, { position: Math.max(0, position) });
 }
 
 // Delete a note from the character_notes table by ID.
 async function deleteCharacterNote(id) {
     if (!_supabaseReady()) return;
-    await sbDelete('character_notes', 'id=eq.' + encodeURIComponent(id));
+    await sbDelete(ENT.characterNote.table, 'id=eq.' + encodeURIComponent(id));
 }
 
 // Upsert a GM-granted file record for a character to Supabase.
 async function syncCharacterFile(file, charId) {
     if (!_supabaseReady() || !charId || !file?.id) return;
-    await sbUpsert('character_files', {
-        id: file.id, character_id: charId, file_id: file.id,
-        name: file.name || '', type: file.type || '', url: file.url || '',
-        updated_at: _nowISO(),
-    });
+    await sbPutFile(file, charId);
 }
 
 // Delete a granted file record from Supabase by file ID.
 async function deleteCharacterFile(fileId) {
     if (!_supabaseReady()) return;
-    await sbDelete('character_files', 'id=eq.' + encodeURIComponent(fileId));
+    await sbDelete(ENT.characterFile.table, 'id=eq.' + encodeURIComponent(fileId));
 }
 
-// Per-character localStorage key prefixes (everything scoped by charId). This list
-// is the ONLY place they are enumerated — every path that drops a character routes
-// through _dropCharacterKeys() below. Two hand-written copies of this list used to
-// exist (here and in deleteCharacter), and both had drifted: neither removed
-// 'aria-camera-off-', so a deleted character leaked its camera kill switch forever.
-const _CHAR_KEY_PREFIXES = ['aria-current-hp-', 'aria-cards-', 'aria-notes-', 'aria-player-files-', 'aria-player-rolls-', 'aria-player-tabs-', 'aria-camera-off-'];
+// Every per-character localStorage key, named once. charKey(which, id) is the only
+// way to build one, and _CHAR_KEY_PREFIXES — the list every deletion path walks —
+// is derived from the same table, so a new key cannot be added to one and forgotten
+// in the other. That is exactly what happened to 'aria-camera-off-': the prefix list
+// and deleteCharacter each spelled the keys out by hand, neither knew about it, and
+// a deleted character leaked its camera kill switch forever.
+const CHAR_KEYS = {
+    hp:     'aria-current-hp-',
+    cards:  'aria-cards-',
+    notes:  'aria-notes-',
+    files:  'aria-player-files-',
+    rolls:  'aria-player-rolls-',
+    tabs:   'aria-player-tabs-',
+    camera: 'aria-camera-off-',
+};
+const _CHAR_KEY_PREFIXES = Object.values(CHAR_KEYS);
+
+// Storage key for one character's slice of `which`; defaults to the open character.
+function charKey(which, id = currentCharId) { return CHAR_KEYS[which] + id; }
 
 // Remove every scoped key belonging to one character.
 function _dropCharacterKeys(id) {
@@ -395,6 +368,16 @@ function _clearLocalPlayerData() {
     localStorage.removeItem('aria-characters');
 }
 
+// Group child rows by their parent id and write one localStorage key per parent.
+// Every parent that had rows gets its key rewritten; parents with none are left
+// alone here — deletions are handled by the orphan sweep on the character list.
+function _storeByParent(which, entity, rows, parentCol) {
+    const byParent = {};
+    rows.forEach(row => (byParent[row[parentCol]] ||= []).push(fromRow(entity, row)));
+    Object.entries(byParent).forEach(([pid, arr]) =>
+        localStorage.setItem(charKey(which, pid), JSON.stringify(arr)));
+}
+
 // Load all player data (characters, states, notes, files) from Supabase into localStorage.
 // Returns true when the load completed (even if the key has no data yet), false on error —
 // callers must not push local data back up after a failed load.
@@ -402,59 +385,33 @@ async function loadFromSupabase() {
     if (!_supabaseReady()) return false;
     try {
         await runMigration(saveKey, 'player');
-        const chars = await sbSelect('characters', 'save_key=eq.' + encodeURIComponent(saveKey));
+        const chars = await sbSelect(ENT.character.table, 'save_key=eq.' + encodeURIComponent(saveKey));
         if (!chars.length) return true;
 
-        const dbChars = chars.map(row => ({
-            id: row.id, name: row.name, class: row.class,
-            campaignKey: row.campaign_key || '',
-            ariaType: row.aria_type || 'ancient',
-            stats: row.stats || {}, physical: row.physical || {},
-            skills: row.skills || [], specials: row.specials || [],
-            weapons: row.weapons || [], protection: row.protection || {},
-            inventory: row.inventory || [],
-            potionRecipes: row.potion_recipes || [],
-            vials: row.vials || 0,
-            potions: row.potions || [],
-            money: row.money || null,
-            karma: row.karma ?? 0,
-        }));
+        const dbChars = chars.map(row => fromRow(ENT.character, row));
         // Clean up scoped keys of characters deleted on another device (the list
         // below is overwritten, which would otherwise orphan their HP/cards/notes).
         const dbIds = new Set(dbChars.map(c => c.id));
         getCharacters().forEach(c => {
-            if (!dbIds.has(c.id)) _CHAR_KEY_PREFIXES.forEach(p => localStorage.removeItem(p + c.id));
+            if (!dbIds.has(c.id)) _dropCharacterKeys(c.id);
         });
         localStorage.setItem('aria-characters', JSON.stringify(dbChars));
 
         const ids = chars.map(c => c.id).join(',');
         const [states, notes, files] = await Promise.all([
             sbSelect('character_state', 'character_id=in.(' + ids + ')'),
-            sbSelect('character_notes', 'character_id=in.(' + ids + ')&order=position.asc'),
-            sbSelect('character_files', 'character_id=in.(' + ids + ')'),
+            sbSelect(ENT.characterNote.table, 'character_id=in.(' + ids + ')&order=position.asc'),
+            sbSelect(ENT.characterFile.table, 'character_id=in.(' + ids + ')'),
         ]);
 
         states.forEach(s => {
-            if (s.hp    !== null && s.hp    !== undefined) localStorage.setItem('aria-current-hp-'   + s.character_id, s.hp);
-            if (s.cards) localStorage.setItem('aria-cards-'       + s.character_id, JSON.stringify(s.cards));
-            if (s.tabs)  localStorage.setItem('aria-player-tabs-' + s.character_id, JSON.stringify(s.tabs));
+            if (s.hp !== null && s.hp !== undefined) localStorage.setItem(charKey('hp', s.character_id), s.hp);
+            if (s.cards) localStorage.setItem(charKey('cards', s.character_id), JSON.stringify(s.cards));
+            if (s.tabs)  localStorage.setItem(charKey('tabs',  s.character_id), JSON.stringify(s.tabs));
         });
 
-        const notesByChar = {};
-        notes.forEach(n => {
-            if (!notesByChar[n.character_id]) notesByChar[n.character_id] = [];
-            notesByChar[n.character_id].push({ id: n.id, name: n.name, content: n.content });
-        });
-        Object.entries(notesByChar).forEach(([cid, arr]) =>
-            localStorage.setItem('aria-notes-' + cid, JSON.stringify(arr)));
-
-        const filesByChar = {};
-        files.forEach(f => {
-            if (!filesByChar[f.character_id]) filesByChar[f.character_id] = [];
-            filesByChar[f.character_id].push({ id: f.file_id, name: f.name, type: f.type, url: f.url });
-        });
-        Object.entries(filesByChar).forEach(([cid, arr]) =>
-            localStorage.setItem('aria-player-files-' + cid, JSON.stringify(arr)));
+        _storeByParent('notes', ENT.characterNote, notes, 'character_id');
+        _storeByParent('files', ENT.characterFile, files, 'character_id');
 
         return true;
     } catch(e) { console.warn('[ARIA] Supabase load failed:', e); return false; }
@@ -464,12 +421,10 @@ async function loadFromSupabase() {
 // ═══════════════════════════════════════════
 //  CHARACTER MANAGEMENT
 // ═══════════════════════════════════════════
-// Return the localStorage key for the current character's HP.
-function hpKey()    { return 'aria-current-hp-' + currentCharId; }
-// Return the localStorage key for the current character's card deck state.
-function cardKey()  { return 'aria-cards-'       + currentCharId; }
-// Return the localStorage key for the current character's notes.
-function notesKey() { return 'aria-notes-'       + currentCharId; }
+// Shorthands for the three keys the panel reaches for most often.
+function hpKey()    { return charKey('hp'); }
+function cardKey()  { return charKey('cards'); }
+function notesKey() { return charKey('notes'); }
 
 // Read the characters array from localStorage.
 function getCharacters() { return JSON.parse(localStorage.getItem('aria-characters') || '[]'); }
@@ -496,12 +451,12 @@ function migrateIfNeeded() {
     if (localStorage.getItem('aria-characters')) return;
     const oldChar = JSON.parse(localStorage.getItem('aria-character') || 'null');
     if (!oldChar) return;
-    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const id = uid();
     saveCharacters([{ ...oldChar, id }]);
     const oldHp = localStorage.getItem('aria-current-hp');
-    if (oldHp !== null) localStorage.setItem('aria-current-hp-' + id, oldHp);
+    if (oldHp !== null) localStorage.setItem(charKey('hp', id), oldHp);
     const oldCards = localStorage.getItem('aria-cards');
-    if (oldCards !== null) localStorage.setItem('aria-cards-' + id, oldCards);
+    if (oldCards !== null) localStorage.setItem(charKey('cards', id), oldCards);
 }
 
 // Load a character by ID into module state, initializing all derived fields.
@@ -529,12 +484,8 @@ function loadCharacterState(id) {
     }
     if (!character.specials) character.specials = [];
     if (character.karma === undefined) character.karma = 0;
-    const saved = JSON.parse(localStorage.getItem(cardKey()) || 'null');
-    cardDeck = saved?.deckIds?.map(cid => cardById(cid)).filter(Boolean) || buildDeck();
-    cardDrawn = new Set(saved?.drawn || []);
-    cardExcluded = new Set(saved?.excluded || []);
-    lastCardId = saved?.lastCardId || null;
-    playerRollHistory = JSON.parse(localStorage.getItem('aria-player-rolls-' + id) || '[]');
+    deck.load(JSON.parse(localStorage.getItem(cardKey()) || 'null'));
+    playerRollHistory = JSON.parse(localStorage.getItem(charKey('rolls', id)) || '[]');
     console.log('[PLAYER] loadCharacterState:', data.name, '| class:', data.class, '| charId:', id, '| campaignKey:', data.campaignKey || 'none', '| ariaType:', data.ariaType || 'ancient', '| skills:', (data.skills || []).length, '| potionRecipes:', (data.potionRecipes || []).length);
     return true;
 }
@@ -605,21 +556,12 @@ async function selectCharacter(id) {
     localStorage.setItem(LAST_CHAR_KEY, id);
     showApp();
     initApp();
-    if (!localStorage.getItem('aria-player-rolls-' + id)) {
+    if (!localStorage.getItem(charKey('rolls', id))) {
         const rows = await loadCharacterRolls(id);
         if (rows.length) {
-            playerRollHistory = rows.map(r => ({
-                skillName:  r.skill_name,
-                threshold:  r.threshold,
-                roll:       r.roll,
-                success:    r.success,
-                char:       character.name,
-                bonusMalus: r.bonus_malus,
-                playerId,
-                ts:         r.ts,
-            }));
+            playerRollHistory = rows.map(r => ({ ...fromRow(ENT.characterRoll, r), char: character.name, playerId }));
             if (playerRollHistory.length > PLAYER_ROLL_HISTORY_MAX) playerRollHistory.length = PLAYER_ROLL_HISTORY_MAX;
-            localStorage.setItem('aria-player-rolls-' + id, JSON.stringify(playerRollHistory));
+            localStorage.setItem(charKey('rolls', id), JSON.stringify(playerRollHistory));
             renderRollHistory();
         }
     }
@@ -629,11 +571,9 @@ async function selectCharacter(id) {
 function deleteCharacter(id) {
     if (!confirm('Supprimer ce personnage ? Cette action est irréversible.')) return;
     if (localStorage.getItem(LAST_CHAR_KEY) === id) localStorage.removeItem(LAST_CHAR_KEY);
-    sbDelete('characters',      'id=eq.'           + encodeURIComponent(id));
-    sbDelete('character_state', 'character_id=eq.' + encodeURIComponent(id));
-    sbDelete('character_notes', 'character_id=eq.' + encodeURIComponent(id));
-    sbDelete('character_files', 'character_id=eq.' + encodeURIComponent(id));
-    sbDelete('character_rolls', 'character_id=eq.' + encodeURIComponent(id));
+    // The child tables come from ENT, so adding a character-scoped entity cannot
+    // leave rows behind here. This used to be five hand-written sbDelete calls.
+    sbDeleteCascade(ENT.character, 'character_id', id);
     const chars = getCharacters().filter(c => c.id !== id);
     saveCharacters(chars);
     _dropCharacterKeys(id);
@@ -658,7 +598,7 @@ function confirmCreateCharacter() {
     const campaignKey = document.getElementById('new-char-campaign').value.trim();
     const ariaType = document.querySelector('input[name="new-char-type"]:checked')?.value || 'ancient';
     const template = ariaType === 'contemporary' ? DEFAULT_CHAR_CONTEMPORARY : DEFAULT_CHAR_ANCIENT;
-    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const id = uid();
     const chars = getCharacters();
     chars.push({ ...JSON.parse(JSON.stringify(template)), name, class: cls, campaignKey, id });
     saveCharacters(chars);
@@ -737,13 +677,11 @@ function initApp() {
     console.log('[PLAYER] initApp: char:', character.name, '| charId:', currentCharId, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     currentHP = null;
     cameraOff = localStorage.getItem(cameraOffKey()) === '1';
-    playerTabs = JSON.parse(localStorage.getItem('aria-player-tabs-' + currentCharId) || '{"cards":false,"alchemy":false}');
-    playerFiles = JSON.parse(localStorage.getItem('aria-player-files-' + currentCharId) || '[]');
+    playerTabs = JSON.parse(localStorage.getItem(charKey('tabs')) || '{"cards":false,"alchemy":false}');
+    playerFiles = JSON.parse(localStorage.getItem(charKey('files')) || '[]');
     initCurrentHP();
     renderAll();
-    buildTracker();
-    updateDeckCount();
-    if (lastCardId) restoreCard();
+    deck.mount();
     loadConfigInputs();
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();
@@ -751,7 +689,7 @@ function initApp() {
     document.getElementById('tab-char').addEventListener('input', scheduleAutoSave);
     document.getElementById('tab-inventory').addEventListener('input', scheduleAutoSave);
     document.getElementById('tab-alchemy').addEventListener('input', scheduleAutoSave);
-    loadNotes();
+    notes.load();
     // No presence heartbeat: `presence.enter` in initAbly announces us once and
     // `presence.update` publishes on change. Nothing polls, and nothing expires.
     acquirePushLock();
@@ -787,133 +725,15 @@ function renderTabLayout() {
 // ═══════════════════════════════════════════
 //  NOTES
 // ═══════════════════════════════════════════
-let notesList = [];
-let currentNoteId = null;
-
-// Load notes from localStorage for the current character, migrating plain-string format if needed.
-function loadNotes() {
-    const raw = localStorage.getItem(notesKey());
-    if (!raw) {
-        notesList = [];
-    } else {
-        try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                notesList = parsed;
-            } else {
-                // Migrate from plain string
-                notesList = [{ id: _noteId(), name: 'Notes', content: raw }];
-            }
-        } catch(e) {
-            // Plain string (not JSON)
-            notesList = [{ id: _noteId(), name: 'Notes', content: raw }];
-        }
-    }
-    currentNoteId = notesList.length > 0 ? notesList[0].id : null;
-    renderNotesList();
-    loadNoteContent();
-}
-
-// Generate a new UUID for a note.
-function _noteId() {
-    return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-
-// Save the current notes list to localStorage.
-function persistNotes() {
-    localStorage.setItem(notesKey(), JSON.stringify(notesList));
-}
-
-// Render the notes sidebar list, highlighting the currently selected note.
-function renderNotesList() {
-    const list = document.getElementById('notes-list');
-    if (!list) return;
-    list.innerHTML = '';
-    notesList.forEach(note => {
-        const item = document.createElement('div');
-        item.className = 'notes-item' + (note.id === currentNoteId ? ' active' : '');
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'notes-item-name';
-        nameSpan.textContent = note.name || 'Sans titre';
-        nameSpan.addEventListener('click', () => selectNote(note.id));
-        const delBtn = document.createElement('button');
-        delBtn.className = 'notes-item-delete';
-        delBtn.title = 'Supprimer';
-        delBtn.textContent = '✕';
-        delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteNote(note.id); });
-        item.appendChild(nameSpan);
-        item.appendChild(delBtn);
-        list.appendChild(item);
-    });
-}
-
-// Load the selected note's name and body into the editor fields.
-function loadNoteContent() {
-    const nameInput = document.getElementById('notes-name-input');
-    const area = document.getElementById('notes-area');
-    if (!nameInput || !area) return;
-    const note = notesList.find(n => n.id === currentNoteId);
-    if (note) {
-        nameInput.value = note.name;
-        area.value = note.content;
-        nameInput.disabled = false;
-        area.disabled = false;
-    } else {
-        nameInput.value = '';
-        area.value = '';
-        nameInput.disabled = true;
-        area.disabled = true;
-    }
-}
-
-// Select a note by ID and display it in the editor.
-function selectNote(id) {
-    currentNoteId = id;
-    renderNotesList();
-    loadNoteContent();
-    document.getElementById('notes-area').focus();
-}
-
-// Add a new empty note, persist it, sync to Supabase, and select it.
-function addNote() {
-    const note = { id: _noteId(), name: 'Nouvelle note', content: '' };
-    notesList.push(note);
-    persistNotes();
-    syncCharacterNote(note);
-    selectNote(note.id);
-    const nameInput = document.getElementById('notes-name-input');
-    if (nameInput) { nameInput.focus(); nameInput.select(); }
-}
-
-// Delete a note, remove it from Supabase, and select the adjacent note.
-function deleteNote(id) {
-    deleteCharacterNote(id);
-    const idx = notesList.findIndex(n => n.id === id);
-    notesList = notesList.filter(n => n.id !== id);
-    currentNoteId = notesList[Math.min(idx, notesList.length - 1)]?.id || null;
-    persistNotes();
-    renderNotesList();
-    loadNoteContent();
-}
-
-// Save the current note's content from the textarea and schedule a Supabase sync.
-function saveCurrentNote() {
-    const note = notesList.find(n => n.id === currentNoteId);
-    if (!note) return;
-    note.content = document.getElementById('notes-area').value;
-    persistNotes();
-    debouncedSyncNote(note);
-}
-
-// Rename the current note from the name input and refresh the list.
-function renameCurrentNote() {
-    const note = notesList.find(n => n.id === currentNoteId);
-    if (!note) return;
-    note.name = document.getElementById('notes-name-input').value;
-    persistNotes();
-    renderNotesList();
-    debouncedSyncNote(note);
-}
+// The engine is makeNotes() in aria-shared.js; this is just the character-scoped
+// wiring. The HTML calls notes.add() / notes.save() / notes.rename() directly.
+const notes = makeNotes({
+    key: notesKey,
+    ids: { list: 'notes-list', name: 'notes-name-input', area: 'notes-area' },
+    sync:     (note, pos) => syncCharacterNote(note, pos),
+    syncSoon: (note, pos) => debouncedSyncNote(note, pos),
+    remove:   id => deleteCharacterNote(id),
+});
 
 // Show/hide conditional tabs based on GM-granted access and character type.
 function applyTabVisibility() {
@@ -1485,6 +1305,24 @@ function resetBM() { bonusMalus = 0; updateBMDisplay(); }
 function bmNextActive() { return bmNextCount > 0 ? bmNextValue : 0; }
 // Persistent + active temporary modifier — for live percentage previews.
 function liveBM() { return bonusMalus + bmNextActive(); }
+
+// THE definition of a roll threshold. doRoll() rolls against this number and every
+// live preview displays it, so the two cannot disagree.
+//
+// This expression used to be hand-written at nine call sites, and they had already
+// drifted: the potion card floored at 0 while doRoll floored at 1, so a recipe could
+// advertise "Succès 0%" and then roll against 1. Skills folded in the per-skill
+// bonus, the potion preview silently didn't. CLAUDE.md carried a paragraph telling
+// the reader to remember `liveBM() + karma` at each site — that paragraph was the
+// bug report for this function's absence.
+//
+//   base   — skill/stat/recipe percentage
+//   bonus  — per-skill permanent modifier (character.skills[n].bonus)
+//   skipBM — Jet libre: the typed threshold is used raw, no BM, temp or karma
+function rollThreshold(base, { bonus = 0, skipBM = false } = {}) {
+    const n = skipBM ? base : base + bonus + liveBM() + (character?.karma ?? 0);
+    return Math.max(1, Math.min(100, n));
+}
 // Arm a temporary modifier for the next N threshold rolls from the bar inputs.
 function setBMNext() {
     const v = parseInt(document.getElementById('bm-next-val').value);
@@ -1525,7 +1363,6 @@ function updateBMDisplay() {
     const node = document.getElementById('bm-display');
     node.textContent = (bonusMalus > 0 ? '+' : '') + bonusMalus;
     node.className = 'bm-display' + (bonusMalus > 0 ? ' positive' : bonusMalus < 0 ? ' negative' : '');
-    const bm = liveBM();
     // Render the armed temporary modifier pill (next N rolls).
     const ns = document.getElementById('bm-next-status');
     if (ns) {
@@ -1547,7 +1384,7 @@ function updateBMDisplay() {
     document.getElementById('skill-list').querySelectorAll('.skill-item').forEach(div => {
         const skill = (character.skills || [])[+div.dataset.skillIdx];
         if (skill) {
-            const v = Math.max(1, Math.min(100, skill.pct + (+skill.bonus || 0) + bm + (character?.karma ?? 0)));
+            const v = rollThreshold(skill.pct, { bonus: +skill.bonus || 0 });
             div.querySelector('.skill-pct').textContent = v + '%';
             const fill = div.querySelector('.skill-bar-fill');
             if (fill) fill.style.width = v + '%';
@@ -1555,16 +1392,16 @@ function updateBMDisplay() {
     });
     document.getElementById('special-list').querySelectorAll('.skill-item').forEach(div => {
         const sp = (character.specials || [])[+div.dataset.skillIdx];
-        if (sp) div.querySelector('.skill-pct').textContent = Math.max(1, Math.min(100, sp.pct + (+sp.bonus || 0) + bm + (character?.karma ?? 0))) + '%';
+        if (sp) div.querySelector('.skill-pct').textContent = rollThreshold(sp.pct, { bonus: +sp.bonus || 0 }) + '%';
     });
     // Recipe cards render one .potion-card-chance each, in recipe order (stock
     // cards have no chance span), so the NodeList maps 1:1 onto potionRecipes.
     document.querySelectorAll('#potion-list .potion-card-chance').forEach((node, i) => {
         const r = (character.potionRecipes || [])[i];
-        if (r) node.textContent = `Succès ${Math.max(0, Math.min(100, (r.successChance || 0) + bm + (character?.karma ?? 0)))}%`;
+        if (r) node.textContent = `Succès ${rollThreshold(r.successChance || 0)}%`;
     });
     updateHiddenRollBtn();
-    renderStats();          // stat-card thresholds bake in liveBM() + karma at render time
+    renderStats();          // stat cards call rollThreshold() at render time
     renderCombatSidebar();
 }
 
@@ -1624,7 +1461,7 @@ function renderSkills() {
     list.innerHTML = '';
     (character.skills || []).map((skill, idx) => ({ skill, idx })).sort((a, b) => a.skill.name.localeCompare(b.skill.name, 'fr')).forEach(({ skill, idx }) => {
         const bonus = +skill.bonus || 0;
-        const eff = Math.max(1, Math.min(100, skill.pct + bonus + liveBM() + (character.karma ?? 0)));
+        const eff = rollThreshold(skill.pct, { bonus });
         const div = document.createElement('div');
         const isSoigner = skill.name === 'Soigner';
         div.className = 'skill-item' + (isSoigner ? ' soigner-skill' : '');
@@ -1647,7 +1484,7 @@ function renderSkills() {
     slist.innerHTML = '';
     (character.specials || []).map((sp, idx) => ({ sp, idx })).sort((a, b) => a.sp.name.localeCompare(b.sp.name, 'fr')).forEach(({ sp, idx }) => {
         const bonus = +sp.bonus || 0;
-        const eff = Math.max(1, Math.min(100, sp.pct + bonus + liveBM() + (character.karma ?? 0)));
+        const eff = rollThreshold(sp.pct, { bonus });
         const div = document.createElement('div');
         div.className = 'skill-item';
         div.dataset.skillName = sp.name;
@@ -1682,8 +1519,7 @@ function renderStats() {
     grid.innerHTML = '';
     ['FOR', 'DEX', 'END', 'INT', 'CHA'].forEach(key => {
         const val = character.stats[key] || 0;
-        // Same formula as doRoll: base + persistent/temp BM + karma, clamped 1–100.
-        const threshold = Math.max(1, Math.min(100, val * multiplier + liveBM() + (character.karma ?? 0)));
+        const threshold = rollThreshold(val * multiplier);
         const div = document.createElement('div');
         div.className = 'stat-card';
         div.onclick = () => rollStat(key, val);
@@ -1768,8 +1604,7 @@ function renderInventorySidebar() {
 function renderCombatSidebar() {
     const body = document.getElementById('combat-sidebar-body');
     if (!body) return;
-    const karma = character.karma ?? 0;
-    const effOf = sk => Math.max(1, Math.min(100, sk.pct + (+sk.bonus || 0) + liveBM() + karma));
+    const effOf = sk => rollThreshold(sk.pct, { bonus: +sk.bonus || 0 });
     const section = (label, ...kids) => el('div', { className: 'sb-section' },
         el('div', { className: 'sb-label', textContent: label }), ...kids);
 
@@ -1993,7 +1828,8 @@ function doRoll(skillName, basePct, skipBM = false) {
     const karma = character?.karma ?? 0;
     const tempBM = skipBM ? 0 : bmNextActive();
     _appliedBM = skipBM ? 0 : (bonusMalus + tempBM);
-    const threshold = skipBM ? Math.max(1, Math.min(100, basePct)) : Math.max(1, Math.min(100, basePct + bonusMalus + tempBM + karma));
+    // Same function the previews call — the displayed % IS the rolled threshold.
+    const threshold = rollThreshold(basePct, { skipBM });
     console.log('[PLAYER] doRoll:', skillName, '| base:', basePct, '| BM:', bonusMalus, '| temp:', tempBM, '| karma:', karma, '| threshold:', threshold, '| via:', dddiceAPI ? 'dddice' : 'local');
     setRolling(true);
     // Consume one charge of the armed temporary modifier (BM-affected rolls only).
@@ -2018,16 +1854,8 @@ function pushRollHistory(entry) {
     const stamped = { ...entry, ts: Date.now() };
     playerRollHistory.unshift(stamped);
     if (playerRollHistory.length > PLAYER_ROLL_HISTORY_MAX) playerRollHistory.pop();
-    localStorage.setItem('aria-player-rolls-' + currentCharId, JSON.stringify(playerRollHistory));
-    if (_supabaseReady()) sbInsert('character_rolls', {
-        character_id: currentCharId,
-        skill_name:   stamped.skillName  || '',
-        threshold:    stamped.threshold  ?? null,
-        roll:         stamped.roll,
-        success:      stamped.success    ?? null,
-        bonus_malus:  stamped.bonusMalus || 0,
-        ts:           stamped.ts,
-    });
+    localStorage.setItem(charKey('rolls'), JSON.stringify(playerRollHistory));
+    if (_supabaseReady()) sbInsert(ENT.characterRoll.table, toRow(ENT.characterRoll, stamped, currentCharId));
     renderRollHistory();
 }
 
@@ -2126,7 +1954,7 @@ function clearRollDateFilter() {
 function clearRollHistory() {
     playerRollHistory = [];
     rollFilter.clear();
-    localStorage.removeItem('aria-player-rolls-' + currentCharId);
+    localStorage.removeItem(charKey('rolls'));
     document.querySelectorAll('#rh-filter-bar .rf-pill').forEach(btn => btn.classList.remove('active'));
     const allBtn = document.getElementById('rfp-all');
     if (allBtn) allBtn.classList.add('active');
@@ -2337,78 +2165,49 @@ function drawFcStar(ctx, r) { const spikes = 4, out = r / 2, inn = r / 5; let ro
 // Stop the float card particle animation and clear the canvas.
 function stopFcParticles() { if (fcAnimFrame) { cancelAnimationFrame(fcAnimFrame); fcAnimFrame = null; } fcCtx.clearRect(0, 0, fcCanvas.width, fcCanvas.height); fcParticles = []; }
 
-// Initialize the dddice SDK: fetch available themes, create the canvas renderer, and connect to the room.
+// Connect to dddice and route finished rolls into this panel's pending state. The
+// connection itself is initDddiceSDK() in aria-shared.js.
+//
+// Other participants' animations never show here: #dddice-wrap is visibility:hidden
+// until this tab calls showDddiceCanvas() before rolling. The SDK holds the canvas
+// element, not the wrapper, so it cannot override that.
 async function initDddice() {
-    const slug = extractRoomSlug(config.dddiceRoom);
-    if (!config.dddiceKey || !slug) return;
+    const ok = await initDddiceSDK(roll => {
+        // Ignore another participant's dice landing while ours is pending — only
+        // enforced when both UUIDs are known (older SDK shapes skip the check).
+        const finishedUuid = _ddRollUuid(roll);
+        const pendingUuid = pendingDddiceRoll?.uuid ?? pendingSecondaryRoll?.uuid;
+        if (pendingUuid && finishedUuid && finishedUuid !== pendingUuid) return;
+        const settle = () => {
+            clearTimeout(dddiceRollSafetyTimer);
+            setTimeout(() => { dddiceSDK?.clear(); hideDddiceCanvas(); }, 1500);
+        };
+        if (pendingDddiceRoll) {
+            const { skillName, threshold } = pendingDddiceRoll;
+            pendingDddiceRoll = null;
+            settle();
+            const total = roll.total_value ?? 0;
+            handleResult(skillName, threshold, total === 0 ? 100 : total);
+        } else if (pendingSecondaryRoll) {
+            const { callback, mapFn } = pendingSecondaryRoll;
+            pendingSecondaryRoll = null;
+            settle();
+            const total = roll.total_value ?? 1;
+            callback(mapFn ? mapFn(total) : total);
+        }
+        // else: not our roll — the canvas is already hidden, nothing to do
+    });
+    if (!ok) return;
+    // Warm the 3D assets without creating a server-side roll, so the first real roll
+    // is instant. loadThemeResources is an internal SDK method.
     try {
-        // Load the dddice browser SDK (embeds 3D dice renderer)
-        const { ThreeDDice, ThreeDDiceRollEvent } = await import('https://esm.sh/dddice-js');
-
-        // Fetch available themes for the dropdown
-        const h = { 'Authorization': `Bearer ${config.dddiceKey}`, 'Accept': 'application/json' };
-        const boxRes = await fetch('https://dddice.com/api/1.0/dice-box', { headers: h });
-        if (!boxRes.ok) throw new Error(`Dice box HTTP ${boxRes.status}`);
-        const themes = (await boxRes.json()).data || [];
-        if (!themes.length) throw new Error('Aucun thème.');
-
-        const sel = document.getElementById('cfg-dddice-theme');
-        sel.innerHTML = '';
-        themes.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.name ? `${t.name} (${t.id})` : t.id; sel.appendChild(o); });
-        sel.disabled = false;
-        sel.value = config.dddiceTheme && themes.find(t => t.id === config.dddiceTheme) ? config.dddiceTheme : themes[0].id;
-
-        // Create the SDK renderer on the canvas, connect to the room
-        const canvas = document.getElementById('dddice-canvas');
-        dddiceSDK = new ThreeDDice(canvas, config.dddiceKey);
-        dddiceSDK.start();
-        await dddiceSDK.connect(slug);
-
-        // When the 3D animation finishes, read the result and handle it.
-        // Only act when this tab initiated the roll (pending state is set).
-        // Other players' roll animations never show because the wrapper div is visibility:hidden
-        // by default and only shown when this tab calls showDddiceCanvas() before rolling.
-        // The SDK holds a ref to the canvas element only, not the wrapper — so it cannot
-        // override the wrapper's visibility.
-        dddiceSDK.on(ThreeDDiceRollEvent.RollFinished, (roll) => {
-            // Ignore other participants' rolls landing while ours is pending —
-            // only enforced when both UUIDs are known (older SDK shapes skip the check).
-            const finishedUuid = _ddRollUuid(roll);
-            const pendingUuid = pendingDddiceRoll?.uuid ?? pendingSecondaryRoll?.uuid;
-            if (pendingUuid && finishedUuid && finishedUuid !== pendingUuid) return;
-            if (pendingDddiceRoll) {
-                clearTimeout(dddiceRollSafetyTimer);
-                const { skillName, threshold } = pendingDddiceRoll;
-                pendingDddiceRoll = null;
-                setTimeout(() => { dddiceSDK?.clear(); hideDddiceCanvas(); }, 1500);
-                const total = roll.total_value ?? 0;
-                handleResult(skillName, threshold, total === 0 ? 100 : total);
-            } else if (pendingSecondaryRoll) {
-                clearTimeout(dddiceRollSafetyTimer);
-                const { callback, mapFn } = pendingSecondaryRoll;
-                pendingSecondaryRoll = null;
-                setTimeout(() => { dddiceSDK?.clear(); hideDddiceCanvas(); }, 1500);
-                const total = roll.total_value ?? 1;
-                callback(mapFn ? mapFn(total) : total);
-            }
-            // else: not our roll — canvas is already hidden, nothing to do
-        });
-
-        dddiceAPI = { key: config.dddiceKey, room: slug, theme: sel.value };
-        setDddiceStatus(true, themes.find(t => t.id === sel.value)?.name || sel.value);
-        sel.onchange = () => { if (dddiceAPI) dddiceAPI.theme = sel.value; config.dddiceTheme = sel.value; localStorage.setItem('aria-config', JSON.stringify(config)); };
-
-        // Preload 3D assets without creating a server-side roll, so the first real roll is instant.
-        // loadThemeResources is an internal SDK method — call it directly to warm up models/textures/sounds.
-        try {
-            if (typeof dddiceSDK.loadThemeResources === 'function') {
-                await dddiceSDK.loadThemeResources([
-                    { type: 'd10x', theme: dddiceAPI.theme },
-                    { type: 'd10', theme: dddiceAPI.theme }
-                ]);
-            }
-        } catch (_) {}
-    } catch (e) { console.error('dddice:', e); setDddiceStatus(false, e.message); dddiceSDK = null; dddiceAPI = null; }
+        if (typeof dddiceSDK.loadThemeResources === 'function') {
+            await dddiceSDK.loadThemeResources([
+                { type: 'd10x', theme: dddiceAPI.theme },
+                { type: 'd10',  theme: dddiceAPI.theme },
+            ]);
+        }
+    } catch (_) {}
 }
 // Show the dddice canvas wrapper (makes the 3D dice animation visible).
 function showDddiceCanvas() { const w = document.getElementById('dddice-wrap'); if (w) w.style.visibility = 'visible'; }
@@ -2582,7 +2381,7 @@ function initAbly() {
                 if (d.charId !== myId) return;
                 console.log('[PLAYER] tab-config received:', JSON.stringify(d.tabs));
                 playerTabs = { ...playerTabs, ...d.tabs };
-                localStorage.setItem('aria-player-tabs-' + currentCharId, JSON.stringify(playerTabs));
+                localStorage.setItem(charKey('tabs'), JSON.stringify(playerTabs));
                 debouncedSyncState();
                 applyTabVisibility();
                 schedulePresence();   // `tabs` rides along in our presence data
@@ -2625,7 +2424,7 @@ function initAbly() {
                 console.log('[PLAYER] file-grant received:', d.file.name, '| for:', d.charId === 'all' ? 'all' : 'me');
                 if (!playerFiles.find(f => f.id === d.file.id)) {
                     playerFiles.push(d.file);
-                    localStorage.setItem('aria-player-files-' + currentCharId, JSON.stringify(playerFiles));
+                    localStorage.setItem(charKey('files'), JSON.stringify(playerFiles));
                     syncCharacterFile(d.file, currentCharId);
                     applyTabVisibility();
                     renderPlayerFiles();
@@ -2638,7 +2437,7 @@ function initAbly() {
                 if (!d.fileId) return;
                 console.log('[PLAYER] file-revoke received:', d.fileId);
                 playerFiles = playerFiles.filter(f => f.id !== d.fileId);
-                localStorage.setItem('aria-player-files-' + currentCharId, JSON.stringify(playerFiles));
+                localStorage.setItem(charKey('files'), JSON.stringify(playerFiles));
                 deleteCharacterFile(d.fileId);
                 applyTabVisibility();
                 renderPlayerFiles();
@@ -2702,7 +2501,7 @@ function copyOverlayUrl() {
 }
 // Publish a card event (draw/reshuffle) to the aria-cards Ably channel.
 function publishCard(type, extra = {}) {
-    if (ablyCards) ablyCards.publish(type, { ...extra, excluded: [...cardExcluded], drawn: [...cardDrawn], deckIds: cardDeck.map(c => c.id), lastCardId });
+    if (ablyCards) ablyCards.publish(type, { ...extra, ...deck.state() });
 }
 // ── Presence: publish ─────────────────────────────────────────────────────────
 let presenceEntered = false;
@@ -2853,7 +2652,7 @@ function saveConfig() {
         lightMode: document.getElementById('cfg-light-mode').checked,
     };
     localStorage.setItem('aria-config', JSON.stringify(config));
-    if (dddiceSDK) { try { dddiceSDK.disconnect?.(); } catch (_) {} dddiceSDK = null; }
+    teardownDddice();
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null;
     // Close the old Ably connection before reinit — nulling the refs without closing
@@ -2861,7 +2660,7 @@ function saveConfig() {
     // close is also what leaves the old campaign's presence set, so there is nothing
     // to publish first and nothing to await before closing.
     if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
-    dddiceAPI = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
+    ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
     ablyPresence = null; presenceEntered = false;
     if (campaignChanged) {
         resetCameraState();
@@ -3048,9 +2847,7 @@ function renderPotions() {
         const grid = document.createElement('div');
         grid.className = 'potion-grid';
         recipes.forEach((r, i) => {
-            // Same modifiers as the roll itself (doRoll adds BM + karma to the threshold).
-            const chance = Math.max(0, Math.min(100, (r.successChance || 0) + liveBM() + (character.karma ?? 0)));
-            // Recipes arrive from the GM over Ably (potion-grant) — escape everything.
+            const chance = rollThreshold(r.successChance || 0);
             const meta = [r.ingredients || '', r.desc || ''].filter(Boolean).join(' — ');
             grid.append(el('div', { className: 'potion-card' },
                 el('div', { className: 'potion-card-top' },
@@ -3294,93 +3091,27 @@ function flashSaveStatus() {
 // ═══════════════════════════════════════════
 //  CARD SYSTEM
 // ═══════════════════════════════════════════
-// Build the card tracker grid of suit rows and rank pills.
-function buildTracker() {
-    const container = document.getElementById('tracker-suits');
-    container.innerHTML = '';
-    for (const suit of SUITS) {
-        const row = document.createElement('div'); row.className = 'suit-row-t';
-        const sym = document.createElement('span'); sym.className = `suit-sym ${suit.cls}`; sym.textContent = suit.sym;
-        row.appendChild(sym);
-        const pills = document.createElement('div'); pills.className = 'rank-pills';
-        for (const rank of RANKS) { pills.appendChild(makePill(`${rank}-${suit.name}`, rank, suit.pillCls)); }
-        row.appendChild(pills); container.appendChild(row);
-    }
-    const jRow = document.createElement('div'); jRow.className = 'suit-row-t';
-    const jSym = document.createElement('span'); jSym.className = 'suit-sym c-purple'; jSym.textContent = '★';
-    jRow.appendChild(jSym);
-    const jPills = document.createElement('div'); jPills.className = 'rank-pills';
-    jPills.appendChild(makePill('joker-red', 'R★', 'is-joker'));
-    jPills.appendChild(makePill('joker-black', 'N★', 'is-joker'));
-    jRow.appendChild(jPills); container.appendChild(jRow);
+// The engine is makeDeck() in aria-shared.js. The player's deck is the shared one:
+// persisted per character and mirrored to the table over Ably.
+const deck = makeDeck({
+    persist: saveCardState,
+    publish: (type, extra) => publishCard(type, { ...extra, playerName: character.name }),
+    fly: animateFly,
+    announce: async remainingOnly => {
+        const flash = document.getElementById('reshuffle-flash');
+        document.getElementById('reshuffle-msg').textContent = remainingOnly ? '↺ Restant mélangé' : '↺ Mélangé';
+        flash.classList.add('show');
+        await delay(900);
+        flash.classList.remove('show');
+    },
+});
+
+// Persist the deck state and schedule the Supabase state sync.
+function saveCardState() {
+    localStorage.setItem(cardKey(), JSON.stringify(deck.state()));
+    debouncedSyncState();
 }
-// Create a rank pill element for the card tracker.
-function makePill(id, label, extraCls) {
-    const p = document.createElement('span');
-    p.id = `pill-${id}`; p.className = 'rank-pill' + (extraCls ? ' ' + extraCls : ''); p.textContent = label;
-    refreshPill(p, id); p.addEventListener('click', () => togglePill(id)); return p;
-}
-// Update a pill's visual state to reflect drawn/excluded/normal status.
-function refreshPill(p, id) { const drawn = cardDrawn.has(id), excl = cardExcluded.has(id); p.classList.toggle('drawn', drawn); p.classList.toggle('excluded', excl); }
-// Refresh all pills in the tracker to match the current deck state.
-function refreshAllPills() { ALL_CARDS.forEach(c => { const p = document.getElementById(`pill-${c.id}`); if (p) refreshPill(p, c.id); }); }
-// Cycle a card's state: normal → excluded → returned to deck, updating the deck.
-function togglePill(id) {
-    if (cardDrawing) return;
-    const card = cardById(id);
-    const name = card.isJoker ? card.label : `${card.rank} de ${SUIT_FR[card.suit.name] || card.suit.name}`;
-    if (cardExcluded.has(id)) { cardExcluded.delete(id); cardDeck.splice(Math.floor(Math.random() * (cardDeck.length + 1)), 0, card); updateDeckCount(); showCardStatus(`${name} re-inclus`); }
-    else if (cardDrawn.has(id)) { cardDrawn.delete(id); cardDeck.splice(Math.floor(Math.random() * (cardDeck.length + 1)), 0, card); updateDeckCount(); showCardStatus(`${name} remis`); }
-    else { cardExcluded.add(id); const idx = cardDeck.findIndex(c => c.id === id); if (idx !== -1) { cardDeck.splice(idx, 1); updateDeckCount(); } showCardStatus(`${name} exclu`); }
-    const p = document.getElementById(`pill-${id}`); if (p) refreshPill(p, id);
-    updateClearBtn(); saveCardState();
-}
-// Remove all card exclusions and put excluded cards back in the deck.
-function clearExclusions() { if (cardDrawing) return; cardExcluded.forEach(id => { const c = cardById(id); if (c) cardDeck.splice(Math.floor(Math.random() * (cardDeck.length + 1)), 0, c); }); cardExcluded.clear(); updateDeckCount(); refreshAllPills(); updateClearBtn(); saveCardState(); showCardStatus('Exclusions effacées'); }
-// Persist the current card deck state (excluded, drawn, deckIds) to localStorage.
-function saveCardState() { localStorage.setItem(cardKey(), JSON.stringify({ excluded: [...cardExcluded], drawn: [...cardDrawn], deckIds: cardDeck.map(c => c.id), lastCardId })); debouncedSyncState(); }
-// Update the deck count label and toggle reshuffle/clear button visibility.
-function updateDeckCount() {
-    const n = cardDeck.length;
-    document.getElementById('deck-count').textContent = n === 0 ? 'Vide' : `${n} carte${n !== 1 ? 's' : ''}`;
-    document.getElementById('deck-wrap').classList.toggle('empty', n === 0);
-    document.getElementById('reshuffle-btn').classList.toggle('visible', n === 0);
-    document.getElementById('reshuffle-remaining-btn').classList.toggle('visible', n > 1 && n < ALL_CARDS.length - cardExcluded.size);
-    updateClearBtn();
-}
-// Show or hide the clear-exclusions button based on whether any cards are excluded.
-function updateClearBtn() { document.getElementById('clear-exclusions-btn').classList.toggle('visible', cardExcluded.size > 0); }
-// Show a temporary status message in the card tab for 2.2 seconds.
-function showCardStatus(msg) { const node = document.getElementById('card-status'); node.textContent = msg; clearTimeout(cardStatusTimer); cardStatusTimer = setTimeout(() => node.textContent = '', 2200); }
-// Restore the last drawn card display after a page reload without animation.
-function restoreCard() {
-    const card = cardById(lastCardId); if (!card) return;
-    const flipWrap = document.getElementById('flip-wrap');
-    renderCardContent(card);
-    document.getElementById('drawn-card').classList.add('ready');
-    flipWrap.classList.remove('hidden');
-    flipWrap.style.transition = 'none';
-    flipWrap.classList.add('flipped');
-    flipWrap.getBoundingClientRect();
-    flipWrap.style.transition = '';
-}
-// Play the card shuffle animation using ghost card elements.
-async function animateShuffle() {
-    const overlay = document.getElementById('shuffle-overlay');
-    const wrap = document.getElementById('deck-wrap');
-    const rect = wrap.getBoundingClientRect();
-    const ghosts = [];
-    for (let i = 0; i < 4; i++) {
-        const g = document.createElement('div'); g.className = 'shuffle-ghost';
-        g.appendChild(Object.assign(document.createElement('div'), { className: 'deck-pattern' }));
-        g.style.cssText = `width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;`;
-        overlay.appendChild(g); ghosts.push(g);
-    }
-    const dirs = ['left', 'right', 'left', 'right'];
-    ghosts.forEach((g, i) => { g.style.animation = `shuffle-${dirs[i]} 0.52s ${i * 0.08}s ease-in-out forwards`; });
-    wrap.classList.remove('shuffling'); wrap.getBoundingClientRect(); wrap.classList.add('shuffling');
-    await delay(680); ghosts.forEach(g => g.remove()); wrap.classList.remove('shuffling');
-}
+
 // Animate a card flying from the deck position to the stage area.
 async function animateFly() {
     const stage = document.querySelector('.card-stage');
@@ -3397,47 +3128,6 @@ async function animateFly() {
     flyEl.style.setProperty('--fly-x1', `${ex - sx}px`); flyEl.style.setProperty('--fly-y1', `${ey - sy}px`);
     flyEl.classList.remove('flying'); flyEl.getBoundingClientRect(); flyEl.classList.add('flying');
     await delay(430); flyEl.classList.remove('flying'); flyEl.style.opacity = '0';
-}
-// Render a card face and flip it into view with a CSS transition.
-async function revealCard(card) {
-    const flipWrap = document.getElementById('flip-wrap');
-    const drawnEl = document.getElementById('drawn-card');
-    renderCardContent(card); drawnEl.classList.add('ready');
-    flipWrap.classList.remove('hidden'); flipWrap.getBoundingClientRect();
-    await delay(30); flipWrap.classList.add('flipped');
-}
-// Draw the top card from the deck with fly and flip animations, then publish to Ably.
-async function drawCard() {
-    if (cardDrawing || cardDeck.length === 0) return;
-    cardDrawing = true;
-    const flipWrap = document.getElementById('flip-wrap');
-    flipWrap.classList.remove('flipped'); flipWrap.classList.add('hidden');
-    document.getElementById('drawn-card').classList.remove('ready');
-    await animateFly();
-    const drawn = cardDeck.pop();
-    cardDrawn.add(drawn.id); lastCardId = drawn.id;
-    const pill = document.getElementById(`pill-${drawn.id}`); if (pill) refreshPill(pill, drawn.id);
-    updateDeckCount(); await revealCard(drawn);
-    showCardStatus(drawn.isJoker ? drawn.label : `${drawn.rank} de ${SUIT_FR[drawn.suit.name] || drawn.suit.name}`);
-    saveCardState(); publishCard('draw', { cardId: drawn.id, playerName: character.name });
-    cardDrawing = false;
-}
-// Reshuffle all or remaining cards with shuffle animation and publish to Ably.
-async function manualReshuffle(remainingOnly) {
-    if (cardDrawing) return;
-    cardDrawing = true;
-    const flipWrap = document.getElementById('flip-wrap');
-    flipWrap.classList.remove('flipped');
-    await delay(200); flipWrap.classList.add('hidden');
-    document.getElementById('drawn-card').classList.remove('ready');
-    await animateShuffle();
-    if (remainingOnly) { cardDeck = shuffle(cardDeck); }
-    else { cardDrawn.clear(); cardDeck = shuffle([...ALL_CARDS].filter(c => !cardExcluded.has(c.id))); lastCardId = null; }
-    buildTracker(); updateDeckCount(); updateClearBtn(); saveCardState(); publishCard('reshuffle');
-    const flash = document.getElementById('reshuffle-flash');
-    document.getElementById('reshuffle-msg').textContent = remainingOnly ? '↺ Restant mélangé' : '↺ Mélangé';
-    flash.classList.add('show'); await delay(900); flash.classList.remove('show');
-    cardDrawing = false;
 }
 
 // ═══════════════════════════════════════════

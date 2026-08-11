@@ -55,8 +55,16 @@ function _finiteNum(v) { if (v === null || v === undefined || v === '') return n
 // value of the wrong shape is a malformed message, not an escaping problem.
 function _isIdToken(v) { return /^[A-Za-z0-9_-]{1,64}$/.test(String(v)); }
 
-// Current UTC time as an ISO 8601 string.
-function _nowISO() { return new Date().toISOString(); }
+// _nowISO() lives in aria-supabase.js — it is part of the persistence layer and
+// that file loads first on every page, including the two that have no shared.js.
+
+// Id for a locally created record. crypto.randomUUID needs a secure context, so
+// file:// falls back to timestamp + random. This expression was pasted inline
+// thirteen times across the two panels — nine of them in aria-gm.js alone, one of
+// which sat below that file's own _uid() helper.
+function uid() {
+    return crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
 
 // Promise that resolves after ms milliseconds.
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -256,6 +264,348 @@ function renderCardFace(face, card) {
     }
 }
 
+// Human label for a card, for status lines.
+function cardLabel(card) {
+    return card.isJoker ? card.label : `${card.rank} de ${SUIT_FR[card.suit.name] || card.suit.name}`;
+}
+
+// ═══════════════════════════════════════════
+//  DECK ENGINE
+// ═══════════════════════════════════════════
+// A deck with a draw stage and a "suivi du talon" pill tracker. The player has one
+// (shared with the table over Ably, persisted per character); the GM has a private
+// one. Both used to be written out in full — ~180 lines each, `gm`-prefixed — and
+// the copies had diverged in ways that were all bugs in the GM's:
+//
+//   * gmTogglePill had no `if (drawing) return` guard, so clicking a pill during a
+//     draw mutated the deck under the animation.
+//   * gmMakePill never called refreshPill on the element it had just created, so a
+//     freshly built tracker rendered every drawn/excluded card as untouched. A
+//     gmRefreshAllPills() call bolted onto the end of gmManualReshuffle hid it.
+//   * gmTogglePill / gmClearExclusions showed no status line where the player's did.
+//
+// The two decks differ in four real ways, and only those are hooks.
+//   prefix   — element id prefix: '' for the player, 'gm-' for the GM
+//   persist  — () => void        save state (player: localStorage + Supabase)
+//   publish  — (type, extra)     mirror the action over Ably (player only)
+//   fly      — async () => void  card-flies-from-deck animation (player only)
+//   announce — (remainingOnly)   post-reshuffle feedback; defaults to the status line
+function makeDeck({ prefix = '', persist, publish, fly, announce } = {}) {
+    let deck = [], drawn = new Set(), excluded = new Set(), lastCardId = null;
+    let drawing = false, statusTimer = null;
+
+    const $ = id => document.getElementById(prefix + id);
+    const pillEl = id => document.getElementById(`${prefix}pill-${id}`);
+
+    // ── state ────────────────────────────────────────────────────────────────
+    // The shape the player persists and publishes; also what load() accepts back.
+    function state() {
+        return { excluded: [...excluded], drawn: [...drawn], deckIds: deck.map(c => c.id), lastCardId };
+    }
+
+    function load(saved) {
+        deck = saved?.deckIds?.map(cid => cardById(cid)).filter(Boolean) || buildDeck();
+        drawn = new Set(saved?.drawn || []);
+        excluded = new Set(saved?.excluded || []);
+        lastCardId = saved?.lastCardId || null;
+        drawing = false;
+    }
+
+    function reset() { load(null); }
+
+    // Build the tracker, sync the counters, and re-show the last drawn card.
+    function mount() {
+        buildTracker();
+        updateCount();
+        if (lastCardId) restore();
+    }
+
+    // ── tracker ──────────────────────────────────────────────────────────────
+    function buildTracker() {
+        const container = $('tracker-suits');
+        if (!container) return;
+        const row = (symCls, sym, pills) => el('div', { className: 'suit-row-t' },
+            el('span', { className: `suit-sym ${symCls}`, textContent: sym }),
+            el('div', { className: 'rank-pills' }, pills));
+        fill(container,
+            SUITS.map(suit => row(suit.cls, suit.sym,
+                RANKS.map(rank => makePill(`${rank}-${suit.name}`, rank, suit.pillCls)))),
+            row('c-purple', '★', [makePill('joker-red', 'R★', 'is-joker'),
+                                  makePill('joker-black', 'N★', 'is-joker')]));
+    }
+
+    function makePill(id, label, extraCls) {
+        const p = el('span', {
+            id: `${prefix}pill-${id}`,
+            className: 'rank-pill' + (extraCls ? ' ' + extraCls : ''),
+            textContent: label,
+            onclick: () => togglePill(id),
+        });
+        refreshPill(p, id);
+        return p;
+    }
+
+    function refreshPill(p, id) {
+        p.classList.toggle('drawn', drawn.has(id));
+        p.classList.toggle('excluded', excluded.has(id));
+    }
+
+    function refreshPillById(id) { const p = pillEl(id); if (p) refreshPill(p, id); }
+    function refreshAllPills() { ALL_CARDS.forEach(c => refreshPillById(c.id)); }
+
+    // Slide a card back into the deck at a random depth.
+    function reinsert(card) { deck.splice(Math.floor(Math.random() * (deck.length + 1)), 0, card); }
+
+    // Cycle a card: in deck → excluded → back in deck. A drawn card goes back too.
+    function togglePill(id) {
+        if (drawing) return;
+        const card = cardById(id);
+        if (!card) return;
+        const name = cardLabel(card);
+        if (excluded.has(id))     { excluded.delete(id); reinsert(card); status(`${name} re-inclus`); }
+        else if (drawn.has(id))   { drawn.delete(id);    reinsert(card); status(`${name} remis`); }
+        else                      { excluded.add(id);
+                                    const i = deck.findIndex(c => c.id === id);
+                                    if (i !== -1) deck.splice(i, 1);
+                                    status(`${name} exclu`); }
+        updateCount();
+        refreshPillById(id);
+        persist?.();
+    }
+
+    function clearExclusions() {
+        if (drawing) return;
+        excluded.forEach(id => { const c = cardById(id); if (c) reinsert(c); });
+        excluded.clear();
+        updateCount();
+        refreshAllPills();
+        status('Exclusions effacées');
+        persist?.();
+    }
+
+    // ── chrome ───────────────────────────────────────────────────────────────
+    function updateCount() {
+        const n = deck.length;
+        const count = $('deck-count');
+        if (count) count.textContent = n === 0 ? 'Vide' : `${n} carte${n !== 1 ? 's' : ''}`;
+        $('deck-wrap')?.classList.toggle('empty', n === 0);
+        $('reshuffle-btn')?.classList.toggle('visible', n === 0);
+        $('reshuffle-remaining-btn')?.classList.toggle('visible', n > 1 && n < ALL_CARDS.length - excluded.size);
+        $('clear-exclusions-btn')?.classList.toggle('visible', excluded.size > 0);
+    }
+
+    function status(msg) {
+        const node = $('card-status');
+        if (!node) return;
+        node.textContent = msg;
+        clearTimeout(statusTimer);
+        statusTimer = setTimeout(() => { node.textContent = ''; }, 2200);
+    }
+
+    // ── stage ────────────────────────────────────────────────────────────────
+    // `.flipped` means "face showing" in both stylesheets (see the note in
+    // aria-gm.css), so one implementation drives both stages.
+    function hideStage() {
+        const wrap = $('flip-wrap');
+        if (wrap) { wrap.classList.remove('flipped'); wrap.classList.add('hidden'); }
+        $('drawn-card')?.classList.remove('ready');
+    }
+
+    async function reveal(card) {
+        const wrap = $('flip-wrap');
+        const face = $('drawn-card');
+        renderCardFace(face, card);
+        face?.classList.add('ready');
+        if (!wrap) return;
+        wrap.classList.remove('hidden');
+        wrap.getBoundingClientRect();
+        await delay(30);
+        wrap.classList.add('flipped');
+    }
+
+    // Re-show the last drawn card after a reload, with no flip animation.
+    function restore() {
+        const card = cardById(lastCardId);
+        const wrap = $('flip-wrap');
+        if (!card || !wrap) return;
+        renderCardFace($('drawn-card'), card);
+        $('drawn-card')?.classList.add('ready');
+        wrap.classList.remove('hidden');
+        wrap.style.transition = 'none';
+        wrap.classList.add('flipped');
+        wrap.getBoundingClientRect();
+        wrap.style.transition = '';
+    }
+
+    async function animateShuffle() {
+        const overlay = $('shuffle-overlay');
+        const wrap = $('deck-wrap');
+        if (!overlay || !wrap) { await delay(300); return; }
+        const rect = wrap.getBoundingClientRect();
+        const dirs = ['left', 'right', 'left', 'right'];
+        const ghosts = dirs.map((dir, i) => {
+            const g = el('div', { className: 'shuffle-ghost', style: {
+                width: `${rect.width}px`, height: `${rect.height}px`,
+                left: `${rect.left}px`, top: `${rect.top}px`,
+                animation: `shuffle-${dir} 0.52s ${i * 0.08}s ease-in-out forwards`,
+            } }, el('div', { className: 'deck-pattern' }));
+            overlay.append(g);
+            return g;
+        });
+        wrap.classList.remove('shuffling'); wrap.getBoundingClientRect(); wrap.classList.add('shuffling');
+        await delay(680);
+        ghosts.forEach(g => g.remove());
+        wrap.classList.remove('shuffling');
+    }
+
+    // ── actions ──────────────────────────────────────────────────────────────
+    async function draw() {
+        if (drawing || deck.length === 0) return;
+        drawing = true;
+        hideStage();
+        await fly?.();
+        const card = deck.pop();
+        drawn.add(card.id);
+        lastCardId = card.id;
+        refreshPillById(card.id);
+        updateCount();
+        await reveal(card);
+        status(cardLabel(card));
+        persist?.();
+        publish?.('draw', { cardId: card.id });
+        drawing = false;
+    }
+
+    async function reshuffle(remainingOnly) {
+        if (drawing) return;
+        drawing = true;
+        hideStage();
+        await animateShuffle();
+        if (remainingOnly) {
+            deck = shuffle(deck);
+        } else {
+            drawn.clear();
+            deck = shuffle(ALL_CARDS.filter(c => !excluded.has(c.id)));
+            lastCardId = null;
+        }
+        refreshAllPills();
+        updateCount();
+        persist?.();
+        publish?.('reshuffle', {});
+        if (announce) await announce(remainingOnly);
+        else status(remainingOnly ? '↺ Restant mélangé' : '↺ Mélangé');
+        drawing = false;
+    }
+
+    return { load, reset, mount, state, draw, reshuffle, clearExclusions, buildTracker, updateCount };
+}
+
+// ═══════════════════════════════════════════
+//  NOTES
+// ═══════════════════════════════════════════
+// A named-notes list: sidebar on the left, name + body editor on the right. Both
+// panels have exactly this widget — the player's scoped to a character, the GM's to
+// a campaign — and each carried its own copy of all eight functions, identical but
+// for a `gm` prefix, one storage key and three element ids. The copies had already
+// started to drift (the GM's dropped the `Array.isArray` branch comment, the
+// player's kept a redundant `notesList = parsed` assignment), which is exactly how
+// a fix applied to one and not the other goes unnoticed.
+//
+//   key()     — localStorage key. Called on every access rather than captured: the
+//               player's key follows the *current* character, which changes.
+//   ids       — { list, name, area } element ids
+//   sync      — (note, position) => void   persist one note remotely
+//   syncSoon  — (note, position) => void   debounced variant, for keystrokes
+//   remove    — (id) => void               drop one note remotely
+function makeNotes({ key, ids, sync, syncSoon, remove }) {
+    let list = [];
+    let currentId = null;
+    const $ = which => document.getElementById(ids[which]);
+    const posOf = note => list.indexOf(note);
+    const current = () => list.find(n => n.id === currentId) || null;
+
+    function persist() { localStorage.setItem(key(), JSON.stringify(list)); }
+
+    // A save written before notes were named is a bare string, not an array.
+    function load() {
+        const raw = localStorage.getItem(key());
+        let parsed = null;
+        if (raw) { try { parsed = JSON.parse(raw); } catch (_) {} }
+        list = Array.isArray(parsed) ? parsed
+             : raw ? [{ id: uid(), name: 'Notes', content: raw }]
+             : [];
+        currentId = list[0]?.id ?? null;
+        render();
+    }
+
+    function renderList() {
+        fill($('list'), list.map(note =>
+            el('div', { className: 'notes-item' + (note.id === currentId ? ' active' : '') },
+                el('span', { className: 'notes-item-name', textContent: note.name || 'Sans titre',
+                    onclick: () => select(note.id) }),
+                el('button', { className: 'notes-item-delete', title: 'Supprimer', textContent: '✕',
+                    onclick: e => { e.stopPropagation(); del(note.id); } }))));
+    }
+
+    function renderEditor() {
+        const nameInput = $('name'), area = $('area');
+        if (!nameInput || !area) return;
+        const note = current();
+        nameInput.value = note ? note.name : '';
+        area.value = note ? note.content : '';
+        nameInput.disabled = area.disabled = !note;
+    }
+
+    function render() { renderList(); renderEditor(); }
+
+    function select(id) {
+        currentId = id;
+        render();
+        $('area')?.focus();
+    }
+
+    function add() {
+        const note = { id: uid(), name: 'Nouvelle note', content: '' };
+        list.push(note);
+        persist();
+        sync?.(note, posOf(note));
+        select(note.id);
+        const nameInput = $('name');
+        if (nameInput) { nameInput.focus(); nameInput.select(); }
+    }
+
+    function del(id) {
+        remove?.(id);
+        const idx = list.findIndex(n => n.id === id);
+        list = list.filter(n => n.id !== id);
+        currentId = list[Math.min(idx, list.length - 1)]?.id ?? null;
+        persist();
+        render();
+    }
+
+    // Write the field the user is typing in back to the note. Only renderList() is
+    // safe to call from here — renderEditor() would rewrite the field being typed
+    // in and reset the caret, so rename() refreshes the list alone.
+    function save() {
+        const note = current();
+        if (!note) return;
+        note.content = $('area').value;
+        persist();
+        syncSoon?.(note, posOf(note));
+    }
+
+    function rename() {
+        const note = current();
+        if (!note) return;
+        note.name = $('name').value;
+        persist();
+        renderList();
+        syncSoon?.(note, posOf(note));
+    }
+
+    return { load, add, select, del, save, rename, get list() { return list; } };
+}
+
 // ═══════════════════════════════════════════
 //  THEME / CONFIG MODAL
 // ═══════════════════════════════════════════
@@ -306,6 +656,80 @@ function wireImageZoom(img) {
 }
 
 // ═══════════════════════════════════════════
+//  dddice
+// ═══════════════════════════════════════════
+// Everything up to and including the RollFinished subscription was written out in
+// both panels. What actually differs between them is the RollFinished handler — the
+// player matches the roll against its own pending state and hides its canvas
+// wrapper, the GM resolves a monster attack — so that is the only hook.
+let dddiceSDK = null;            // ThreeDDice SDK instance
+let dddiceAPI = null;            // { key, room, theme } once connected
+let dddiceResizeHandler = null;  // stored so it can be removed before re-registering
+
+// Fetch the account's dice-box themes and fill the config modal's dropdown.
+async function _dddiceThemes() {
+    const res = await fetch('https://dddice.com/api/1.0/dice-box', {
+        headers: { 'Authorization': `Bearer ${config.dddiceKey}`, 'Accept': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`Dice box HTTP ${res.status}`);
+    const themes = (await res.json()).data || [];
+    if (!themes.length) throw new Error('Aucun thème.');
+    return themes;
+}
+
+// Load the SDK, connect to the room, and subscribe onRollFinished. Resolves true
+// once connected, false when dddice is unconfigured or the setup failed.
+// Init order matters: .start() must precede .connect().
+async function initDddiceSDK(onRollFinished) {
+    const slug = extractRoomSlug(config.dddiceRoom);
+    if (!config.dddiceKey || !slug) return false;
+    try {
+        const { ThreeDDice, ThreeDDiceRollEvent } = await import('https://esm.sh/dddice-js');
+        const themes = await _dddiceThemes();
+
+        const sel = document.getElementById('cfg-dddice-theme');
+        fill(sel, themes.map(t => el('option', { value: t.id, textContent: t.name ? `${t.name} (${t.id})` : t.id })));
+        sel.disabled = false;
+        sel.value = config.dddiceTheme && themes.find(t => t.id === config.dddiceTheme) ? config.dddiceTheme : themes[0].id;
+
+        dddiceSDK = new ThreeDDice(document.getElementById('dddice-canvas'), config.dddiceKey);
+        dddiceSDK.start();
+        await dddiceSDK.connect(slug);
+        dddiceSDK.on(ThreeDDiceRollEvent.RollFinished, onRollFinished);
+
+        // Keep the WebGL viewport in sync with the window. Removed before
+        // re-registering because saveConfig() re-inits the SDK; only the GM used to
+        // do this, so the player's dice rendered at a stale scale after a resize.
+        if (dddiceResizeHandler) window.removeEventListener('resize', dddiceResizeHandler);
+        dddiceResizeHandler = () => dddiceSDK?.resize();
+        window.addEventListener('resize', dddiceResizeHandler);
+
+        dddiceAPI = { key: config.dddiceKey, room: slug, theme: sel.value };
+        setDddiceStatus(true, themes.find(t => t.id === sel.value)?.name || sel.value);
+        sel.onchange = () => {
+            if (dddiceAPI) dddiceAPI.theme = sel.value;
+            config.dddiceTheme = sel.value;
+            localStorage.setItem('aria-config', JSON.stringify(config));
+        };
+        return true;
+    } catch (e) {
+        console.error('dddice:', e);
+        setDddiceStatus(false, e.message);
+        dddiceSDK = null;
+        dddiceAPI = null;
+        return false;
+    }
+}
+
+// Disconnect the SDK and drop the resize listener, before a re-init or a teardown.
+function teardownDddice() {
+    if (dddiceResizeHandler) { window.removeEventListener('resize', dddiceResizeHandler); dddiceResizeHandler = null; }
+    try { dddiceSDK?.disconnect(); } catch (_) {}
+    dddiceSDK = null;
+    dddiceAPI = null;
+}
+
+// ═══════════════════════════════════════════
 //  SAVE KEY GATEWAY
 // ═══════════════════════════════════════════
 let saveKey = localStorage.getItem('aria-save-key') || null;
@@ -316,7 +740,7 @@ function _supabaseReady() { return !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !!sa
 
 // Show the two-panel gateway (new key + existing key) with a freshly generated key.
 function showGateway() {
-    _pendingNewKey = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    _pendingNewKey = uid();
     document.getElementById('gateway-key-display').textContent = _pendingNewKey;
     const cancel = document.getElementById('gateway-cancel');
     if (cancel) cancel.style.display = saveKey ? '' : 'none';
