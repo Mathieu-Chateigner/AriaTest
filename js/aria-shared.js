@@ -76,6 +76,74 @@ function classify(roll, threshold, success) {
     return success ? 'success' : 'fail';
 }
 
+// Does one roll entry pass the Succès / Échec / Critique / Dés pill filter? An empty
+// filter set passes everything, and Succès / Échec include their critical variants —
+// which is what the pill labels promise.
+//
+// Both panels show the same five pills, and each used to carry its own predicate.
+// They had drifted: the GM's ended in `rollFilter.has(type)`, so a critical success
+// was hidden while the "Succès" pill was lit, and a critical failure while "Échec"
+// was. One definition, so the pills cannot mean two things again.
+function rollPassesFilter(entry, filter) {
+    if (!filter.size) return true;
+    if (entry.threshold === null) return filter.has('die');
+    const type = classify(entry.roll, entry.threshold, entry.success);
+    if (filter.has('crit')    && (type === 'crit-success' || type === 'crit-fail')) return true;
+    if (filter.has('success') && (type === 'success'      || type === 'crit-success')) return true;
+    if (filter.has('fail')    && (type === 'fail'         || type === 'crit-fail')) return true;
+    return false;
+}
+
+// ── Dice formulas ─────────────────────────────────────────────────────────────
+// Split a formula ("2d6+2", "1d8-1", "3d4", "5") into signed terms. One tokenizer
+// behind both consumers: rollDiceFormula, which rolls locally, and
+// formulaToDiceSpec, which hands the dice to dddice and keeps the flat modifier.
+// The grammar used to be written out three times — once per panel plus the dddice
+// variant — and the panels' two copies had already drifted on the empty case.
+function _diceTerms(formula) {
+    const expr = String(formula ?? '').replace(/\s+/g, '').toLowerCase();
+    if (!expr) return [];
+    return expr.split(/(?=[+-])/).filter(Boolean).map(token => {
+        const sign = token[0] === '-' ? -1 : 1;
+        const raw  = token.replace(/^[+-]/, '');
+        const m    = raw.match(/^(\d+)d(\d+)$/);
+        return m ? { sign, count: +m[1], sides: +m[2] } : { sign, flat: parseInt(raw) };
+    });
+}
+
+// Evaluate a dice formula locally. `breakdown` shows each dice term's individual
+// rolls, e.g. "[3+5] +2".
+function rollDiceFormula(formula) {
+    let total = 0;
+    const parts = [];
+    for (const t of _diceTerms(formula)) {
+        const lead = t.sign < 0 ? '−' : parts.length ? '+' : '';
+        if (t.sides) {
+            const rolls = Array.from({ length: t.count }, () => 1 + Math.floor(Math.random() * t.sides));
+            total += t.sign * rolls.reduce((a, b) => a + b, 0);
+            parts.push(`${lead}[${rolls.join('+')}]`);
+        } else if (!isNaN(t.flat)) {
+            total += t.sign * t.flat;
+            parts.push(`${lead}${t.flat}`);
+        }
+    }
+    return { total, breakdown: parts.join(' ') };
+}
+
+// Flatten a formula into the dice list dddice needs plus the flat modifier. dddice
+// rolls only positive dice, so a subtracted dice term ("2d6-1d4") cannot be
+// expressed and its sign is dropped here, exactly as before; such formulas are
+// vanishingly rare for weapon damage.
+// ponytail: sign dropped on dice terms, split the roll if a formula ever needs it.
+function formulaToDiceSpec(formula) {
+    const dice = []; let modifier = 0;
+    for (const t of _diceTerms(formula)) {
+        if (t.sides) { for (let i = 0; i < t.count; i++) dice.push(`d${t.sides}`); }
+        else if (!isNaN(t.flat)) modifier += t.sign * t.flat;
+    }
+    return { dice, modifier };
+}
+
 // Accept either a full dddice room URL or a bare slug.
 function extractRoomSlug(val) {
     if (!val) return '';
@@ -604,6 +672,245 @@ function makeNotes({ key, ids, sync, syncSoon, remove }) {
     }
 
     return { load, add, select, del, save, rename, get list() { return list; } };
+}
+
+// ═══════════════════════════════════════════
+//  CAMERA (VDO.ninja push + view)
+// ═══════════════════════════════════════════
+// Both panels publish one webcam into the GM's VDO.ninja room and view everyone
+// else's, and both carried a byte-identical copy of the whole mechanism under
+// gm-prefixed names: the single-pusher Web Lock, the push/view URL builders, the
+// kill switch, its cross-tab sync, and the 📹 button. That is precisely the
+// duplication the deck and notes factories exist to prevent.
+//
+// What genuinely differs is the work after a state change — the player refreshes the
+// Caméras tab and the presence rail, the GM its topbar button and the "Votre caméra"
+// preview. That is the `onChange` hook, and nothing else is forked.
+//
+//   tag        — console prefix ('[VDO]' / '[GM]')
+//   sidPrefix  — stream id prefix ('aria-' / 'aria-gm-')
+//   lockPrefix — Web Lock name prefix ('aria-push-' / 'aria-gm-push-')
+//   frameId    — element id of the hidden push iframe
+//   ownerId()  — charId / campaignId; falsy when nothing is open
+//   offKey()   — localStorage key for the kill switch, scoped to the owner
+//   room()     — active VDO room name, '' when none
+//   password() — room password, '' when none
+//   onChange() — panel work after any state change (re-render tabs / preview)
+//   announce() — republish presence so peers see the new advertised streamId
+function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
+                      ownerId, offKey, room, password,
+                      onChange = () => {}, announce = () => {} }) {
+    let off = false, lockHeld = false, _release = null, _abort = null;
+
+    // The stream id is a pure function of the owner UUID, so every tab of one
+    // participant derives the same one — which is exactly why only one may push.
+    const streamId = () => { const id = ownerId(); return id ? sidPrefix + id.slice(0, 8) : ''; };
+
+    // "Is anyone publishing this stream?" Every term is state that all of the
+    // participant's tabs read identically, so they advertise the same id and no
+    // consumer can see it flip. Deliberately NOT gated on lockHeld: a non-holding tab
+    // would then advertise '' under the same clientId as its pushing sibling.
+    const live = () => !!ownerId() && !!room() && !off;
+
+    const cam = {
+        get off()      { return off; },
+        get lockHeld() { return lockHeld; },
+        streamId, live,
+
+        // What presence advertises. Empty unless some tab is actually pushing — an id
+        // nobody publishes makes every receiver open a viewer on a dead stream: a
+        // black box on each peer's rail and, worse, on the OBS output.
+        advertisedId() { return live() ? streamId() : ''; },
+
+        // Viewer URL. &solo is required alongside &room — without it VDO.ninja
+        // ignores &view and renders the "Join Room with Camera" landing page. The
+        // password is required too: streams pushed into a protected room are
+        // encrypted, so a bare ?view=SID stays black.
+        viewSrc(sid, muted) {
+            let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput`;
+            if (muted) src += '&muted';
+            if (room()) src += `&solo&room=${encodeURIComponent(room())}`;
+            if (password()) src += `&password=${encodeURIComponent(password())}`;
+            return src;
+        },
+
+        // ── Single-pusher lock ────────────────────────────────────────────────
+        // Two tabs would publish into the same room under the same stream id. An
+        // exclusive Web Lock names the one tab that owns the webcam: the browser
+        // queues the others and releases it when the holder's tab goes away
+        // *including a crash*, at which point the next in the queue starts pushing.
+        // No TTL to tune, no claim record to read back, no "taking over" state.
+        //
+        // The lock answers "which tab pushes" and nothing else — see live().
+        acquireLock() {
+            cam.releaseLock();
+            if (!ownerId()) return;
+            // Web Locks needs a secure context with a real origin; from file:// it
+            // throws. Nothing can push there anyway (getUserMedia refuses too), so
+            // assume sole ownership rather than leaving nobody pushing at all.
+            if (!navigator.locks) { lockHeld = true; onChange(); return; }
+            const ac = new AbortController();
+            _abort = ac;
+            try {
+                navigator.locks.request(lockPrefix + ownerId(), { mode: 'exclusive', signal: ac.signal },
+                    () => new Promise(res => {
+                        _abort = null; _release = res; lockHeld = true;
+                        console.log(tag, 'push lock acquired — this tab owns the webcam');
+                        onChange();
+                    })
+                ).catch(() => {});   // AbortError when we left the queue before being granted
+            } catch (_) { lockHeld = true; onChange(); }
+        },
+
+        // Leave the queue, or hand the lock to the next tab, on owner switch.
+        releaseLock() {
+            if (_abort)   { try { _abort.abort(); } catch (_) {} _abort = null; }
+            if (_release) { _release(); _release = null; }
+            lockHeld = false;
+        },
+
+        // ── Kill switch ───────────────────────────────────────────────────────
+        // Persisted per owner so a participant who opted out is not re-broadcast by
+        // the next page load. The GM decides the room; each participant decides
+        // whether to publish into it.
+        loadOff() { off = localStorage.getItem(offKey()) === '1'; },
+
+        toggle() {
+            off = !off;
+            if (ownerId()) localStorage.setItem(offKey(), off ? '1' : '0');
+            console.log(tag, 'camera', off ? 'OFF (local)' : 'ON');
+            onChange();      // the lock stays ours; we just stop publishing into it
+            announce();
+        },
+
+        // live() reads the kill switch, so every tab of a participant must agree on
+        // it — otherwise two tabs sharing a clientId would advertise different stream
+        // ids and the tile would flip between them. `storage` fires only in the
+        // *other* tabs, so this never re-enters the tab that made the change.
+        // Returns true when it handled the event.
+        syncFromStorage(e) {
+            if (!ownerId() || e.key !== offKey()) return false;
+            const v = e.newValue === '1';
+            if (v === off) return false;
+            off = v;
+            console.log(tag, 'camera', off ? 'OFF' : 'ON', '(synced from another tab)');
+            onChange();
+            announce();
+            return true;
+        },
+
+        // ── Push iframe ───────────────────────────────────────────────────────
+        // Two separate questions. live() — is this stream being published at all, by
+        // this tab or a sibling? — drives the self preview. `shouldPush` adds lock
+        // ownership and drives the frame: a tab that isn't the pusher still views
+        // what its sibling publishes.
+        syncPushFrame() {
+            const frame = document.getElementById(frameId);
+            if (!frame) { console.warn(tag, 'push frame not found: #' + frameId); return; }
+            if (!(live() && lockHeld)) {
+                const why = off ? 'camera cut locally'
+                          : !room() ? 'no vdoRoom'
+                          : !ownerId() ? 'nothing open'
+                          : 'another tab holds the push lock';
+                console.log(tag, why, '— clearing push iframe');
+                cam.blankPushFrame();
+                return;
+            }
+            // Blank &view: "no streams will play; only publishing will be allowed" —
+            // without it the push page joins as a full room client and downloads (and
+            // renders) every other guest's video next to the self preview.
+            let src = `https://vdo.ninja/?push=${streamId()}&room=${encodeURIComponent(room())}&view&autostart&webcam&noaudio&cleanoutput`;
+            if (password()) src += `&password=${encodeURIComponent(password())}`;
+            // Redacted: this log gets pasted into bug reports, and the room password
+            // is enough to join the room and watch every player.
+            console.log(tag, 'push:', src.replace(/([?&]password=)[^&]*/, '$1***'));
+            if (frame.src !== src) frame.src = src;
+        },
+
+        // Blank the push iframe without touching the kill switch — for leaving a
+        // character/campaign, where the owner id is about to stop resolving.
+        // 'about:blank', never '': an empty src resolves to the page's own URL and
+        // would load a second copy of the whole app inside the hidden iframe.
+        blankPushFrame() {
+            const frame = document.getElementById(frameId);
+            if (frame && frame.src && frame.src !== 'about:blank') frame.src = 'about:blank';
+        },
+
+        // Sync the 📹 kill-switch button. Hidden while no room is set — nothing is
+        // published either way then, so the control would be a no-op.
+        renderToggle(btnId) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            btn.style.display = room() ? '' : 'none';
+            btn.classList.toggle('off', off);
+            btn.textContent = off ? '🚫' : '📹';
+            btn.title = off ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
+        },
+    };
+    return cam;
+}
+
+// ═══════════════════════════════════════════
+//  FILE VIEWER
+// ═══════════════════════════════════════════
+// The modal that previews a granted/uploaded file. Both panels had a line-for-line
+// copy differing only in the `gm-` id prefix — the same shape makeDeck already
+// takes a prefix for.
+//
+//   prefix — element id prefix: '' for the player, 'gm-' for the GM
+//   files  — () => the list to look the id up in (playerFiles / gmFiles)
+function makeFileViewer({ prefix = '', files }) {
+    const $ = suffix => document.getElementById(prefix + suffix);
+    return {
+        open(fileId) {
+            const f = files().find(x => x.id === fileId);
+            if (!f) return;
+            $('fv-title').textContent = f.name;
+            const body = $('fv-body');
+            fill(body);
+            // f.type can be missing on a malformed grant or an old row — guard it.
+            // The URL is remote-controlled (grants travel over Ably), so a
+            // javascript: src would execute in this origin: _safeUrl or nothing.
+            const url = _safeUrl(f.url);
+            const type = f.type || '';
+            if (url && type.startsWith('image/')) {
+                const img = el('img', { className: 'fv-image', src: url });
+                body.append(img);
+                wireImageZoom(img);
+            } else if (url && type === 'application/pdf') {
+                body.append(el('iframe', { className: 'fv-iframe', src: url }));
+            } else if (url && type.startsWith('text/')) {
+                const pre = el('pre', { className: 'fv-text', textContent: 'Chargement…' });
+                body.append(pre);
+                fetch(url).then(r => r.text())
+                    .then(t => { pre.textContent = t; })
+                    .catch(() => { pre.textContent = 'Erreur de chargement.'; });
+            } else {
+                body.append(el('div', { className: 'fv-unsupported' },
+                    el('div', { className: 'fv-unsupported-icon', textContent: fileIcon(type) }),
+                    el('div', { className: 'fv-unsupported-name', textContent: f.name }),
+                    url && el('a', { className: 'fv-download-link', href: url, target: '_blank',
+                        rel: 'noopener', textContent: 'Ouvrir dans un nouvel onglet' })));
+            }
+            $('file-viewer-scrim').classList.add('show');
+            $('file-viewer-modal').classList.add('show');
+        },
+        close() {
+            $('file-viewer-scrim').classList.remove('show');
+            $('file-viewer-modal').classList.remove('show');
+            fill($('fv-body'));
+        },
+    };
+}
+
+// Three-letter badge for a MIME type, shown on file rows and in the viewer's
+// unsupported-type fallback.
+function fileIcon(type) {
+    if (!type) return 'DOC';
+    if (type.startsWith('image/')) return 'IMG';
+    if (type === 'application/pdf') return 'PDF';
+    if (type.startsWith('text/')) return 'TXT';
+    return 'DOC';
 }
 
 // ═══════════════════════════════════════════

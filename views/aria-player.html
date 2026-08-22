@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-panel.css">
     <link rel="stylesheet" href="../css/aria-player.css">
 </head>
 <body>
@@ -151,7 +152,7 @@
             <button class="pres-pill" id="pres-pill-reduit" onclick="setPresenceMode('reduit')" title="Pastilles dans la barre — présence sans pixels">Réduit</button>
             <button class="pres-pill" id="pres-pill-bandeau" onclick="setPresenceMode('bandeau')" title="Rail de visages ancré au bord">Bandeau</button>
             <button class="pres-pill" id="pres-pill-tablee" onclick="setPresenceMode('tablee')" title="Pleine attention — scène de visages">Tablée</button>
-            <button class="pres-pill cam-toggle" id="pres-cam-toggle" onclick="toggleCamera()" title="Couper / rétablir ma caméra">📹</button>
+            <button class="pres-pill cam-toggle" id="pres-cam-toggle" onclick="cam.toggle()" title="Couper / rétablir ma caméra">📹</button>
         </div>
 
         <span class="rolling-ind" id="rolling-ind">Lancer…</span>
@@ -482,11 +483,11 @@
     </div>
 
     <!-- FILE VIEWER MODAL -->
-    <div class="modal-scrim" id="file-viewer-scrim" onclick="closeFileViewer()"></div>
+    <div class="modal-scrim" id="file-viewer-scrim" onclick="fileViewer.close()"></div>
     <div class="file-viewer-modal" id="file-viewer-modal">
         <div class="fv-header">
             <div class="fv-title" id="fv-title"></div>
-            <button class="fv-close-btn" onclick="closeFileViewer()">✕</button>
+            <button class="fv-close-btn" onclick="fileViewer.close()">✕</button>
         </div>
         <div class="fv-body" id="fv-body"></div>
     </div>

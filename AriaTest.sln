@@ -24,6 +24,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "js", "js", "{EB9BD0E8-9EE2-
 		js\aria-overlay-editor.js = js\aria-overlay-editor.js
 		js\aria-overlay.js = js\aria-overlay.js
 		js\aria-player.js = js\aria-player.js
+		js\aria-shared.js = js\aria-shared.js
 		js\aria-supabase.js = js\aria-supabase.js
 	EndProjectSection
 EndProject

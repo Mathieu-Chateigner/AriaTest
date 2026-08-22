@@ -54,11 +54,13 @@ views/
   aria-overlay.html
   aria-overlay-editor.html  ← drag-and-drop overlay layout editor (opened from player/GM panel)
 css/
+  aria-panel.css            ← rules shared by both panels (loaded first on each page)
   aria-player.css
   aria-gm.css
   aria-overlay.css
   aria-overlay-editor.css
 js/
+  aria-shared.selfcheck.js  ← node-runnable check for the pure logic in aria-shared.js
   aria-supabase.js          ← shared Supabase helpers (loaded first, before panel scripts)
   aria-shared.js            ← shared runtime: el() DOM builder, split-pane engine,
                               music transport, save-key gateway, card deck, utils
@@ -72,16 +74,28 @@ js/
 
 ### `aria-shared.js`
 
-Loaded before the panel script on both panel pages (`aria-supabase.js` → `aria-shared.js` → `aria-player.js`/`aria-gm.js`). It holds everything the two panels would otherwise keep byte-identical copies of: the split-pane engine, the music transport, the DOM builder, the save-key gateway, the dddice connection, and two widget factories.
+Loaded before the panel script on both panel pages (`aria-supabase.js` → `aria-shared.js` → `aria-player.js`/`aria-gm.js`). It holds everything the two panels would otherwise keep byte-identical copies of: the split-pane engine, the music transport, the DOM builder, the save-key gateway, the dddice connection, the dice grammar, the roll-filter predicate, and four widget factories.
 
-**The two factories are the pattern to follow when a widget exists on both sides.** Each returns an object holding its own state; the panel creates one instance and the HTML calls its methods (`deck.draw()`, `notes.add()`).
+**The factories are the pattern to follow when a widget exists on both sides.** Each returns an object holding its own state; the panel creates one instance and the HTML calls its methods (`deck.draw()`, `notes.add()`, `cam.toggle()`, `fileViewer.close()`).
 
 | factory | player instance | GM instance |
 |---|---|---|
 | `makeDeck({ prefix, persist, publish, fly, announce })` | `deck` — table deck, persisted and published | `gmDeck` — `prefix:'gm-'`, private, takes no hooks |
 | `makeNotes({ key, ids, sync, syncSoon, remove })` | `notes` — character-scoped | `gmNotes` — campaign-scoped |
+| `makeCamera({ tag, sidPrefix, lockPrefix, frameId, ownerId, offKey, room, password, onChange, announce })` | `cam` — `'aria-'`, keyed on `charId` | `cam` — `'aria-gm-'`, keyed on `campaignId` |
+| `makeFileViewer({ prefix, files })` | `fileViewer` — over `playerFiles` | `fileViewer` — `prefix:'gm-'`, over `gmFiles` |
 
-Both were previously written out twice (~180 and ~110 lines each), and both copies had drifted — the GM's `gmTogglePill` had lost the `if (drawing) return` guard, and its `gmMakePill` never refreshed the pill it had just created, which a stray `gmRefreshAllPills()` in an unrelated function compensated for. **If you find yourself prefixing a function with `gm`, make it a hook instead.**
+Every one of these was previously written out twice, and every copy had drifted. The deck's: the GM's `gmTogglePill` had lost the `if (drawing) return` guard, and its `gmMakePill` never refreshed the pill it had just created, which a stray `gmRefreshAllPills()` in an unrelated function compensated for. The camera's: seven `gm`-prefixed twins (`gmDerivedStreamId`, `gmAdvertisedStreamId`, `gmVdoViewSrc`, `acquireGMPushLock`, `releaseGMPushLock`, `gmCameraOffKey`, `toggleGMCamera`) whose only real difference was which post-change render to run — now the `onChange` hook. **If you find yourself prefixing a function with `gm`, make it a hook instead.**
+
+Three non-factory pieces were deduplicated the same way and are worth knowing by name:
+
+| shared | replaced |
+|---|---|
+| `rollPassesFilter(entry, filter)` | one filter predicate per panel; see *Roll filter pills* under Known pitfalls |
+| `rollDiceFormula(f)` / `formulaToDiceSpec(f)` / `_diceTerms(f)` | the `"2d6+2"` grammar, parsed in three places |
+| `fileIcon(type)` | `_pfFileIcon` (player) and `_fileIcon` (GM), identical |
+
+`js/aria-shared.selfcheck.js` covers the pure logic among these — `node js/aria-shared.selfcheck.js`. It stubs the two browser globals the file touches at load and asserts against the dice grammar and the filter pills. Run it after touching either; everything else in `aria-shared.js` needs a real DOM and is exercised by opening the panels.
 
 Only one panel script ever shares a page with it, so **a name declared in `aria-shared.js` must not also be declared in either panel** (top-level `let`/`const` in classic scripts share one global lexical environment; a duplicate is a SyntaxError that kills the file). Note that top-level `let`/`const` are *not* properties of `window` — they resolve by name from other scripts and from inline HTML handlers, but `window.ARIA` is `undefined`.
 
@@ -241,12 +255,12 @@ Consequences worth stating because they used to be code:
 ### VDO.ninja camera integration
 
 Each participant's camera stream is identified by an **auto-derived stream ID** — players never set this manually:
-- Player: `'aria-' + charId.slice(0, 8)` — `derivedStreamId()` in `aria-player.js`
-- GM: `'aria-gm-' + campaignId.slice(0, 8)` — `gmDerivedStreamId()` in `aria-gm.js`
+- Player: `'aria-' + charId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria-'`
+- GM: `'aria-gm-' + campaignId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria-gm-'`
 
 The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. It reaches players as part of the GM's presence member data. Players activate their hidden push iframe (`#vdo-push-frame`) once they see a room. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
 
-**Viewer iframes need the room password too.** Streams pushed into a password-protected room are encrypted, so a bare `?view=SID` stays black — `vdoViewSrc()` (player), `gmVdoViewSrc()` (GM) and `vdoCamSrc()` (overlay) all append `&room` + `&password`. (An earlier version of this file claimed viewers didn't need it; that was wrong and cost a debugging session.)
+**Viewer iframes need the room password too.** Streams pushed into a password-protected room are encrypted, so a bare `?view=SID` stays black — `cam.viewSrc()` (both panels) and `vdoCamSrc()` (overlay) all append `&room` + `&password`. (An earlier version of this file claimed viewers didn't need it; that was wrong and cost a debugging session.)
 
 **The push iframes live outside the tab/pane layout** — `#vdo-push-frame` (player) and `#vdo-gm-push-frame` (GM) are siblings of `#app-wrapper`, fixed and full-viewport at `opacity:0`. Never `display:none` (can block camera capture) and never visible (the self-preview shows through the app's transparent backgrounds). The GM's push frame used to sit inside the Joueurs tab, whose `.tab-content` goes `display:none` on every tab switch — the GM camera silently died. What shows in the Joueurs tab is a **muted viewer** of the GM's own stream, which is safe to hide.
 
@@ -254,21 +268,21 @@ The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign vi
 
 **Nothing calls `getUserMedia` — in either app.** The push iframes own the camera; every in-app tile is a VDO.ninja **viewer**, the self tiles being viewers of one's own stream with `&muted`. A native self-view fallback used to exist for the "no VDO room" case on both sides; it was unreachable (the Caméras tab only appears once a room is known, so the fallback could never bootstrap) and is gone. Don't reintroduce it: it lights the camera LED for a preview nobody is watching.
 
-**Participants advertise `streamId` only while actually publishing.** `selfStreamLive()` (`= charId && vdoRoom && !cameraOff`) and `gmAdvertisedStreamId()` gate it; `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline && currentVdoRoom`. Advertising it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
+**Participants advertise `streamId` only while actually publishing.** `cam.advertisedId()` gates it, returning `''` unless `cam.live()` (`= ownerId && room && !off`); `renderPlayerCards()` renders a camera iframe only when `p.streamId && isOnline && currentVdoRoom`. Advertising it unconditionally gave every GM card a permanent black box, and the persisted known-players snapshot resurrected dead iframes for offline players on campaign load.
 
 **A viewer tile requires a room.** A viewer URL without `&room` cannot decrypt a stream pushed into a password-protected room, so a tile built from a `streamId` that outlived the room is a guaranteed black rectangle. Every tile builder gates on the room: `camerasAvailable()` (`= !!vdoRoom`) drives the player's Caméras tab and presence control, the GM/peer entries in `renderCamerasTab()` and `renderPresenceRail()` are gated on `vdoRoom` like the self tile always was, and the GM's player cards require `currentVdoRoom`. The GM's `saveConfig()` calls `renderPlayerCards()` so setting/clearing the room applies at once.
 
 **Leaving a campaign requires a camera teardown, not just an Ably re-subscribe.** `resetCameraState()` (player) clears the room/peers/GM stream/spotlight, blanks the push iframe and re-renders. It is called by `switchCharacter()` **and** by `saveConfig()` when the join code changed — editing the join code in the ⚙ modal re-subscribes every channel onto another campaign and is a campaign switch. Closing the old Ably connection is what leaves the old campaign's presence set, so nothing needs to be published (or awaited) first.
 
-**Both sides own a camera kill switch.** `cameraOff` (per character, `aria-camera-off-{charId}`, toggled by `toggleCamera()` from the `📹` pill in the presence control) and `gmCameraOff` (per campaign, `aria-gm-camera-off-{campaignId}`, toggled by `toggleGMCamera()` from the topbar `📹` next to *Lire la table*) gate the push iframe, the advertised `streamId`, and the self tile / "Votre caméra" preview. The GM decides the room; each participant decides whether to publish into it. Cutting the GM camera is deliberately **not** a session-over signal — `vdoRoom` stays in the member data, so players go on publishing and only the MJ tile disappears. `renderGMCameraToggle()` hides the button when no room is set.
+**Both sides own a camera kill switch** — one implementation, `cam.off`, toggled by `cam.toggle()`: per character (`aria-camera-off-{charId}`, the `📹` pill in the presence control) and per campaign (`aria-gm-camera-off-{campaignId}`, the topbar `📹` next to *Lire la table*). It gates the push iframe, the advertised `streamId`, and the self tile / "Votre caméra" preview. The GM decides the room; each participant decides whether to publish into it. Cutting the GM camera is deliberately **not** a session-over signal — `vdoRoom` stays in the member data, so players go on publishing and only the MJ tile disappears. `cam.renderToggle(btnId)` hides the button when no room is set.
 
-**Both kill switches sync across tabs via the `storage` event.** They are per-character / per-campaign localStorage state that `selfStreamLive()` / `gmAdvertisedStreamId()` read, so every tab of a participant must agree on them — otherwise two tabs sharing a `clientId` would advertise different stream IDs and the tile would flip between them. `storage` fires only in the *other* tabs, so the handler never re-enters the tab that made the change.
+**The kill switch syncs across tabs via the `storage` event** (`cam.syncFromStorage(e)`, which each panel's handler calls). It is per-character / per-campaign localStorage state that `cam.live()` reads, so every tab of a participant must agree on it — otherwise two tabs sharing a `clientId` would advertise different stream IDs and the tile would flip between them. `storage` fires only in the *other* tabs, so the handler never re-enters the tab that made the change.
 
-**One character, several tabs: only one may hold the webcam.** The push stream ID is a pure function of `charId` (`campaignId` for the GM), so two tabs would publish into the same room under the same ID. Arbitration is an **exclusive Web Lock** — `aria-push-{charId}` / `aria-gm-push-{campaignId}` — requested once per character/campaign and held for the tab's life via a promise that never resolves. The browser grants it to one tab, queues the rest, and releases it when the holder's tab goes away *including a crash*, at which point the next in the queue starts pushing immediately. `releasePushLock()` / `releaseGMPushLock()` abort the queued request or resolve the held one on character/campaign switch.
+**One character, several tabs: only one may hold the webcam.** The push stream ID is a pure function of `charId` (`campaignId` for the GM), so two tabs would publish into the same room under the same ID. Arbitration is an **exclusive Web Lock** — `aria-push-{charId}` / `aria-gm-push-{campaignId}` — requested once per character/campaign and held for the tab's life via a promise that never resolves. The browser grants it to one tab, queues the rest, and releases it when the holder's tab goes away *including a crash*, at which point the next in the queue starts pushing immediately. `cam.releaseLock()` aborts the queued request or resolves the held one on character/campaign switch; `cam.acquireLock()` gets in line.
 
 There is no TTL, no timestamped record, no read-back-after-write, and no "taking over" state to report: those all existed because the previous localStorage claim had to detect a dead holder itself. Web Locks needs a secure context with a real origin and throws from `file://`; both apps then assume sole ownership, which is correct there since nothing can push from `file://` anyway.
 
-**The lock answers "which tab pushes" and nothing else.** "Is anyone pushing?" is `vdoRoom && !cameraOff` — shared state every tab of the participant evaluates identically — so they all advertise the same `streamId` and no consumer can see it flip. Gating the *advertised* ID on lock ownership would have a non-holding tab publish `''` under the same `clientId` as its sibling. `updateGMPushIframe()` keeps the two questions apart: `streamLive` drives the "Votre caméra" preview, `shouldPush` adds `gmPushLockHeld` and drives the push frame.
+**The lock answers "which tab pushes" and nothing else.** "Is anyone pushing?" is `cam.live()` — shared state every tab of the participant evaluates identically — so they all advertise the same `streamId` and no consumer can see it flip. Gating the *advertised* ID on lock ownership would have a non-holding tab publish `''` under the same `clientId` as its sibling. `cam.syncPushFrame()` keeps the two questions apart: `cam.live()` drives the "Votre caméra" preview, and it adds `cam.lockHeld` to drive the push frame.
 
 **Viewer iframes get `allow="autoplay; fullscreen"` and nothing else.** Only the push frames (`#vdo-push-frame`, `#gm-self-view-wrap`'s iframe) need `camera; microphone; display-capture`. Don't copy the push permission list onto a viewer.
 
@@ -278,7 +292,7 @@ There is no TTL, no timestamped record, no read-back-after-write, and no "taking
 
 **The Bandeau rail and the Caméras grid must never both be live** — they open viewer iframes on the same streams, doubling the WebRTC connections per peer. `renderPresenceUI()` hides the rail while `tab-cameras` is in `openPanes`; `renderTabLayout()` calls `renderPresenceUI()` so docking/undocking the pane re-evaluates it.
 
-**Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `vdoViewSrc()` (player) and `gmVdoViewSrc()` (GM) append `&solo&room=...` together.
+**Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `cam.viewSrc()` appends `&solo&room=...` together.
 
 **Push URLs MUST include a blank `&view`** (`?push=SID&room=ROOM&view&...`) — per VDO.ninja docs, an empty `&view` means "no streams will play; only publishing will be allowed". Without it, a push page inside a room acts as a full room client and *renders every other guest's video* next to the self-preview (players appeared inside the GM's "Votre caméra" panel) and silently downloads all remote streams in the player's hidden push iframe.
 
@@ -413,7 +427,7 @@ Published with `presence.enter()` / `presence.update()`, read with `presence.get
   campaignKey, ariaType, streamId, ts }
 ```
 - `charId` — character UUID (stable; never changes even if the name does). Also the `clientId`, so it keys the participant in every consumer.
-- `streamId` — `'aria-' + charId.slice(0, 8)`, or `''` unless a `vdoRoom` is active and `cameraOff` is false (an advertised ID nobody is pushing renders as a black iframe on every receiver).
+- `streamId` — `'aria-' + charId.slice(0, 8)`, or `''` unless a `vdoRoom` is active and the kill switch is off (`cam.advertisedId()`) (an advertised ID nobody is pushing renders as a black iframe on every receiver).
 - `ts` — publish time. Used to pick the newest member when one `clientId` has several (two tabs, or the ghost of a refreshed tab).
 - `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
 
@@ -423,9 +437,9 @@ Republished by `saveCurrentCharacter()`, `handleGMDamage()` / `handleGMHeal()`, 
 ```js
 { role: 'gm', streamId, vdoRoom, vdoRoomPassword, spotlightCharId, ts }
 ```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on or no room is set (`gmAdvertisedStreamId()`). Players read `vdoRoom`/`vdoRoomPassword` from here to activate their push iframe. `spotlightCharId` lives here rather than in a broadcast so a late joiner picks it up from `presence.get()`.
+`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on or no room is set (`cam.advertisedId()`). Players read `vdoRoom`/`vdoRoomPassword` from here to activate their push iframe. `spotlightCharId` lives here rather than in a broadcast so a late joiner picks it up from `presence.get()`.
 
-Republished by `toggleSpotlight()`, `toggleGMCamera()`, `saveConfig()` (via re-entry on the new connection), and when the spotlighted player leaves the set.
+Republished by `toggleSpotlight()`, `cam.toggle()`, `saveConfig()` (via re-entry on the new connection), and when the spotlighted player leaves the set.
 
 There is **no "session over" payload**. Leaving the presence set is the signal, and Ably emits it. `gmSpotlightCharId` is cleared when the spotlighted player is no longer in the set — Ably has already waited out a possible reconnect, so this no longer fires on a refresh or a closed second tab.
 
@@ -581,6 +595,34 @@ Craft and Soigner rolls are **BM-affected** like any skill roll — only the **J
 
 **Light mode:** Toggled via `config.lightMode`. Applied at module level (before `initApp`) to prevent flash. All overrides live in a `body.light-mode` block at the bottom of each CSS file. Always use CSS variables — never hardcode dark colors.
 
+### `css/aria-panel.css` — the shared panel stylesheet
+
+Both panel pages load it **before** their own sheet:
+
+```html
+<link rel="stylesheet" href="../css/aria-panel.css">
+<link rel="stylesheet" href="../css/aria-player.css">   <!-- or aria-gm.css -->
+```
+
+That order matters: anything in the shared sheet can still be overridden by the panel that needs to differ. It holds the ~170 rules that were byte-identical in the two panel sheets once notation (`0.2s` vs `.2s`) and token aliases (`--fail` vs `--bad`, `--gm-accent` vs `--gold`) were resolved — the base reset, `body`, tabs, panels, notes, deck pills, the gateway, the selection screen, modals and buttons.
+
+**The shared sheet never names ember or violet.** It refers only to accent handles that each panel defines in its own `:root` (and again under `body.light-mode`), so one rule renders ember on the player and violet on the GM:
+
+| token | player | GM |
+|---|---|---|
+| `--gold` / `--gold-light` | `var(--ember)` / `var(--ember2)` | `var(--violet)` / `var(--violet2)` |
+| `--gold-dim` | `var(--faint)` | `var(--faint)` |
+| `--accent-soft` | `var(--embersoft)` | `var(--violetsoft)` |
+| `--accent-rgb` | `236,164,86` (light: `169,98,15`) | `169,139,221` (light: `106,71,163`) |
+
+`--accent-rgb` exists so an accent at an arbitrary alpha is still one rule: `rgba(var(--accent-rgb), .12)`. `--accent-soft` is a `var()` reference, so it follows the theme without a light-mode entry of its own.
+
+**About 60 rules genuinely differ and were deliberately left in the panel files** — the deck / card-back gradient (the GM's is a purple-dark gradient, not token-driven), `.topbar`, `.panel`, `.panel-header`, `.tabs`, `.die-btn`, `.fv-close-btn` and others. Those differences are now the *only* reason a selector appears in a panel file, which is what makes them visible as choices rather than drift.
+
+**Changing a rule in `aria-panel.css` changes both panels.** If only one should change, override it in that panel's sheet instead. Before the split the two copies had already drifted — `.card-action-btn` had grown a 1px padding difference and `.clear-btn` differed only in declaration order.
+
+The extraction was verified by diffing computed styles: every element, 33 properties, across the selection screen, every tab, the modals and both themes — 14 states on the player and 12 on the GM, ~500k computed values, zero differences. Re-run that comparison if you ever move rules between these files; source order decides equal-specificity conflicts and only the real cascade can settle them.
+
 ---
 
 ## Conventions
@@ -600,6 +642,12 @@ Craft and Soigner rolls are **BM-affected** like any skill roll — only the **J
 ### `.flipped` means "face showing" — in both stylesheets
 
 `.flip-face` carries the `rotateY(180deg)`, so a `.flip-wrap` at rest shows `.card-back-face` and adding `.flipped` animates round to the card. `aria-gm.css` used to put that rotation on `.card-back-face` instead, which inverted the meaning of `.flipped` between the two panels, and every reveal in `aria-gm.js` carried inverted logic to compensate (set `.flipped` with the transition off, then remove it). Both stylesheets now share the convention and `makeDeck`'s single `reveal()` drives both stages. If a card shows its back, fix the stylesheet, not the JS.
+
+### Roll filter pills: Succès and Échec include their criticals
+
+Both panels show the same five pills (`Tous` / `Succès` / `Échec` / `Critique` / `Dés`) over the same `rollFilter` Set, and each used to carry its own predicate. They had drifted: the player's treated a critical success as a success, while the GM's ended in `rollFilter.has(type)` — where `type` is `'crit-success'`, not `'success'` — so lighting **Succès** on the GM feed *hid* every critical success, and **Échec** hid every critical failure. The same buttons meant two different things.
+
+`rollPassesFilter(entry, filter)` in `aria-shared.js` is now the only definition, and it matches what the labels promise: `Succès`/`Échec` include their critical variants, `Critique` catches both, `Dés` matches `threshold === null`, an empty set passes everything, and several lit pills union. The GM composes it with its player-name filter (`playerFilter`); nothing else re-derives it.
 
 ### `element.className = ''` strips base CSS classes
 Always reset to the base class string, not `''`:

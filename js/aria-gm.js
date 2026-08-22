@@ -50,49 +50,26 @@ let playerFilter = new Set();
 let cardHistory = [];
 let currentVdoRoom = '';
 let currentVdoRoomPassword = '';
-// GM-side camera kill switch, the mirror of the player's `cameraOff`. The GM decides
-// the room; this decides whether the GM publishes into it. Without it the only way
-// for the GM to go camera-off was clearing the room — which cuts every player's
-// camera too. Persisted per campaign so it survives a refresh.
-let gmCameraOff = false;
-// ── Single-pusher lock (the mirror of the player's) ────────────────────────────
-// gmDerivedStreamId() is a pure function of campaignId, so two GM tabs on one
-// campaign would publish into the same VDO room under the same ID. An exclusive Web
-// Lock names the one tab that owns the webcam: the browser queues the others and
-// releases it when the holder's tab dies, crash included, with no id to invent, no
-// TTL to tune against a heartbeat, and no record to read back.
+// GM-side camera, the mirror of the player's. The GM decides the room; this decides
+// whether the GM publishes into it — without it the only way to go camera-off was
+// clearing the room, which cuts every player's camera too. Cutting it is deliberately
+// NOT a session-over signal: vdoRoom stays in the member data, so players go on
+// publishing and only the MJ tile disappears.
 //
-// As on the player side the lock answers "which tab pushes" only. "Is anyone
-// pushing?" is `currentVdoRoom && !gmCameraOff` — shared state every GM tab reads
-// identically, so they all advertise the same stream ID and the MJ tile cannot flip.
-let gmPushLockHeld = false;
-let _gmLockRelease = null, _gmLockAbort = null;
-function acquireGMPushLock() {
-    releaseGMPushLock();
-    if (!currentCampaignId) return;
-    // Web Locks needs a secure context with a real origin; from file:// it throws.
-    // Nothing can push there anyway, so assume sole ownership rather than leaving the
-    // campaign with no pusher.
-    if (!navigator.locks) { gmPushLockHeld = true; updateGMPushIframe(); return; }
-    const ac = new AbortController();
-    _gmLockAbort = ac;
-    try {
-        navigator.locks.request('aria-gm-push-' + currentCampaignId, { mode: 'exclusive', signal: ac.signal },
-            () => new Promise(release => {
-                _gmLockAbort = null;
-                _gmLockRelease = release;
-                gmPushLockHeld = true;
-                console.log('[GM] push lock acquired — this tab owns the webcam');
-                updateGMPushIframe();
-            })
-        ).catch(() => {});   // AbortError when we left the queue before being granted
-    } catch (_) { gmPushLockHeld = true; updateGMPushIframe(); }
-}
-function releaseGMPushLock() {
-    if (_gmLockAbort) { try { _gmLockAbort.abort(); } catch (_) {} _gmLockAbort = null; }
-    if (_gmLockRelease) { _gmLockRelease(); _gmLockRelease = null; }
-    gmPushLockHeld = false;
-}
+// The Web Lock, the URL builders and the cross-tab kill-switch sync all live in
+// makeCamera(); only the preview and topbar work below is GM-specific.
+const cam = makeCamera({
+    tag: '[GM]',
+    sidPrefix: 'aria-gm-',
+    lockPrefix: 'aria-gm-push-',
+    frameId: 'vdo-gm-push-frame',
+    ownerId:  () => currentCampaignId,
+    offKey:   () => campKey('camera'),
+    room:     () => currentVdoRoom,
+    password: () => currentVdoRoomPassword,
+    onChange: () => updateGMPushIframe(),
+    announce: () => publishGMPresence(),
+});
 let ablyPresence = null;   // the aria-presence channel — its presence set IS the roster
 let gmClickHandlerRegistered = false;
 let renderPlayerCardsTimer = null;
@@ -421,9 +398,9 @@ function loadCampaignState(id) {
     currentCampaignType = camp.ariaType || 'ancient';
     currentVdoRoom = camp.vdoRoom || '';
     currentVdoRoomPassword = camp.vdoRoomPassword || '';
-    // Read after currentCampaignId is set — gmCameraOffKey() depends on it. A GM who
-    // opted out must not be re-broadcast by the next page load.
-    gmCameraOff = localStorage.getItem(gmCameraOffKey()) === '1';
+    // Read after currentCampaignId is set — the kill-switch key is scoped to it. A
+    // GM who opted out must not be re-broadcast by the next page load.
+    cam.loadOff();
     monsters    = JSON.parse(localStorage.getItem(monstersKey())  || '[]');
     rollFeed    = JSON.parse(localStorage.getItem(rollsKey())     || '[]');
     cardHistory = JSON.parse(localStorage.getItem(cardHistKey()) || '[]');
@@ -608,7 +585,7 @@ function switchCampaign() {
     filesGrantedSessions.clear();
     currentVdoRoom = '';
     currentVdoRoomPassword = '';
-    releaseGMPushLock();   // while currentCampaignId still resolves the lock name
+    cam.releaseLock();     // while currentCampaignId still resolves the lock name
     stopGMSelfView();
     if (renderPlayerCardsTimer) { clearTimeout(renderPlayerCardsTimer); renderPlayerCardsTimer = null; }
     if (renderMonstersTimer) { clearTimeout(renderMonstersTimer); renderMonstersTimer = null; }
@@ -669,8 +646,8 @@ function initApp() {
     loadConfigInputs();
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     if (config.ablyKey) initAbly();   // enters presence with the room + spotlight
-    acquireGMPushLock();
-    updateGMPushIframe();   // drives both the hidden push frame and the preview
+    cam.acquireLock();
+    updateGMPushIframe();   // drives the topbar button, the push frame and the preview
     applyReadTable();
     if (!gmClickHandlerRegistered) {
         document.addEventListener('click', e => { if (!e.target.closest('.gm-select')) closeAllSelects(); });
@@ -854,7 +831,7 @@ let gmPresenceEntered = false;
 function gmPresenceData() {
     return {
         role: 'gm',
-        streamId: gmAdvertisedStreamId(),
+        streamId: cam.advertisedId(),
         vdoRoom: currentVdoRoom,
         vdoRoomPassword: currentVdoRoomPassword,
         spotlightCharId: gmSpotlightCharId,
@@ -953,129 +930,49 @@ function toggleSpotlight(charId) {
     renderPlayerCards();
 }
 
-// The GM's own VDO.ninja stream ID, derived from the campaign UUID.
-function gmDerivedStreamId() {
-    return currentCampaignId ? 'aria-gm-' + currentCampaignId.slice(0, 8) : '';
-}
-// What our presence data advertises. Empty while the camera is cut, for the same
-// reason the player sends an empty streamId then: an ID nobody is pushing makes every
-// receiver open a viewer iframe on a dead stream — a black box on each player's rail
-// and, worse, on the OBS output. `vdoRoom` stays in the member data, so cutting the
-// camera is NOT "session over" and players keep publishing their own cameras; only
-// the MJ tile goes.
-//
-// Both terms are shared state that every GM tab reads identically, so they advertise
-// the same ID and the MJ tile cannot flip between them — and if the tab holding the
-// push lock dies, the browser hands the lock to a queued sibling immediately, so
-// there is no window in which the advertised ID has no publisher behind it.
-function gmAdvertisedStreamId() {
-    return (gmCameraOff || !currentVdoRoom) ? '' : gmDerivedStreamId();
-}
-function gmCameraOffKey() { return campKey('camera'); }
-// Cut / restore the GM camera. Off ⇒ push iframe to about:blank (webcam released),
-// preview dropped, and an immediate gm-presence so players drop the MJ tile now
-// rather than on the next 8s tick.
-function toggleGMCamera() {
-    gmCameraOff = !gmCameraOff;
-    if (currentCampaignId) localStorage.setItem(gmCameraOffKey(), gmCameraOff ? '1' : '0');
-    console.log('[GM] camera', gmCameraOff ? 'OFF (local)' : 'ON');
-    updateGMPushIframe();
-    publishGMPresence();   // players drop the MJ tile as soon as this lands
-}
-// Sync the topbar kill-switch button. Only meaningful while a room is active — with
-// no room nothing is published either way, so the control would be a no-op.
-function renderGMCameraToggle() {
-    const btn = document.getElementById('tb-cam-toggle');
-    if (!btn) return;
-    btn.style.display = currentVdoRoom ? '' : 'none';
-    btn.classList.toggle('off', gmCameraOff);
-    btn.textContent = gmCameraOff ? '🚫' : '📹';
-    btn.title = gmCameraOff ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
-}
 
-// Build a VDO.ninja viewer URL for a player stream; room/password only appended
-// once known (an empty `&room=` would make VDO.ninja try to join a room named "").
-function gmVdoViewSrc(streamId, muted) {
-    let src = `https://vdo.ninja/?view=${encodeURIComponent(streamId)}&autoplay&cleanoutput`;
-    if (muted) src += '&muted';
-    // &solo is required alongside &room: without it VDO.ninja ignores &view and
-    // shows the "Join Room with Camera" landing page instead of the stream.
-    if (currentVdoRoom) src += `&solo&room=${encodeURIComponent(currentVdoRoom)}`;
-    if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
-    return src;
-}
-
-// Drive the GM push iframe (#vdo-gm-push-frame, fixed + opacity:0 outside the app
-// wrapper) and the "Votre caméra" preview in the Joueurs tab.
+// The GM's camera UI: the topbar kill switch, the hidden push frame (both owned by
+// cam), and the "Votre caméra" preview in the Joueurs tab, which is ours.
 //
 // The push frame is deliberately NOT the preview: it used to be the visible iframe
 // inside #tab-players, and .tab-content goes display:none on every tab switch, which
-// can block camera capture. Same split as the player: hidden push + viewer preview.
+// can block camera capture. The preview is a muted viewer of our own stream instead.
 function updateGMPushIframe() {
-    const pushFrame = document.getElementById('vdo-gm-push-frame');
+    cam.renderToggle('tb-cam-toggle');
+    cam.syncPushFrame();
     const wrap = document.getElementById('gm-self-view-wrap');
     const section = document.getElementById('gm-self-view-section');
-    if (!pushFrame) { console.warn('[GM] updateGMPushIframe: #vdo-gm-push-frame not found'); return; }
-    renderGMCameraToggle();
-    // Two separate questions. `streamLive` — is the GM's stream being published at
-    // all (by this tab or a sibling)? `shouldPush` — should THIS tab own the webcam?
-    // The preview follows the first, the push frame the second, exactly as on the
-    // player side: a tab that isn't the pusher still views what its sibling publishes.
-    const sid = gmDerivedStreamId();
-    // The preview is a viewer of our own stream, so it is only worth showing while
-    // some tab is publishing it — the same rule as the advertised ID.
-    const streamLive = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff;
-    const shouldPush = !!currentVdoRoom && !!currentCampaignId && !gmCameraOff && gmPushLockHeld;
-    if (!shouldPush) {
-        const why = gmCameraOff ? 'camera cut by the GM'
-                  : !currentVdoRoom ? 'no vdoRoom'
-                  : 'another GM tab holds the push lock';
-        console.log('[GM] updateGMPushIframe:', why, '— clearing push iframe');
-        // 'about:blank', never '' — an empty src resolves to the page's own URL and
-        // would load a second copy of the GM app inside the iframe.
-        if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
-    } else {
-        // Blank &view: "no streams will play; only publishing will be allowed" — without it
-        // the push page renders every guest's video next to the GM's own preview.
-        let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(currentVdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
-        if (currentVdoRoomPassword) src += `&password=${encodeURIComponent(currentVdoRoomPassword)}`;
-        // Redacted: this log is routinely captured/pasted when debugging black streams,
-        // and the room password is enough to join the room and watch every player.
-        console.log('[GM] updateGMPushIframe:', src.replace(/([?&]password=)[^&]*/, '$1***'));
-        if (pushFrame.src !== src) pushFrame.src = src;
-    }
-    // Preview: a muted viewer of our own stream, safe to hide with the tab — but not
+    if (!wrap || !section) return;
+    // Only worth showing while some tab is publishing — the same rule as the
+    // advertised ID, and cam.live() is that rule. Safe to hide with the tab, but not
     // safe to *leave loaded* behind a display:none pane, which keeps its WebRTC
     // connection up. Dropped with the pane; renderTabLayout() rebuilds it on reopen.
-    if (wrap && section) {
-        if (!streamLive || !openPanes.includes('tab-players')) {
-            if (wrap.innerHTML) wrap.innerHTML = '';
-            section.style.display = 'none';   // nothing published ⇒ no empty preview box
-            return;
-        }
-        const viewSrc = gmVdoViewSrc(sid, true);
-        let iframe = wrap.querySelector('iframe');
-        if (!iframe) {
-            iframe = document.createElement('iframe');
-            iframe.allow = 'autoplay; fullscreen';   // viewer-only
-            iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-            wrap.appendChild(iframe);
-        }
-        if (iframe.src !== viewSrc) iframe.src = viewSrc;
-        section.style.display = '';
+    if (!cam.live() || !openPanes.includes('tab-players')) {
+        if (wrap.innerHTML) wrap.innerHTML = '';
+        section.style.display = 'none';   // nothing published ⇒ no empty preview box
+        return;
     }
+    const viewSrc = cam.viewSrc(cam.streamId(), true);
+    let iframe = wrap.querySelector('iframe');
+    if (!iframe) {
+        iframe = el('iframe', { allow: 'autoplay; fullscreen',   // viewer-only
+            style: { width: '100%', height: '100%', border: 'none', display: 'block' } });
+        wrap.appendChild(iframe);
+    }
+    setFrameSrc(iframe, viewSrc);
+    section.style.display = '';
 }
 // Tear down the GM camera: stops publishing and drops the preview. There is
 // deliberately no native getUserMedia path anywhere — without a room nothing is
 // streamed, so grabbing the webcam would light the camera LED for nothing.
 function stopGMSelfView() {
-    const pushFrame = document.getElementById('vdo-gm-push-frame');
-    if (pushFrame && pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
+    cam.blankPushFrame();
     const section = document.getElementById('gm-self-view-section');
     if (section) section.style.display = 'none';
     const wrap = document.getElementById('gm-self-view-wrap');
     if (wrap) wrap.innerHTML = '';
 }
+
 // Publish a damage event to a specific player via the aria-damage channel.
 function publishDamage(targetId, damage, hpBefore, hpAfter, maxHP, charName) {
     if (!ablyDamage) { console.warn('[GM] publishDamage: ablyDamage not ready'); return; }
@@ -1177,7 +1074,7 @@ function _playerCardState(p, charId) {
         // password-protected room, and the known-players snapshot keeps the last
         // streamId of players who have gone — so both gates, or the card shows a
         // guaranteed-black rectangle.
-        camSrc: (p.streamId && online && currentVdoRoom) ? gmVdoViewSrc(p.streamId, false) : '',
+        camSrc: (p.streamId && online && currentVdoRoom) ? cam.viewSrc(p.streamId, false) : '',
     };
 }
 
@@ -1348,7 +1245,7 @@ function openPlayerDetails(charId) {
             const hasAccess = isAll || (Array.isArray(f.grantedTo) && f.grantedTo.includes(charId));
             return el('button', {
                 className: 'pdm-tab-toggle' + (hasAccess ? ' active' : ''),
-                textContent: `${_fileIcon(f.type)} ${f.name}`,
+                textContent: `${fileIcon(f.type)} ${f.name}`,
                 disabled: isAll,
                 title: isAll ? 'Accès accordé à tous' : null,
                 onclick: isAll ? null : () => grantFileToPlayer(f.id, charId),
@@ -1555,31 +1452,6 @@ function doGMMonsterHeal() {
     saveMonsters();
     clearTimeout(renderMonstersTimer); renderMonstersTimer = setTimeout(renderMonsters, 50);
     setTimeout(() => triggerCardFx(monsterCardEl(m.id), 'heal'), 70);
-}
-// Evaluate a dice formula string (e.g. "2d6+2") and return total and breakdown.
-function rollDiceFormula(formula) {
-    const expr = (formula || '').replace(/\s+/g, '').toLowerCase();
-    if (!expr) return { total: 0, breakdown: '' };
-    const tokens = expr.split(/(?=[+-])/);
-    let total = 0;
-    const parts = [];
-    for (const token of tokens) {
-        if (!token) continue;
-        const sign = token[0] === '-' ? -1 : 1;
-        const raw = token.replace(/^[+-]/, '');
-        const m = raw.match(/^(\d+)d(\d+)$/);
-        if (m) {
-            const rolls = [];
-            for (let i = 0; i < parseInt(m[1]); i++) rolls.push(Math.floor(Math.random() * parseInt(m[2])) + 1);
-            const sub = rolls.reduce((a, b) => a + b, 0);
-            total += sign * sub;
-            parts.push(`${sign < 0 ? '−' : parts.length ? '+' : ''}[${rolls.join('+')}]`);
-        } else {
-            const num = parseInt(raw);
-            if (!isNaN(num)) { total += sign * num; parts.push(`${sign < 0 ? '−' : parts.length ? '+' : ''}${num}`); }
-        }
-    }
-    return { total, breakdown: parts.join(' ') };
 }
 // Rebuild the attack select dropdown when the monster selection changes.
 function onMonsterSelectChange() {
@@ -1964,24 +1836,12 @@ function renderRollFeed() {
         });
     }
 
-    // Apply filters
-    let filtered = rollFeed;
-    if (rollFilter.size > 0 || playerFilter.size > 0) {
-        filtered = rollFeed.filter(d => {
-            if (playerFilter.size > 0) {
-                const name = d.char || d.playerId || '?';
-                if (!playerFilter.has(name)) return false;
-            }
-            if (rollFilter.size > 0) {
-                const isDie = d.threshold === null;
-                if (isDie) return rollFilter.has('die');
-                const type = classify(d.roll, d.threshold, d.success);
-                if (rollFilter.has('crit') && (type === 'crit-success' || type === 'crit-fail')) return true;
-                return rollFilter.has(type);
-            }
-            return true;
-        });
-    }
+    // Apply filters. The roll pills go through the shared predicate — this copy used
+    // to end in `rollFilter.has(type)`, which hid a critical success while "Succès"
+    // was lit, so the same pills meant different things on the two panels.
+    const filtered = rollFeed.filter(d =>
+        (!playerFilter.size || playerFilter.has(d.char || d.playerId || '?'))
+        && rollPassesFilter(d, rollFilter));
 
     if (!filtered.length) { feed.innerHTML = '<div class="rolls-empty">En attente de jets…</div>'; return; }
 
@@ -2260,21 +2120,11 @@ window.addEventListener('storage', e => {
         applyTheme(!!config.lightMode);
         return;
     }
-    // The kill switch is per-campaign localStorage state read only in
-    // loadCampaignState, so a sibling GM tab never learned the camera had been cut —
-    // and since both tabs broadcast gm-presence every 8s, they alternated an empty and
-    // a real streamId, making the MJ tile appear and disappear on every player's rail
-    // (and flipping gmLiveStreamId on the OBS overlay). Fires only in the other tabs,
-    // so it never re-enters the one that toggled.
-    if (currentCampaignId && e.key === gmCameraOffKey()) {
-        const off = e.newValue === '1';
-        if (off === gmCameraOff) return;
-        gmCameraOff = off;
-        console.log('[GM] camera', gmCameraOff ? 'OFF' : 'ON', '(synced from another tab)');
-        updateGMPushIframe();
-        // No gm-presence publish here: the tab that toggled already sent one, and the
-        // 8s heartbeat carries the new streamId regardless.
-    }
+    // Keep every GM tab agreeing on the kill switch: cam.live() reads it, so two
+    // tabs that disagreed would advertise different stream IDs under one clientId and
+    // the MJ tile would flip between them on every player's rail (and on the OBS
+    // overlay). See cam.syncFromStorage(), which re-renders and republishes presence.
+    cam.syncFromStorage(e);
 });
 // Populate the config modal inputs from the current config and campaign.
 function loadConfigInputs() {
@@ -2309,7 +2159,7 @@ function saveConfig() {
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     ablyPresence = null; gmPresenceEntered = false;
     if (config.ablyKey) initAbly();   // re-enters presence with the new room
-    acquireGMPushLock();
+    cam.acquireLock();
     updateGMPushIframe();
     // Setting or clearing the room changes whether player cards may carry a camera at
     // all. Without this the grid waited for the next presence heartbeat (up to 5s) —
@@ -2391,45 +2241,11 @@ function initGmDeck() {
 // ═══════════════════════════════════════════
 //  GM FILE VIEWER
 // ═══════════════════════════════════════════
-// Open the GM file viewer modal for a file, rendering image/PDF/text inline.
-function openGmFileViewer(fileId) {
-    const f = gmFiles.find(f => f.id === fileId);
-    if (!f) return;
-    document.getElementById('gm-fv-title').textContent = f.name;
-    const body = document.getElementById('gm-fv-body');
-    body.innerHTML = '';
-    const url = _safeUrl(f.url);
-    if (url && f.type && f.type.startsWith('image/')) {
-        const img = document.createElement('img');
-        img.src = url; img.className = 'fv-image';
-        body.appendChild(img);
-        wireImageZoom(img);
-    } else if (url && f.type === 'application/pdf') {
-        const iframe = document.createElement('iframe');
-        iframe.src = url; iframe.className = 'fv-iframe';
-        body.appendChild(iframe);
-    } else if (url && f.type && f.type.startsWith('text/')) {
-        const pre = document.createElement('pre');
-        pre.className = 'fv-text'; pre.textContent = 'Chargement…';
-        body.appendChild(pre);
-        fetch(url).then(r => r.text()).then(t => { pre.textContent = t; }).catch(() => { pre.textContent = 'Erreur de chargement.'; });
-    } else {
-        body.append(el('div', { className: 'fv-unsupported' },
-            el('div', { className: 'fv-unsupported-icon', textContent: _fileIcon(f.type) }),
-            el('div', { className: 'fv-unsupported-name', textContent: f.name }),
-            url && el('a', { className: 'fv-download-link', href: url, target: '_blank', rel: 'noopener',
-                textContent: 'Ouvrir dans un nouvel onglet' })));
-    }
-    document.getElementById('gm-file-viewer-scrim').classList.add('show');
-    document.getElementById('gm-file-viewer-modal').classList.add('show');
-}
+// Same engine as the player's; the 'gm-' prefix reaches this page's copy of the
+// identical markup.
+const fileViewer = makeFileViewer({ prefix: 'gm-', files: () => gmFiles });
 
-// Close the GM file viewer modal and clear its body.
-function closeGmFileViewer() {
-    document.getElementById('gm-file-viewer-scrim').classList.remove('show');
-    document.getElementById('gm-file-viewer-modal').classList.remove('show');
-    document.getElementById('gm-fv-body').innerHTML = '';
-}
+
 
 
 // ═══════════════════════════════════════════
@@ -2574,14 +2390,6 @@ function _pdmSkillPct(s) {
     if (!b) return `${pct}%`;
     return [`${pct + b}% `, el('span', { className: 'pdm-skill-mod', title: 'Modificateur permanent',
         textContent: `${b > 0 ? '+' : ''}${b}` })];
-}
-// Return a short uppercase type tag for a file MIME type (mono label, no emoji).
-function _fileIcon(type) {
-    if (!type) return 'DOC';
-    if (type.startsWith('image/')) return 'IMG';
-    if (type === 'application/pdf') return 'PDF';
-    if (type.startsWith('text/')) return 'TXT';
-    return 'DOC';
 }
 
 // Persist GM files to localStorage and debounce Supabase sync.
@@ -3274,13 +3082,13 @@ function renderGmFiles() {
         list.append(el('div', { className: 'gm-file-card' },
             el('span', { className: 'group-grip', draggable: true, title: 'Glisser vers un groupe', textContent: '⠿',
                 ondragstart: e => _groupDragStart(e, f.id, 'file'), ondragend: e => _groupDragEnd(e) }),
-            el('div', { className: 'gm-file-icon', textContent: _fileIcon(f.type) }),
+            el('div', { className: 'gm-file-icon', textContent: fileIcon(f.type) }),
             el('div', { className: 'gm-file-info' },
                 el('div', { className: 'gm-file-name', textContent: f.name }),
                 el('div', { className: 'gm-file-grant-status', textContent: grantLabel },
                     gName && el('span', { className: 'group-badge', textContent: ' ' + gName }))),
             el('div', { className: 'gm-file-actions' },
-                el('button', { className: 'gm-file-open-btn', title: 'Ouvrir', textContent: 'Ouvrir', onclick: () => openGmFileViewer(f.id) }),
+                el('button', { className: 'gm-file-open-btn', title: 'Ouvrir', textContent: 'Ouvrir', onclick: () => fileViewer.open(f.id) }),
                 el('button', { className: 'gm-file-btn' + (isAll ? ' active' : ''), textContent: 'Tous',
                     title: isAll ? 'Révoquer accès global' : 'Accorder à tous', onclick: () => grantFileToAll(f.id) }),
                 el('button', { className: 'gm-file-del-btn', title: 'Supprimer', textContent: '✕', onclick: () => removeGmFile(f.id) }))));

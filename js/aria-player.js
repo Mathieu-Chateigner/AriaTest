@@ -139,96 +139,22 @@ let vdoRoomPassword = '';
 let presenceMode = localStorage.getItem('aria-presence-mode') || 'bandeau';
 let spotlightCharId = null;   // GM spotlight — that player's face goes big for everyone
 let localStageSid = '';       // locally chosen big tile in Tablée (clicking a face)
-// Player-side camera kill switch. The GM decides the room; this decides whether we
-// publish into it at all. Persisted per character so it survives a refresh — a
-// player who opted out must not be re-broadcast by the next page load.
-let cameraOff = false;
-function cameraOffKey() { return charKey('camera'); }
-// Toggle the local camera. Off ⇒ push iframe goes to about:blank (webcam released)
-// and presence advertises no stream ID, so no peer opens a viewer on a dead stream.
-function toggleCamera() {
-    cameraOff = !cameraOff;
-    if (currentCharId) localStorage.setItem(cameraOffKey(), cameraOff ? '1' : '0');
-    console.log('[VDO] camera', cameraOff ? 'OFF (local)' : 'ON');
-    updatePushIframe();   // the lock stays ours; we just stop publishing into it
-    sendPresence();
-    updateCamerasTabVisibility();
-}
-// Derive the VDO.ninja push stream ID from the first 8 chars of the character UUID.
-function derivedStreamId() {
-    return 'aria-' + currentCharId.slice(0, 8);
-}
-
-// ── Single-pusher lock ─────────────────────────────────────────────────────────
-// The push stream ID is a pure function of charId, so two tabs on one character
-// would publish into the same VDO.ninja room under the same ID. Exactly one tab may
-// own the webcam — which is precisely what an exclusive Web Lock is. The browser
-// grants it to one holder, queues the others, and releases it when the holder's tab
-// goes away, *including a crash*: there is no unload handler to miss and no TTL to
-// wait out, and the next tab in the queue starts pushing the instant the holder dies.
-//
-// The lock answers "which tab pushes" and nothing else. "Is anyone pushing?" is
-// `vdoRoom && !cameraOff` — shared state that every tab of the character evaluates
-// identically — so all of them advertise the same streamId and no consumer can see it
-// flip. Conflating those two questions is what the old claim record kept getting wrong.
-let pushLockHeld = false;
-let _pushLockRelease = null, _pushLockAbort = null;
-// Get in line for the webcam. Called once per character; held for the tab's life.
-function acquirePushLock() {
-    releasePushLock();
-    if (!currentCharId) return;
-    // Web Locks needs a secure context with a real origin — from file:// it throws.
-    // Nothing can push there anyway (getUserMedia refuses too), so assume sole
-    // ownership rather than leaving the character with no pusher at all.
-    if (!navigator.locks) { pushLockHeld = true; updatePushIframe(); return; }
-    const ac = new AbortController();
-    _pushLockAbort = ac;
-    try {
-        navigator.locks.request('aria-push-' + currentCharId, { mode: 'exclusive', signal: ac.signal },
-            () => new Promise(release => {
-                _pushLockAbort = null;
-                _pushLockRelease = release;
-                pushLockHeld = true;
-                console.log('[VDO] push lock acquired — this tab owns the webcam');
-                updatePushIframe();
-                renderPresenceUI();
-            })
-        ).catch(() => {});   // AbortError when we left the queue before being granted
-    } catch (_) { pushLockHeld = true; updatePushIframe(); }
-}
-// Leave the queue, or hand the lock to the next tab, on character switch.
-function releasePushLock() {
-    if (_pushLockAbort) { try { _pushLockAbort.abort(); } catch (_) {} _pushLockAbort = null; }
-    if (_pushLockRelease) { _pushLockRelease(); _pushLockRelease = null; }
-    pushLockHeld = false;
-}
-// True when this character's stream is being published, by this tab or a sibling —
-// the precondition for a self tile, which is just a muted viewer of it. Every tab
-// answers this identically because both terms are shared state, so the tile cannot
-// flicker and no cross-tab liveness record is needed: the browser guarantees that
-// some live tab holds the lock whenever any tab of this character is open.
-function selfStreamLive() {
-    return !!currentCharId && !!vdoRoom && !cameraOff;
-}
-// Set the VDO.ninja push iframe src — iframe is full-viewport before #app-wrapper in DOM so browser grants camera access.
-function updatePushIframe() {
-    const pushFrame = document.getElementById('vdo-push-frame');
-    if (!pushFrame) { console.warn('[VDO] updatePushIframe: #vdo-push-frame not found'); return; }
-    if (!vdoRoom || !currentCharId || cameraOff || !pushLockHeld) {
-        // 'about:blank', never '' — an empty src resolves to the page's own URL and
-        // would load a second copy of the whole app inside the hidden iframe.
-        if (pushFrame.src && pushFrame.src !== 'about:blank') pushFrame.src = 'about:blank';
-        updateCamerasTabVisibility();
-        return;
-    }
-    const sid = derivedStreamId();
-    // Blank &view: "no streams will play; only publishing will be allowed" — without it
-    // the push page joins the room as a full client and downloads every guest's stream.
-    let src = `https://vdo.ninja/?push=${sid}&room=${encodeURIComponent(vdoRoom)}&view&autostart&webcam&noaudio&cleanoutput`;
-    if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
-    if (pushFrame.src !== src) pushFrame.src = src;
-    updateCamerasTabVisibility();
-}
+// Player-side camera. The GM decides the room; this decides whether we publish into
+// it at all. Everything mechanical — the single-pusher Web Lock, the push/view URLs,
+// the kill switch and its cross-tab sync — lives in makeCamera(); only the post-change
+// rendering is ours.
+const cam = makeCamera({
+    tag: '[VDO]',
+    sidPrefix: 'aria-',
+    lockPrefix: 'aria-push-',
+    frameId: 'vdo-push-frame',
+    ownerId:  () => currentCharId,
+    offKey:   () => charKey('camera'),
+    room:     () => vdoRoom,
+    password: () => vdoRoomPassword,
+    onChange: () => { cam.syncPushFrame(); updateCamerasTabVisibility(); renderPresenceUI(); },
+    announce: () => sendPresence(),
+});
 let ablyInstance = null;
 let currentHP = null;
 const knownPlayers = {}; // { charId: { name } } — other players, from the presence set
@@ -630,7 +556,7 @@ function switchCharacter() {
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     ablyPresence = null; presenceEntered = false;
-    releasePushLock();   // before resetCameraState: it blanks the push iframe
+    cam.releaseLock();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     localStorage.removeItem(LAST_CHAR_KEY);   // deliberate exit — don't auto-re-enter
     showSelectionScreen();
@@ -648,7 +574,7 @@ function switchCharacter() {
 function resetCameraState() {
     vdoRoom = '';
     vdoRoomPassword = '';
-    updatePushIframe();       // → about:blank, camera released
+    cam.blankPushFrame();     // camera released
     peerCameras.clear();
     gmStreamId = '';
     spotlightCharId = null;
@@ -676,7 +602,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 function initApp() {
     console.log('[PLAYER] initApp: char:', character.name, '| charId:', currentCharId, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     currentHP = null;
-    cameraOff = localStorage.getItem(cameraOffKey()) === '1';
+    cam.loadOff();
     playerTabs = JSON.parse(localStorage.getItem(charKey('tabs')) || '{"cards":false,"alchemy":false}');
     playerFiles = JSON.parse(localStorage.getItem(charKey('files')) || '[]');
     initCurrentHP();
@@ -692,12 +618,12 @@ function initApp() {
     notes.load();
     // No presence heartbeat: `presence.enter` in initAbly announces us once and
     // `presence.update` publishes on change. Nothing polls, and nothing expires.
-    acquirePushLock();
+    cam.acquireLock();
     document.title = character.name ? `ARIA – ${character.name}` : 'ARIA – Joueur';
     updateOverlayEditorBtn();
     const volSlider = document.getElementById('music-bar-volume');
     if (volSlider) volSlider.value = String(musicMasterVolume);
-    updatePushIframe();
+    cam.syncPushFrame();
     // No startSelfView() here: requesting the webcam at boot lit the camera LED even
     // when no VDO room existed and the Caméras tab was never opened. renderCamerasTab()
     // asks for it only when the tab is actually shown.
@@ -816,11 +742,10 @@ function setPresenceMode(m) {
 // The stream ID currently spotlighted by the GM ('' if none / unknown).
 function spotlightSid() {
     if (!spotlightCharId) return '';
-    // selfStreamLive() answers "is the stream published"; a *tile* additionally needs
-    // the room, because a viewer URL without &room can't decrypt a stream pushed into
-    // a password-protected one. The two used to be one test — they are separate now
-    // that selfStreamLive() is claim-only (see its comment).
-    if (spotlightCharId === currentCharId) return (vdoRoom && selfStreamLive()) ? derivedStreamId() : '';
+    // cam.live() covers both halves a tile needs: something is being published, and
+    // a room is set — a viewer URL without &room cannot decrypt a stream pushed into
+    // a password-protected one, so a tile without it is a guaranteed black rectangle.
+    if (spotlightCharId === currentCharId) return cam.advertisedId();
     return peerCameras.get(spotlightCharId)?.streamId || '';
 }
 
@@ -842,13 +767,7 @@ function renderPresenceUI() {
     ['reduit', 'bandeau', 'tablee'].forEach(m =>
         document.getElementById('pres-pill-' + m)?.classList.toggle('active', presenceMode === m));
     // Camera kill switch — only meaningful while a room is active
-    const camBtn = document.getElementById('pres-cam-toggle');
-    if (camBtn) {
-        camBtn.style.display = vdoRoom ? '' : 'none';
-        camBtn.classList.toggle('off', cameraOff);
-        camBtn.textContent = cameraOff ? '🚫' : '📹';
-        camBtn.title = cameraOff ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
-    }
+    cam.renderToggle('pres-cam-toggle');
     // Réduit — initials dots in the command bar ("présence sans pixels")
     const dots = document.getElementById('tb-presence-dots');
     if (dots) {
@@ -914,7 +833,7 @@ function renderPresenceRail() {
     // Every tile needs the room in its URL — see camerasAvailable(). The self tile
     // already required it; the GM and peer tiles did not, so a stale streamId
     // outlived the room and rendered as a black rectangle.
-    if (vdoRoom && selfStreamLive()) expected.set(derivedStreamId(), (character.name || 'Vous'));
+    if (cam.live()) expected.set(cam.streamId(), (character.name || 'Vous'));
     if (vdoRoom && gmStreamId) expected.set(gmStreamId, 'MJ');
     if (vdoRoom) peerCameras.forEach((p, charId) => { if (p.streamId && charId !== currentCharId) expected.set(p.streamId, p.name || charId); });
     const spot = spotlightSid();
@@ -930,8 +849,8 @@ function renderPresenceRail() {
         tile._label = tile.lastChild;
         return tile;
     }, (tile, label, sid) => {
-        const isSelf = vdoRoom && currentCharId && !cameraOff && sid === derivedStreamId();
-        setFrameSrc(tile._frame, vdoViewSrc(sid, !!isSelf));
+        const isSelf = cam.live() && sid === cam.streamId();
+        setFrameSrc(tile._frame, cam.viewSrc(sid, isSelf));
         tile._label.textContent = label;
         tile.classList.toggle('spotlit', !!spot && sid === spot);
     });
@@ -960,18 +879,6 @@ function applyStageMain() {
     cells.forEach(c => c.classList.toggle('stage-main', c === main));
 }
 
-// Build a VDO.ninja viewer URL; the room/password params are only appended once
-// known (an empty `&room=` would make VDO.ninja try to join a room named "").
-function vdoViewSrc(sid, muted) {
-    let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput`;
-    if (muted) src += '&muted';
-    // &solo is required alongside &room: without it VDO.ninja ignores &view and
-    // shows the "Join Room with Camera" landing page instead of the stream.
-    if (vdoRoom) src += `&solo&room=${encodeURIComponent(vdoRoom)}`;
-    if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
-    return src;
-}
-
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
     const grid = document.getElementById('cameras-grid');
@@ -984,9 +891,9 @@ function renderCamerasTab() {
         let msg = '';
         if (vdoRoom && !window.isSecureContext) {
             msg = '⚠ Caméra indisponible : la page doit être servie en HTTPS (page GitHub Pages) — depuis un fichier local le navigateur refuse l’accès webcam. Vous voyez les autres, ils ne vous voient pas.';
-        } else if (vdoRoom && cameraOff) {
+        } else if (vdoRoom && cam.off) {
             msg = '📹 Votre caméra est coupée — les autres ne vous voient pas. Bouton 🚫 dans la barre du haut pour rétablir.';
-        } else if (vdoRoom && !pushLockHeld) {
+        } else if (vdoRoom && !cam.lockHeld) {
             // Informational, not a failure: the stream is live, this tab just isn't
             // the one publishing it. Stated because the webcam LED belongs to the
             // other tab and that is otherwise puzzling. There is no "taking over"
@@ -1000,9 +907,9 @@ function renderCamerasTab() {
     // #vdo-push-frame; there is no native <video> path. No room or camera cut ⇒ nothing
     // is being published by any tab of this character, so no self tile.
     let selfCell = grid.querySelector('.camera-cell[data-self]');
-    if (vdoRoom && selfStreamLive()) {   // room required — see spotlightSid()
-        const sid = derivedStreamId();
-        const viewSrc = vdoViewSrc(sid, true);
+    if (cam.live()) {   // room included — see spotlightSid()
+        const sid = cam.streamId();
+        const viewSrc = cam.viewSrc(sid, true);
         if (!selfCell) {
             selfCell = document.createElement('div');
             selfCell.className = 'camera-cell';
@@ -1074,10 +981,10 @@ function renderCamerasTab() {
             // Re-src the iframe if the expected URL changed (e.g. the room/password
             // arrived after the cell was first created with a room-less URL).
             const iframe = cell.querySelector('.camera-iframe');
-            const expectedSrc = vdoViewSrc(sid, false);
+            const expectedSrc = cam.viewSrc(sid, false);
             if (iframe && iframe.src !== expectedSrc) iframe.src = expectedSrc;
         } else {
-            const iframeSrc = vdoViewSrc(sid, false);
+            const iframeSrc = cam.viewSrc(sid, false);
             const cell = document.createElement('div');
             cell.className = 'camera-cell';
             const wrap = document.createElement('div');
@@ -1688,21 +1595,6 @@ async function rollDieViaDddice(sides, callback) {
         callback(Math.floor(Math.random() * sides) + 1);
     }
 }
-// Parse "2d6+2" → { dice: ['d6','d6'], modifier: 2 }
-// Parse a dice formula string like "2d6+2" into a dice type array and a flat modifier.
-function formulaToDiceSpec(formula) {
-    const tokens = formula.replace(/\s+/g,'').toLowerCase().split(/(?=[+-])/);
-    const dice = []; let modifier = 0;
-    for (const token of tokens) {
-        if (!token) continue;
-        const sign = token[0] === '-' ? -1 : 1;
-        const raw  = token.replace(/^[+-]/,'');
-        const m = raw.match(/^(\d+)d(\d+)$/);
-        if (m) { for (let i = 0; i < +m[1]; i++) dice.push(`d${m[2]}`); }
-        else    { modifier += sign * (+raw || 0); }
-    }
-    return { dice, modifier };
-}
 // Roll a standard die (d4/d6/d8/d10/d12/d20) and publish the result.
 function rollDie(sides) {
     if (pendingDddiceRoll || pendingSecondaryRoll) return;
@@ -1714,39 +1606,6 @@ function rollDie(sides) {
     });
 }
 
-// Parse and roll a dice formula like "2d6+2", "1d8-1", "3d4", "5"
-// Evaluate a dice formula string (e.g. "2d6+2") and return total and breakdown.
-function rollDiceFormula(formula) {
-    const expr = (formula || '').replace(/\s+/g, '').toLowerCase();
-    if (!expr) return { total: 0, breakdown: '0' };
-    // Split on + or - keeping the sign with the following term
-    const tokens = expr.split(/(?=[+-])/);
-    let total = 0;
-    const parts = [];
-    for (const token of tokens) {
-        if (!token) continue;
-        const sign = token[0] === '-' ? -1 : 1;
-        const raw = token.replace(/^[+-]/, '');
-        const diceMatch = raw.match(/^(\d+)d(\d+)$/);
-        if (diceMatch) {
-            const count = parseInt(diceMatch[1]);
-            const sides = parseInt(diceMatch[2]);
-            const rolls = [];
-            for (let i = 0; i < count; i++) rolls.push(Math.floor(Math.random() * sides) + 1);
-            const sub = rolls.reduce((a, b) => a + b, 0);
-            total += sign * sub;
-            const prefix = sign < 0 ? '−' : parts.length ? '+' : '';
-            parts.push(`${prefix}[${rolls.join('+')}]`);
-        } else {
-            const num = parseInt(raw);
-            if (!isNaN(num)) {
-                total += sign * num;
-                parts.push(`${sign < 0 ? '−' : parts.length ? '+' : ''}${num}`);
-            }
-        }
-    }
-    return { total, breakdown: parts.join(' ') };
-}
 
 // Show a weapon damage result on the float card and publish it to Ably.
 function _showWeaponDamageResult(name, formula, result) {
@@ -1864,22 +1723,7 @@ function renderRollHistory() {
     const list = document.getElementById('roll-history-list');
     if (!list) return;
 
-    let filtered = playerRollHistory;
-    if (rollFilter.size > 0) {
-        filtered = filtered.filter(r => {
-            const isDie = r.threshold === null;
-            if (isDie) return rollFilter.has('die');
-            const type = classify(r.roll, r.threshold, r.success);
-            const isCrit    = type === 'crit-success' || type === 'crit-fail';
-            const isSuccess = type === 'success'       || type === 'crit-success';
-            const isFail    = type === 'fail'          || type === 'crit-fail';
-            // Succès/Échec include their critical variants; Critique catches both crits.
-            if (rollFilter.has('crit')    && isCrit)    return true;
-            if (rollFilter.has('success') && isSuccess) return true;
-            if (rollFilter.has('fail')    && isFail)    return true;
-            return false;
-        });
-    }
+    let filtered = playerRollHistory.filter(r => rollPassesFilter(r, rollFilter));
     if (rollDateFilter) {
         filtered = filtered.filter(r => r.ts && localDateKey(r.ts) === rollDateFilter);
     }
@@ -2512,7 +2356,7 @@ function presenceData() {
     // Advertise a stream ID only while this character's camera is actually being
     // published: an ID nobody is pushing makes every receiver open a viewer iframe on
     // a dead stream — a black box on the GM's card, on each peer's rail, and on the
-    // OBS output. selfStreamLive() is shared state, so every tab of this character
+    // OBS output. cam.live() is shared state, so every tab of this character
     // publishes the same value and the tile cannot flip between them.
     return {
         role: 'player',
@@ -2531,7 +2375,7 @@ function presenceData() {
         karma: character.karma ?? 0,
         campaignKey: character.campaignKey || '',
         ariaType: character.ariaType || 'ancient',
-        streamId: selfStreamLive() ? derivedStreamId() : '',
+        streamId: cam.advertisedId(),
         ts: Date.now(),
     };
 }
@@ -2594,7 +2438,7 @@ function applyPresenceSet(members) {
     });
     // The room is what decides whether we publish at all, so a change to it changes
     // the stream ID we advertise — say so now rather than leaving receivers to guess.
-    if (roomChanged) { updatePushIframe(); sendPresence(); }
+    if (roomChanged) { cam.syncPushFrame(); sendPresence(); }
     updateCamerasTabVisibility();   // → renderPresenceUI + renderCamerasTab
 }
 // Update the Ably status dot and text labels in the topbar and config modal.
@@ -2611,20 +2455,9 @@ window.addEventListener('storage', e => {
         applyTheme(!!config.lightMode);
         return;
     }
-    // The kill switch is per-character localStorage state, and selfStreamLive() reads
-    // it — so every tab of this character has to agree on it or they would advertise
-    // different stream IDs under the same clientId and the tile would flip between
-    // them. (`storage` fires only in the *other* tabs, so this never re-enters the
-    // tab that made the change.)
-    if (currentCharId && e.key === cameraOffKey()) {
-        const off = e.newValue === '1';
-        if (off === cameraOff) return;
-        cameraOff = off;
-        console.log('[VDO] camera', cameraOff ? 'OFF' : 'ON', '(synced from another tab)');
-        updatePushIframe();
-        sendPresence();
-        updateCamerasTabVisibility();
-    }
+    // Keep every tab of this character agreeing on the kill switch — see
+    // cam.syncFromStorage(), which re-renders and republishes presence when it moved.
+    cam.syncFromStorage(e);
 });
 // Populate the config modal inputs from the current config and character.
 function loadConfigInputs() {
@@ -3133,14 +2966,10 @@ async function animateFly() {
 // ═══════════════════════════════════════════
 //  PLAYER FILES
 // ═══════════════════════════════════════════
-// Return a short uppercase type tag for a file MIME type (mono label, no emoji).
-function _pfFileIcon(type) {
-    if (!type) return 'DOC';
-    if (type.startsWith('image/')) return 'IMG';
-    if (type === 'application/pdf') return 'PDF';
-    if (type.startsWith('text/')) return 'TXT';
-    return 'DOC';
-}
+
+// The preview modal for a GM-granted file. Same engine as the GM's, which reaches
+// the identical markup through the 'gm-' id prefix.
+const fileViewer = makeFileViewer({ files: () => playerFiles });
 
 // Render the GM-granted files list in the Fichiers tab.
 function renderPlayerFiles() {
@@ -3156,56 +2985,11 @@ function renderPlayerFiles() {
     // Files are granted by the GM over Ably — name and id are remote strings.
     playerFiles.forEach(f => {
         list.append(el('div', { className: 'player-file-row' },
-            el('div', { className: 'pf-icon', textContent: _pfFileIcon(f.type) }),
+            el('div', { className: 'pf-icon', textContent: fileIcon(f.type) }),
             el('div', { className: 'pf-name', textContent: f.name }),
-            el('button', { className: 'pf-open-btn', textContent: 'Ouvrir', onclick: () => openFileViewer(f.id) })));
+            el('button', { className: 'pf-open-btn', textContent: 'Ouvrir', onclick: () => fileViewer.open(f.id) })));
     });
 }
 
-// Open the file viewer modal for a player file, rendering image/PDF/text inline.
-function openFileViewer(fileId) {
-    const f = playerFiles.find(f => f.id === fileId);
-    if (!f) return;
-    document.getElementById('fv-title').textContent = f.name;
-    const body = document.getElementById('fv-body');
-    body.innerHTML = '';
-    const url = _safeUrl(f.url);
-    // f.type can be missing on a malformed grant or an old row — guard like the GM viewer.
-    if (url && f.type && f.type.startsWith('image/')) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.className = 'fv-image';
-        body.appendChild(img);
-        wireImageZoom(img);
-    } else if (url && f.type === 'application/pdf') {
-        const iframe = document.createElement('iframe');
-        iframe.src = url;
-        iframe.className = 'fv-iframe';
-        body.appendChild(iframe);
-    } else if (url && f.type && f.type.startsWith('text/')) {
-        const pre = document.createElement('pre');
-        pre.className = 'fv-text';
-        pre.textContent = 'Chargement…';
-        body.appendChild(pre);
-        fetch(url)
-            .then(r => r.text())
-            .then(text => { pre.textContent = text; })
-            .catch(() => { pre.textContent = 'Erreur de chargement.'; });
-    } else {
-        body.append(el('div', { className: 'fv-unsupported' },
-            el('div', { className: 'fv-unsupported-icon', textContent: _pfFileIcon(f.type) }),
-            el('div', { className: 'fv-unsupported-name', textContent: f.name }),
-            url && el('a', { className: 'fv-download-link', href: url, target: '_blank', rel: 'noopener',
-                textContent: 'Ouvrir dans un nouvel onglet' })));
-    }
-    document.getElementById('file-viewer-scrim').classList.add('show');
-    document.getElementById('file-viewer-modal').classList.add('show');
-}
 
-// Close the file viewer modal and clear its body.
-function closeFileViewer() {
-    document.getElementById('file-viewer-scrim').classList.remove('show');
-    document.getElementById('file-viewer-modal').classList.remove('show');
-    document.getElementById('fv-body').innerHTML = '';
-}
 

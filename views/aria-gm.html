@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-panel.css">
     <link rel="stylesheet" href="../css/aria-gm.css">
 </head>
 <body>
@@ -92,8 +93,8 @@
             <span class="trt-icon">⌗</span> Lire la table<span class="trt-on">· on</span>
         </button>
         <!-- camera kill switch — the GM decides the room, this decides whether the GM
-             publishes into it. Shown only while a room is active (renderGMCameraToggle). -->
-        <button class="tb-cam-toggle" id="tb-cam-toggle" onclick="toggleGMCamera()" style="display:none;" title="Couper ma caméra">📹</button>
+             publishes into it. Shown only while a room is active (cam.renderToggle). -->
+        <button class="tb-cam-toggle" id="tb-cam-toggle" onclick="cam.toggle()" style="display:none;" title="Couper ma caméra">📹</button>
         <!-- music mini chip (design frame 12) — shows the now-playing track -->
         <div class="tb-music-chip" id="tb-music-chip" style="visibility:hidden;" title="Piste en cours">
             <span class="tb-music-note">♪</span>
@@ -535,11 +536,11 @@
     </div><!-- /#app-wrapper -->
 
     <!-- GM FILE VIEWER MODAL -->
-    <div class="modal-scrim" id="gm-file-viewer-scrim" onclick="closeGmFileViewer()"></div>
+    <div class="modal-scrim" id="gm-file-viewer-scrim" onclick="fileViewer.close()"></div>
     <div class="file-viewer-modal" id="gm-file-viewer-modal">
         <div class="fv-header">
             <div class="fv-title" id="gm-fv-title"></div>
-            <button class="fv-close-btn" onclick="closeGmFileViewer()">✕</button>
+            <button class="fv-close-btn" onclick="fileViewer.close()">✕</button>
         </div>
         <div class="fv-body" id="gm-fv-body"></div>
     </div>
