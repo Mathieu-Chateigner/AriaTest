@@ -88,7 +88,8 @@
 .player-card.hp-critical, .monster-card.hp-critical { animation: ariaCritGlow 1.8s ease-in-out infinite; }
 /* death (HP 0) — desaturate + dim */
 .player-card.is-dead, .monster-card.is-dead { filter: grayscale(.85); opacity: .55; }
-.player-card.is-dead .pc-camera-wrap::after {
+.player-card.is-dead .pc-camera-wrap::after,
+.player-card.is-dead.no-cam .pc-header::after {
     content: 'MORT';
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     background: rgba(5,6,9,.55); pointer-events: none; z-index: 6;
@@ -618,13 +619,11 @@
     position: relative; z-index: 2;
 }
 .pc-online-dot {
-    position: absolute;
-    top: 9px; left: 9px;
     width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--faint);
     flex-shrink: 0;
-    z-index: 3;
+    align-self: center;
 }
 .pc-online-dot.online { background: var(--ok); animation: ariaPulse 2.4s infinite; }
 .player-card.hp-critical .pc-online-dot.online { background: var(--bad); }
@@ -1770,7 +1769,7 @@
 .sel-card-row { display: flex; align-items: center; gap: 8px; width: 100%; }
 .sel-card-row .sel-card-name { flex: 1; min-width: 0; }
 .sel-card-joincode { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--gm-accent-light); cursor: pointer; transition: color .15s; }
-.sel-card-joincode:hover { color: var(--gm-accent); }.gateway-eyebrow.ember { color: var(--gm-accent-light); }.gateway-btn:hover { filter: brightness(1.1); }/* ════════════════════════════════════════════
+.sel-card-joincode:hover { color: var(--gm-accent); }.gateway-btn:hover { filter: brightness(1.1); }/* ════════════════════════════════════════════
    LIGHT MODE
    ════════════════════════════════════════════ */
 body.light-mode {

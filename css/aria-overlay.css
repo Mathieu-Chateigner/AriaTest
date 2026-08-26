@@ -111,7 +111,7 @@ body {
 }
 /* The roll colour drives the skill label, the rule and the number; the verdict
    stays --warm in every state (design frame 20). */
-#roll-card { --roll-col: var(--ok); }
+#roll-card { --roll-col: var(--warm); }
 #roll-card.success { --roll-col: var(--ok); }
 #roll-card.fail, #roll-card.crit-fail { --roll-col: var(--bad); }
 #roll-card.crit-success { --roll-col: var(--ember); }

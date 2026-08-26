@@ -933,6 +933,7 @@
 /* ── FREE ROLL — form as full-height left rail + history (design frame 05) ── */
 #tab-free.active,
 #tab-notes.active { padding: 0; }
+#tab-cards.active { padding: 24px 40px; }
 .free-roll-layout {
     display: grid;
     grid-template-columns: 380px 1fr;
@@ -1876,7 +1877,8 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
 /* The roll colour drives the corners, the skill label, the number and the rule.
    The verdict stays --warm in every state (design frame 11): the number is the
    value, the accent marks it — the label does not repeat the signal. */
-.float-roll-card { --roll-col: var(--ok); }
+.float-roll-card { --roll-col: var(--warm); }
+.float-roll-card.die       { --roll-col: var(--dim); }
 .float-roll-card.success   { --roll-col: var(--ok); }
 .float-roll-card.fail,
 .float-roll-card.crit-fail { --roll-col: var(--bad); }
@@ -2086,7 +2088,7 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
 .sel-config-input { background: var(--field); border: 1px solid var(--line2); border-radius: 3px; color: var(--text); font-family: 'Archivo', sans-serif; font-size: 14px; padding: 9px 11px; width: 100%; transition: border-color 0.2s; }
 .sel-config-input:focus { outline: none; border-color: var(--ember); }
 .sel-config-save-btn { margin-top: 8px; background: var(--ember); border: none; border-radius: 3px; color: var(--ink); font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 10px 20px; cursor: pointer; align-self: flex-end; transition: filter 0.2s; }
-.sel-config-save-btn:hover { filter: brightness(1.08); }.gateway-eyebrow.ember { color: var(--ember); }.gateway-btn:hover { filter: brightness(1.08); }/* Music unlock prompt */
+.sel-config-save-btn:hover { filter: brightness(1.08); }.gateway-btn:hover { filter: brightness(1.08); }/* Music unlock prompt */
 .music-unlock-prompt {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: var(--bg3); border: 1px solid var(--gold-dim); border-radius: var(--radius);

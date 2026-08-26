@@ -299,7 +299,9 @@ function showRoll(data) {
 
     const bm = !isDie && data.bonusMalus && data.bonusMalus !== 0
         ? ` · mod ${data.bonusMalus > 0 ? '+' : ''}${data.bonusMalus}` : '';
-    document.getElementById('card-bonus').textContent = isDie ? '' : `seuil ${data.threshold} · d100${bm}`;
+    // Remote payload: only print the meta line when the threshold is a real number.
+    const th = Number.isFinite(+data.threshold) && data.threshold !== null ? +data.threshold : null;
+    document.getElementById('card-bonus').textContent = th === null ? '' : `seuil ${th} · d100${bm}`;
 
     const verdictEl = document.getElementById('card-verdict');
     const subEl = document.getElementById('card-crit-sub');
@@ -309,6 +311,7 @@ function showRoll(data) {
         case 'die':
             verdictEl.textContent = '';
             verdictEl.className = 'card-verdict';
+            rollCard.classList.add('die');
             break;
         case 'crit-success':
             verdictEl.textContent = 'SUCCÈS CRITIQUE';

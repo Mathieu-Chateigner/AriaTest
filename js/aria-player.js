@@ -1667,7 +1667,7 @@ async function rollWeaponDamage(name, formula) {
 function showDieCard(diceName, result) {
     const card = document.getElementById('float-roll-card');
     const scrim = document.getElementById('roll-scrim');
-    card.className = 'float-roll-card';
+    card.className = 'float-roll-card die';
     clearTimeout(floatCardTimer);
     document.getElementById('fc-char').textContent = '';
     document.getElementById('fc-skill').textContent = diceName;

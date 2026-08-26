@@ -342,17 +342,19 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .notes-area:focus { border-color: var(--gold); }
 .card-tab-layout {
     display: flex;
-    gap: 20px;
+    align-items: center;
+    gap: 40px;
     flex-wrap: wrap;
 }
 .card-deck-col {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    width: 160px;
+    gap: 12px;
+    width: var(--deck-w);
     flex-shrink: 0;
 }
+.card-deck-col .card-action-btn { width: 100%; padding-left: 0; padding-right: 0; text-align: center; }
 .deck-wrap {
     width: var(--deck-w);
     height: var(--deck-h);

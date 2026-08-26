@@ -1127,11 +1127,12 @@ function renderPlayerCards() {
             // can ask for, for no benefit.
             cam:   el('iframe', { className: 'pc-camera-frame', allow: 'autoplay; fullscreen', allowFullscreen: true }),
         };
-        refs.camWrap = el('div', { className: 'pc-camera-wrap' }, refs.cam, refs.dot);
+        refs.camWrap = el('div', { className: 'pc-camera-wrap' }, refs.cam);
 
         const card = el('div', { className: 'player-card', dataset: { charId } },
             refs.camWrap,
             el('div', { className: 'pc-header' },
+                refs.dot,
                 el('div', { style: { flex: '1', minWidth: '0' } }, refs.name, refs.cls),
                 refs.spot,
                 el('button', { className: 'pc-btn details', textContent: '≡', title: 'Voir la fiche', onclick: () => openPlayerDetails(charId) })),
@@ -1156,7 +1157,8 @@ function renderPlayerCards() {
     }, (card, p, charId) => {
         const s = _playerCardState(p, charId);
         const r = card._refs;
-        card.className = `player-card ${s.online ? 'online' : 'offline'}${s.stateCls}`;
+        // `no-cam` moves the death plate to the name row — see the MORT rule.
+        card.className = `player-card ${s.online ? 'online' : 'offline'}${s.stateCls}${currentVdoRoom ? '' : ' no-cam'}`;
         r.dot.className = `pc-online-dot${s.online ? ' online' : ''}`;
         r.name.textContent = p.name || charId;
         r.cls.textContent = p.charClass || '';
@@ -1180,6 +1182,9 @@ function renderPlayerCards() {
         r.karma.className = `pc-karma-val${s.karma > 0 ? ' positive' : s.karma < 0 ? ' negative' : ''}`;
         // Hide rather than detach: removing the wrapper would kill the WebRTC
         // connection, and blanking the src reloads the frame on the way back.
+        // No room at all: no face area. Room but no stream from this player: the
+        // design's hatched placeholder, which also keeps every card the same height.
+        r.camWrap.style.display = currentVdoRoom ? '' : 'none';
         r.camWrap.classList.toggle('no-stream', !s.camSrc);
         r.cam.style.display = s.camSrc ? '' : 'none';
         if (s.camSrc) setFrameSrc(r.cam, s.camSrc);
@@ -1885,7 +1890,7 @@ function renderRollFeed() {
                             title: 'Jet caché — visible uniquement par le MJ' }),
                         d.char || d.playerId || '?'),
                     el('div', { className: 're-skill',
-                        textContent: d.skillName + (isDie ? '' : ` · seuil ${threshold}%${bm ? ` · BM ${bm > 0 ? '+' : ''}${bm}` : ''}`) })),
+                        textContent: (d.skillName || '') + (isDie ? '' : ` · seuil ${threshold}%${bm ? ` · BM ${bm > 0 ? '+' : ''}${bm}` : ''}`) })),
                 el('div', { className: 're-result' },
                     !isDie && el('div', { className: `re-verdict ${vcls[type]}`, textContent: verdicts[type] }),
                     at && el('div', { className: 're-time',
