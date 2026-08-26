@@ -11,6 +11,7 @@
     --field:rgba(0,0,0,.30); --field2:rgba(0,0,0,.25);
     --track:rgba(255,255,255,.06); --track2:rgba(255,255,255,.10);
     --chromeV1:#0f0c16; --chromeV2:#0a080d; --railV:#0a0810;
+    --rail:#0a0d12; --feed1:#0c0f15; --feed2:#090c11;
     /* ── Legacy aliases → new palette (chrome accent = violet) ── */
     --gold: var(--violet);
     --gold-light: var(--violet2);
@@ -27,33 +28,35 @@
 
 html, body { height: 100%; background: var(--ink); color: var(--text); font-family: 'Archivo', sans-serif; font-size: 14px; overflow: hidden; -webkit-font-smoothing: antialiased; }
 
-#editor-topbar { height: 52px; background: linear-gradient(180deg, var(--chromeV1), var(--chromeV2)); border-bottom: 1px solid var(--line2); display: flex; align-items: center; padding: 0 18px; gap: 14px; flex-shrink: 0; }
+#editor-topbar { height: 52px; background: linear-gradient(180deg, var(--chromeV1), var(--chromeV2)); border-bottom: 1px solid var(--line2); display: flex; align-items: center; padding: 0 20px; gap: 14px; flex-shrink: 0; }
 #editor-title { font-family: 'Cormorant Garamond', serif; font-size: 18px; color: var(--violet2); font-weight: 600; }
 #editor-owner-label { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
 #editor-actions { display: flex; gap: 8px; }
 
-.btn-primary { background: var(--violet); color: var(--ink); border: 1px solid var(--violet); border-radius: 3px; padding: 7px 15px; cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; transition: filter 0.15s; }
+.btn-primary { background: var(--violet); color: var(--ink); border: 1px solid var(--violet); border-radius: 3px; padding: 7px 15px; cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; transition: filter 0.15s; }
 .btn-primary:hover { filter: brightness(1.08); }
 .btn-secondary { background: transparent; color: var(--dim); border: 1px solid var(--line2); border-radius: 3px; padding: 7px 13px; cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; transition: color 0.15s, border-color 0.15s; }
 .btn-secondary:hover, .btn-secondary.active { color: var(--violet2); border-color: var(--violet); }
-.btn-danger { background: none; color: var(--bad); border: 1px solid rgba(226,90,79,0.3); border-radius: 3px; padding: 8px 12px; cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-top: 12px; width: 100%; transition: background 0.15s; }
+.btn-danger { background: none; color: var(--bad); border: 1px solid rgba(226,90,79,0.3); border-radius: 3px; padding: 9px 0; cursor: pointer; font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; text-align: center; margin-top: 18px; width: 100%; transition: background 0.15s; }
 .btn-danger:hover { background: rgba(226,90,79,0.13); }
 
-#editor-body { display: flex; height: calc(100vh - 48px); overflow: hidden; }
+#editor-body { display: flex; height: calc(100vh - 52px); overflow: hidden; }
 
-#editor-palette { width: 190px; flex-shrink: 0; background: var(--railV); border-right: 1px solid var(--line2); overflow-y: auto; padding: 14px 12px; }
-.palette-section-label { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 8px; padding: 0 2px; }
+#editor-palette { width: 190px; flex-shrink: 0; background: var(--railV); border-right: 1px solid var(--line2); overflow-y: auto; padding: 16px 14px; }
+.palette-section-label { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 10px; padding: 0 2px; }
 .palette-item { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 9px 11px; margin-bottom: 6px; font-family: 'Archivo', sans-serif; font-size: 12px; color: var(--text); cursor: grab; user-select: none; transition: border-color 0.15s, background 0.15s; }
 .palette-item:hover { border-color: var(--violet); background: var(--field2); }
 .palette-item.event-item { border-color: rgba(169,139,221,0.3); }
 .palette-item.event-item:hover { border-color: var(--violet); }
 
-#editor-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--ink); overflow: hidden; padding: 16px; }
-#editor-canvas { position: relative; background: rgba(150,168,200,0.03); border: 1px solid var(--line2); aspect-ratio: 16 / 9; }
+#editor-canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 24px;
+    background: repeating-conic-gradient(var(--rail) 0% 25%, var(--feed1) 0% 50%) 0 0 / 28px 28px; }
+#editor-canvas { position: relative; border: 1px solid var(--line2); border-radius: 4px; aspect-ratio: 16 / 9;
+    background: repeating-linear-gradient(135deg, var(--feed1) 0 14px, var(--rail) 14px 28px); }
 #editor-canvas.grid-on::before { content: ''; position: absolute; inset: 0; background-image: linear-gradient(rgba(150,168,200,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(150,168,200,0.07) 1px, transparent 1px); background-size: 10% 10%; pointer-events: none; z-index: 0; }
 
 .editor-widget { position: absolute; border: 1px dashed var(--line2); border-radius: 3px; cursor: move; user-select: none; background: rgba(10,12,17,0.45); overflow: visible; display: flex; align-items: center; justify-content: center; font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); text-align: center; z-index: 1; }
-.editor-widget.selected { border-color: var(--ember); border-style: solid; box-shadow: 0 0 0 3px var(--embersoft); z-index: 10; }
+.editor-widget.selected { border: 1.5px solid var(--ember); border-radius: 4px; box-shadow: 0 0 0 3px var(--embersoft); z-index: 10; }
 .editor-widget.event-widget { border-color: rgba(169,139,221,0.5); background: var(--violetsoft); }
 .editor-widget.event-widget.selected { border-color: var(--ember); }
 .widget-label { pointer-events: none; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
@@ -69,12 +72,12 @@ html, body { height: 100%; background: var(--ink); color: var(--text); font-fami
 .resize-handle.sw { bottom: -4px; left: -4px; cursor: sw-resize; }
 .resize-handle.w  { top: calc(50% - 4px); left: -4px; cursor: w-resize; }
 
-#editor-props { width: 210px; flex-shrink: 0; background: var(--railV); border-left: 1px solid var(--line2); overflow-y: auto; padding: 14px 12px; }
+#editor-props { width: 210px; flex-shrink: 0; background: var(--railV); border-left: 1px solid var(--line2); overflow-y: auto; padding: 16px; }
 #props-empty { color: var(--faint); font-size: 12px; text-align: center; margin-top: 24px; }
 .props-title { font-family: 'Cormorant Garamond', serif; font-size: 16px; font-weight: 600; color: var(--ember2); margin-bottom: 14px; text-transform: none; letter-spacing: 0.01em; }
 .props-label { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); margin-bottom: 4px; margin-top: 10px; }
 .props-input { width: 100%; background: var(--field); border: 1px solid var(--line2); border-radius: 3px; color: var(--text); padding: 7px 9px; font-size: 13px; font-family: 'Archivo', sans-serif; }
 .props-input:focus { outline: none; border-color: var(--ember); }
 .props-hint { font-family: 'Archivo', sans-serif; font-size: 10.5px; color: var(--faint); margin-top: 5px; line-height: 1.35; }
-.props-textarea { width: 100%; height: 80px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); color: var(--parchment); padding: 6px 8px; font-size: 0.85em; font-family: 'Cormorant Garamond', serif; resize: vertical; }
-.props-textarea:focus { outline: none; border-color: var(--gold-dim); }
+.props-textarea { width: 100%; height: 80px; background: var(--field); border: 1px solid var(--line2); border-radius: 3px; color: var(--text); padding: 7px 9px; font-size: 13px; font-family: 'Archivo', sans-serif; resize: vertical; }
+.props-textarea:focus { outline: none; border-color: var(--ember); }

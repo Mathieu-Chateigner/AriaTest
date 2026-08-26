@@ -298,8 +298,8 @@ function showRoll(data) {
     document.getElementById('card-roll').textContent = data.roll;
 
     const bm = !isDie && data.bonusMalus && data.bonusMalus !== 0
-        ? `(Modificateur : ${data.bonusMalus > 0 ? '+' : ''}${data.bonusMalus})` : '';
-    document.getElementById('card-bonus').textContent = bm;
+        ? ` · mod ${data.bonusMalus > 0 ? '+' : ''}${data.bonusMalus}` : '';
+    document.getElementById('card-bonus').textContent = isDie ? '' : `seuil ${data.threshold} · d100${bm}`;
 
     const verdictEl = document.getElementById('card-verdict');
     const subEl = document.getElementById('card-crit-sub');
@@ -327,10 +327,12 @@ function showRoll(data) {
         case 'success':
             verdictEl.textContent = 'SUCCÈS';
             verdictEl.className = 'card-verdict verdict-success';
+            rollCard.classList.add('success');
             break;
         case 'fail':
             verdictEl.textContent = 'ÉCHEC';
             verdictEl.className = 'card-verdict verdict-fail';
+            rollCard.classList.add('fail');
             break;
     }
 

@@ -98,31 +98,41 @@ body {
     display: none;
     flex-direction: column;
     align-items: center;
-    background: rgba(10,12,17,0.86);
+    background: rgba(10,12,17,0.84);
     border: 1px solid var(--line2);
-    box-shadow: 0 0 60px -14px rgba(236,164,86,0.30),0 24px 80px rgba(0,0,0,0.85);
-    padding: 40px 60px 44px;
+    border-radius: 6px;
+    box-shadow: 0 0 60px -16px rgba(91,201,142,.45), inset 0 0 0 1px rgba(91,201,142,.14);
+    padding: 28px 28px 24px;
     position: relative;
-    min-width: 400px;
+    width: 316px;
     text-align: center;
     z-index: 10;
     will-change: transform, opacity;
 }
+/* The roll colour drives the skill label, the rule and the number; the verdict
+   stays --warm in every state (design frame 20). */
+#roll-card { --roll-col: var(--ok); }
+#roll-card.success { --roll-col: var(--ok); }
+#roll-card.fail, #roll-card.crit-fail { --roll-col: var(--bad); }
+#roll-card.crit-success { --roll-col: var(--ember); }
+#roll-card.die { --roll-col: var(--dim); }
 
     #roll-card.show {
         display: flex;
         animation: cardReveal 0.4s cubic-bezier(0.34,1.4,0.64,1);
     }
 
+    #roll-card.fail {
+        box-shadow: 0 0 60px -16px rgba(226,90,79,.45), inset 0 0 0 1px rgba(226,90,79,.14);
+    }
+
     #roll-card.crit-success {
-        border-color: var(--ember);
-        box-shadow: 0 0 0 1px rgba(236,164,86,0.25),0 0 60px rgba(236,164,86,0.32),0 24px 80px rgba(0,0,0,0.85);
+        box-shadow: 0 0 70px -14px rgba(236,164,86,.5), inset 0 0 0 1px rgba(236,164,86,.18);
         animation: cardReveal 0.4s cubic-bezier(0.34,1.4,0.64,1),glowPulseGreen 1.6s 0.5s ease-in-out infinite;
     }
 
     #roll-card.crit-fail {
-        border-color: var(--bad);
-        box-shadow: 0 0 0 1px rgba(226,90,79,0.3),0 0 60px rgba(226,90,79,0.35),0 24px 80px rgba(0,0,0,0.85);
+        box-shadow: 0 0 60px -16px rgba(226,90,79,.45), inset 0 0 0 1px rgba(226,90,79,.14);
         animation: cardReveal 0.4s cubic-bezier(0.34,1.4,0.64,1),shakeCard 0.45s 0.4s ease-in-out,glowPulseRed 1.4s 1s ease-in-out infinite;
     }
 
@@ -180,16 +190,8 @@ body {
     }
 }
 
-#roll-card::before {
-    content: '';
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    right: 6px;
-    bottom: 6px;
-    border: 1px solid rgba(150,168,200,0.08);
-    pointer-events: none;
-}
+#roll-card::before { content: none; }
+#roll-card .corner { display: none; }
 
 .corner {
     position: absolute;
@@ -233,30 +235,31 @@ body {
 .card-char {
     font-family: 'Cormorant Garamond',serif;
     font-style: italic;
-    font-size: 18px;
+    font-size: 17px;
     color: var(--warm);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
 }
+.card-char:empty { display: none; }
 
 .card-skill {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 11px;
-    letter-spacing: 0.28em;
+    letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--dim);
-    margin-bottom: 16px;
-    max-width: 320px;
+    color: var(--roll-col);
+    margin-bottom: 6px;
+    max-width: 260px;
     line-height: 1.4;
 }
 
 .card-roll {
     font-family: 'Archivo', sans-serif;
     font-variant-numeric: tabular-nums;
-    font-size: 104px;
+    font-size: 100px;
     font-weight: 800;
-    color: var(--warm);
-    line-height: .85;
-    margin-bottom: 4px;
+    color: var(--roll-col);
+    line-height: .84;
+    margin-bottom: 0;
     animation: rollIn 0.45s cubic-bezier(0.22,1.5,0.5,1);
 }
 
@@ -305,16 +308,27 @@ body {
 }
 
 .card-divider {
-    width: 50px;
+    width: 42px;
     height: 1px;
-    background: var(--line2);
-    margin: 16px auto;
+    background: var(--roll-col);
+    opacity: .6;
+    margin: 0 auto 14px;
+    order: 2;
 }
+.card-char { order: 0; }
+.card-skill { order: 1; }
+.card-roll { order: 3; }
+.card-verdict { order: 4; }
+.card-crit-sub { order: 5; }
+.card-bonus { order: 6; }
 
 .card-verdict {
     font-family: 'Cormorant Garamond',serif;
+    font-size: 25px;
     font-weight: 600;
+    color: var(--warm);
     letter-spacing: 0.04em;
+    margin-top: 13px;
     animation: verdictIn 0.35s 0.18s both ease-out;
 }
 
@@ -331,25 +345,25 @@ body {
 }
 
 .verdict-success {
-    font-size: 26px;
-    color: var(--ok);
+    font-size: 25px;
+    color: var(--warm);
 }
 
 .verdict-fail {
-    font-size: 26px;
-    color: var(--bad);
+    font-size: 25px;
+    color: var(--warm);
 }
 
 .verdict-crit-success {
-    font-size: 24px;
-    color: var(--ember);
+    font-size: 25px;
+    color: var(--warm);
     text-shadow: 0 0 24px rgba(236,164,86,0.6);
     animation: verdictIn 0.35s 0.18s both ease-out,critFlicker 1.5s 0.8s ease-in-out infinite alternate;
 }
 
 .verdict-crit-fail {
-    font-size: 24px;
-    color: var(--bad);
+    font-size: 25px;
+    color: var(--warm);
     text-shadow: 0 0 24px rgba(226,90,79,0.6);
     animation: verdictIn 0.35s 0.18s both ease-out,critFlicker 1.2s 0.8s ease-in-out infinite alternate;
 }
@@ -369,8 +383,8 @@ body {
 .card-crit-sub {
     font-family: 'Cormorant Garamond',serif;
     font-style: italic;
-    font-size: 12px;
-    letter-spacing: 0.12em;
+    font-size: 13px;
+    letter-spacing: 0.08em;
     margin-top: 6px;
     opacity: 0;
     animation: subIn 0.5s 0.6s both ease-out;
@@ -397,12 +411,14 @@ body {
 }
 
 .card-bonus {
-    font-size: 13px;
-    color: var(--gold-dim);
-    font-style: italic;
-    margin-top: 8px;
-    letter-spacing: 0.05em;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-top: 7px;
 }
+.card-bonus:empty { display: none; }
 
 /* ══════════════════════════════
            DRAWN PLAYING CARD OVERLAY

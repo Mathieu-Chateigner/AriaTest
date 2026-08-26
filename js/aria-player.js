@@ -1934,15 +1934,16 @@ function showFloatCard(data) {
     document.getElementById('fc-char').textContent = data.char || '';
     document.getElementById('fc-skill').textContent = data.skillName;
     document.getElementById('fc-roll').textContent = data.roll;
-    document.getElementById('fc-bonus').textContent = data.bonusMalus && data.bonusMalus !== 0 ? `(Modificateur : ${data.bonusMalus > 0 ? '+' : ''}${data.bonusMalus})` : '';
+    const fcMod = data.bonusMalus && data.bonusMalus !== 0 ? ` · mod ${data.bonusMalus > 0 ? '+' : ''}${data.bonusMalus}` : '';
+    document.getElementById('fc-bonus').textContent = data.threshold === null ? '' : `seuil ${data.threshold}${fcMod}`;
     const vEl = document.getElementById('fc-verdict');
     const sEl = document.getElementById('fc-crit-sub');
     sEl.textContent = '';
     switch (type) {
         case 'crit-success': vEl.textContent = 'SUCCÈS CRITIQUE'; vEl.className = 'fc-verdict fv-crit-success'; sEl.textContent = '✦ les dieux sourient ✦'; card.classList.add('crit-success'); spawnFcParticles('success'); break;
         case 'crit-fail': vEl.textContent = 'ÉCHEC CRITIQUE'; vEl.className = 'fc-verdict fv-crit-fail'; sEl.textContent = '✦ les dieux se détournent ✦'; card.classList.add('crit-fail'); spawnFcParticles('fail'); break;
-        case 'success': vEl.textContent = 'SUCCÈS'; vEl.className = 'fc-verdict fv-success'; break;
-        case 'fail': vEl.textContent = 'ÉCHEC'; vEl.className = 'fc-verdict fv-fail'; break;
+        case 'success': vEl.textContent = 'SUCCÈS'; vEl.className = 'fc-verdict fv-success'; card.classList.add('success'); break;
+        case 'fail': vEl.textContent = 'ÉCHEC'; vEl.className = 'fc-verdict fv-fail'; card.classList.add('fail'); break;
     }
     void card.offsetWidth;
     scrim.classList.add('show');

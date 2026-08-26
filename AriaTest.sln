@@ -15,6 +15,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "css", "css", "{5874BCC7-76C
 		css\aria-gm.css = css\aria-gm.css
 		css\aria-overlay-editor.css = css\aria-overlay-editor.css
 		css\aria-overlay.css = css\aria-overlay.css
+		css\aria-panel.css = css\aria-panel.css
 		css\aria-player.css = css\aria-player.css
 	EndProjectSection
 EndProject
@@ -25,6 +26,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "js", "js", "{EB9BD0E8-9EE2-
 		js\aria-overlay.js = js\aria-overlay.js
 		js\aria-player.js = js\aria-player.js
 		js\aria-shared.js = js\aria-shared.js
+		js\aria-shared.selfcheck.js = js\aria-shared.selfcheck.js
 		js\aria-supabase.js = js\aria-supabase.js
 	EndProjectSection
 EndProject

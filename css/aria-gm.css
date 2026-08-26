@@ -13,6 +13,9 @@
     --track:rgba(255,255,255,.06); --track2:rgba(255,255,255,.10);
     --chromeV1:#0f0c16; --chromeV2:#0a080d; --railV:#0a0810; --rail:#0a0810;
     --frameShadow:rgba(0,0,0,.9); --pageGlow:rgba(169,139,221,.045); --hp1:#2f7d54;
+    --feed1:#0c0f15; --feed2:#090c11;
+    --deck1:#1a1525; --deck2:#0c0a14;
+    --cardFace1:#f3ede1; --cardFace2:#ddd2bc; --cardRed:#b03a3a; --cardInk:#1a1a22;
     /* Accent handles used by css/aria-panel.css. That file never names ember or
        violet — it goes through these, so one rule renders in both panels. */
     --accent-soft: var(--violetsoft);
@@ -34,16 +37,16 @@
     --border: var(--line);
     --border-strong: var(--line2);
     --radius: 4px;
-    /* card system (unchanged — playing-card faces) */
-    --card-red:    #c0392b;
-    --card-black:  #1a1a1a;
-    --card-cream:  #f5f0e8;
+    /* card system — playing-card faces (design frame 08) */
+    --card-red:    var(--cardRed);
+    --card-black:  var(--cardInk);
+    --card-cream:  var(--cardFace1);
     --card-purple: #7b3fa0;
     --card-navy:   #1b3a6b;
     --card-w:  160px;
     --card-h:  224px;
-    --deck-w:  128px;
-    --deck-h:  179px;
+    --deck-w:  120px;
+    --deck-h:  168px;
 }/* ════════════════════════════════════════════
    COMBAT-FEEDBACK FX — event-driven motion on player/monster cards.
    HP numbers update synchronously elsewhere; these layers are cosmetic.
@@ -85,11 +88,12 @@
 .player-card.hp-critical, .monster-card.hp-critical { animation: ariaCritGlow 1.8s ease-in-out infinite; }
 /* death (HP 0) — desaturate + dim */
 .player-card.is-dead, .monster-card.is-dead { filter: grayscale(.85); opacity: .55; }
-.player-card.is-dead .pc-dead-plate {
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    background:rgba(5,6,9,.55); pointer-events:none; z-index:6;
-    font-family:'Cormorant Garamond',serif; font-size:22px; font-weight:700;
-    letter-spacing:.34em; text-indent:.34em; color:var(--bad);
+.player-card.is-dead .pc-camera-wrap::after {
+    content: 'MORT';
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5,6,9,.55); pointer-events: none; z-index: 6;
+    font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 700;
+    letter-spacing: .34em; text-indent: .34em; color: var(--bad);
 }
 
 /* ════════════════════════════════════════════
@@ -98,7 +102,7 @@
 .topbar {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
     padding: 0 20px;
     height: 56px;
     background: linear-gradient(180deg, var(--chromeV1), var(--chromeV2));
@@ -296,6 +300,15 @@
 }/* Rail layouts don't fit half-width panes — stack them in split mode */
 .content.split-mode .gm-two-col,
 .content.split-mode .gm-jets-layout { grid-template-columns: 1fr; }
+/* Half-width pane: the design's compact gutter (frame 22) */
+.content.split-mode > .tab-content.active { padding: 18px 18px 20px; }
+.content.split-mode .section-header { gap: 11px; margin-bottom: 13px; }
+.content.split-mode .players-grid,
+.content.split-mode .monsters-grid,
+.content.split-mode .gm-pot-list { grid-template-columns: 1fr; }
+/* …but a stacked rail layout still bleeds to the pane edges. */
+.content.split-mode > .tab-content.active:has(> .gm-two-col),
+.content.split-mode > .tab-content.active:has(> .gm-jets-layout) { padding: 0; }
 .content.split-mode .gm-col-rail,
 .content.split-mode .gm-jets-console { border-right: none; border-bottom: 1px solid var(--line2); }.content.split-mode > .split-divider {
     display: flex;
@@ -377,8 +390,8 @@
 .section-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 13px;
+    margin-bottom: 14px;
     margin-top: 2px;
 }
 .section-icon {
@@ -570,14 +583,14 @@
 
 .players-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
 }
 
 .player-card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: 5px;
     overflow: hidden;
     transition: border-color .18s, opacity .55s ease, filter .55s ease;
     position: relative;
@@ -598,20 +611,34 @@
 
 .pc-header {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 10px;
-    padding: 12px 14px;
+    padding: 13px 15px 0;
     background: none;
-    border-bottom: 1px solid var(--line);
     position: relative; z-index: 2;
 }
 .pc-online-dot {
-    width: 7px; height: 7px;
+    position: absolute;
+    top: 9px; left: 9px;
+    width: 6px; height: 6px;
     border-radius: 50%;
     background: var(--faint);
     flex-shrink: 0;
+    z-index: 3;
 }
-.pc-online-dot.online { background: var(--ok); box-shadow: 0 0 6px rgba(91,201,142,0.5); }
+.pc-online-dot.online { background: var(--ok); animation: ariaPulse 2.4s infinite; }
+.player-card.hp-critical .pc-online-dot.online { background: var(--bad); }
+@keyframes ariaPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+/* The hatch is the design's camera placeholder — it stays put when no stream is
+   up so every card keeps its height; only the iframe is hidden. */
+.pc-camera-wrap.no-stream::before {
+    content: 'caméra';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
+    color: rgba(120,134,158,.4);
+}
 .pc-name {
     font-family: 'Cormorant Garamond', serif;
     font-size: 19px;
@@ -630,19 +657,20 @@
     color: var(--dim);
 }
 .pc-body {
-    padding: 12px 14px;
+    padding: 10px 15px 13px;
     display: flex;
     flex-direction: column;
     gap: 8px;
     position: relative; z-index: 2;
 }
 .pc-hp-row { display: flex; align-items: center; gap: 10px; }
+.pc-hp-max { font-family: 'Archivo', sans-serif; font-size: 12px; color: var(--dim); }
 .pc-hp-num {
     font-family: 'Archivo', sans-serif;
     font-variant-numeric: tabular-nums;
-    font-size: 24px;
+    font-size: 23px;
     font-weight: 700;
-    color: var(--text);
+    color: var(--ok);
     line-height: 1;
     display: inline-block;
     transform-origin: left center;
@@ -778,12 +806,13 @@
     left: 50%;
     transform: translate(-50%,-50%);
     z-index: 1001;
-    width: 600px;
+    width: 620px;
     max-width: 96vw;
     max-height: 85vh;
-    background: var(--bg2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
+    background: var(--panel);
+    border: 1px solid var(--line2);
+    border-radius: 6px;
+    box-shadow: 0 30px 80px -30px var(--frameShadow);
     display: none;
     flex-direction: column;
     overflow: hidden;
@@ -794,17 +823,28 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 18px 20px 14px;
-    border-bottom: 1px solid var(--border);
+    padding: 22px 26px;
+    border-bottom: 1px solid var(--line);
     flex-shrink: 0;
-    background: rgba(169,139,221,0.06);
+    background: linear-gradient(180deg, var(--chromeV1), var(--chromeV2));
 }
-.pdm-name { font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 600; color: var(--warm); letter-spacing: .01em; }
-.pdm-class { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--violet); margin-top: 4px; }
-.pdm-close-btn { background: none; border: none; color: var(--parchment-dim); font-size: 14px; cursor: pointer; padding: 2px 6px; border-radius: var(--radius); transition: color .15s; }
-.pdm-close-btn:hover { color: var(--parchment); }
-.pdm-body { overflow-y: auto; padding: 16px 20px; flex: 1; }
-.pdm-section { margin-bottom: 18px; }
+.pdm-name { font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 600; color: var(--warm); letter-spacing: .01em; line-height: 1.05; }
+.pdm-class { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--violet); margin-top: 3px; }
+.pdm-close-btn {
+    background: none;
+    border: 1px solid var(--line2);
+    border-radius: 3px;
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim);
+    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color .15s, color .15s;
+}
+.pdm-close-btn:hover { border-color: var(--violet); color: var(--violet2); }
+.pdm-body { overflow-y: auto; padding: 22px 26px; flex: 1; }
+.pdm-section { margin-bottom: 20px; }
 .pdm-section-title {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 9.5px;
@@ -815,25 +855,33 @@
     padding-bottom: 4px;
     margin-bottom: 8px;
 }
-.pdm-stats-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.pdm-hp-block { display: flex; align-items: baseline; gap: 3px; margin-right: 4px; }
-.pdm-hp-num { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; line-height: 1; }
-.pdm-hp-sep { font-family: 'Archivo', sans-serif; color: var(--dim); font-size: 14px; }
-.pdm-hp-max { font-family: 'Archivo', sans-serif; font-size: 12px; color: var(--dim); }
+.pdm-attrs-row { display: flex; gap: 14px; align-items: stretch; }
+.pdm-hp-panel {
+    flex: 1;
+    background: var(--field2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px;
+    text-align: center;
+}
+.pdm-hp-label { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--faint); margin-bottom: 7px; }
+.pdm-hp-num { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 38px; font-weight: 700; line-height: .9; }
+.pdm-hp-max { font-family: 'Archivo', sans-serif; font-size: 15px; font-weight: 400; color: var(--dim); }
+.pdm-stats-grid { flex: 2; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 .pdm-stat-block {
     background: var(--field2);
     border: 1px solid var(--line);
     border-radius: 3px;
-    padding: 5px 10px;
+    padding: 11px 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-width: 44px;
+    justify-content: center;
 }
-.pdm-stat-key { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .12em; color: var(--faint); text-transform: uppercase; }
-.pdm-stat-val { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2; }
-.pdm-skills-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 4px 12px; }
-.pdm-skill-row { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; border-bottom: 1px solid rgba(169,139,221,0.08); }
+.pdm-stat-key { font-family: ui-monospace, Menlo, monospace; font-size: 8.5px; letter-spacing: .12em; color: var(--faint); text-transform: uppercase; margin-bottom: 5px; }
+.pdm-stat-val { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; color: var(--text); line-height: 1; }
+.pdm-skills-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px 18px; }
+.pdm-skill-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; }
 .pdm-skill-name { font-family: 'Archivo', sans-serif; font-size: 13.5px; color: var(--text); }
 .pdm-skill-pct { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 700; color: var(--dim); white-space: nowrap; margin-left: 8px; }
 .pdm-skill-mod { font-family: 'Cormorant Garamond', serif; font-size: 10px; font-weight: 600; color: var(--gm-accent-light); background: rgba(169,139,221,0.14); border: 1px solid var(--gm-accent-dim); border-radius: 8px; padding: 0 5px; margin-left: 3px; }
@@ -960,7 +1008,7 @@
 /* Monster cards grid */
 .monsters-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px,1fr));
+    grid-template-columns: repeat(auto-fill, minmax(400px,1fr));
     gap: 12px;
 }
 .monster-card {
@@ -984,19 +1032,19 @@
 .monster-card:hover::before { opacity: 1; }
 .mc-header {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 10px;
-    padding: 11px 14px;
+    padding: 14px 16px 9px;
     background: none;
-    border-bottom: 1px solid var(--line);
     position: relative; z-index: 2;
 }
 .mc-name { font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 600; color: var(--warm); flex: 1; }
 .mc-del { background: none; border: none; color: rgba(226,90,79,0.5); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 3px; transition: color .15s; }
 .mc-del:hover { color: var(--bad); }
-.mc-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 2; }
+.mc-body { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 2; }
 .mc-hp-row { display: flex; align-items: center; gap: 10px; }
-.mc-hp-num { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 700; line-height: 1; display: inline-block; transform-origin: left center; }
+.mc-hp-max { font-family: 'Archivo', sans-serif; font-size: 12px; color: var(--dim); }
+.mc-hp-num { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; line-height: 1; display: inline-block; transform-origin: left center; }
 .mc-hp-bar-wrap { flex: 1; height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; }
 .mc-hp-bar { height: 100%; border-radius: 3px; transition: width .8s ease, background .3s; }
 .mc-stats { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -1078,8 +1126,8 @@
     border-left: 2px solid var(--line2);
     border-radius: 3px;
     display: grid;
-    grid-template-columns: 120px 1fr auto;
-    gap: 10px 14px;
+    grid-template-columns: 1fr auto auto;
+    gap: 13px;
     align-items: center;
     position: relative;
     overflow: hidden;
@@ -1100,12 +1148,12 @@
 .roll-entry.hidden-roll { background: var(--violetsoft); border-style: dashed; }
 .re-hidden-badge { font-family: ui-monospace, Menlo, monospace; font-size: 8px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--gm-accent-light); border: 1px solid var(--gm-accent-dim); border-radius: 2px; padding: 1px 4px; margin-right: 5px; }
 
-.re-char { font-family: 'Cormorant Garamond', serif; font-size: 17px; font-weight: 600; color: var(--warm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
-.re-context { display: flex; flex-direction: column; gap: 3px; position: relative; }
-.re-skill { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); line-height: 1.3; }
-.re-threshold { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--faint); letter-spacing: .05em; }
-.re-result { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 56px; position: relative; }
-.re-roll { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; }
+.re-char { font-family: 'Cormorant Garamond', serif; font-size: 17px; font-weight: 600; color: var(--warm); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
+.re-context { display: flex; flex-direction: column; min-width: 0; position: relative; }
+.re-skill { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); line-height: 1.3; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.re-result { display: flex; flex-direction: column; align-items: flex-end; text-align: right; position: relative; }
+.re-time { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--faint); margin-top: 2px; }
+.re-roll { font-family: 'Archivo', sans-serif; font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 700; color: var(--text); line-height: 1; min-width: 48px; text-align: right; position: relative; }
 .roll-entry.success .re-roll      { color: var(--ok); }
 .roll-entry.fail .re-roll         { color: var(--bad); }
 .roll-entry.crit-success .re-roll { color: var(--ember); }
@@ -1280,7 +1328,7 @@
 /* ════════════════════════════════════════════
    CARTES TAB — CARD GAME CSS
    ════════════════════════════════════════════ */
-.gm-own-deck-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }.deck-back { width: 100%; height: 100%; border-radius: 8px; border: 2px solid var(--gm-accent-dim); background: linear-gradient(145deg,#120820,#0a0610); display: flex; align-items: center; justify-content: center; box-shadow: 2px 4px 12px rgba(0,0,0,0.6); }.card-action-btn {
+.gm-own-deck-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }.card-action-btn {
     font-family: 'Archivo', sans-serif;
     font-size: 10.5px;
     font-weight: 600;
@@ -1296,16 +1344,7 @@
     visibility: hidden;
     white-space: nowrap;
 }.card-action-btn:hover { border-color: var(--violet); color: var(--violet2); }
-.deck-pattern { width: 88%; height: 88%; border: 1px solid rgba(169,139,221,0.3); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--gm-accent-dim); }
-.card-stage { display: flex; align-items: center; justify-content: center; min-height: 260px; }.card-back-face {
-    position: absolute; width: 100%; height: 100%;
-    backface-visibility: hidden;
-    border-radius: 10px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-    background: linear-gradient(145deg,#120820,#0a0610);
-    border: 2px solid var(--gm-accent-dim);
-    display: flex; align-items: center; justify-content: center;
-}.rank-pill {
+.card-stage { display: flex; align-items: center; justify-content: center; min-height: 260px; }.rank-pill {
     font-family: 'Cormorant Garamond', serif;
     font-size: 12px;
     padding: 2px 6px;
@@ -1344,15 +1383,7 @@
 .chr-card.c-red { color: var(--card-red); }
 .chr-card.c-black { color: var(--parchment); }
 .chr-card.c-purple { color: var(--card-purple); }
-.chr-time { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .08em; color: var(--faint); white-space: nowrap; }.shuffle-ghost {
-    position: fixed;
-    pointer-events: none;
-    border-radius: 8px;
-    background: linear-gradient(145deg,#120820,#0a0610);
-    border: 2px solid var(--gm-accent-dim);
-    overflow: hidden;
-    display: flex; align-items: center; justify-content: center;
-}@keyframes shuffle-left {
+.chr-time { font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .08em; color: var(--faint); white-space: nowrap; }@keyframes shuffle-left {
     0%  { transform: translate(0,0) rotate(0); }
     40% { transform: translate(-40px,-8px) rotate(-8deg); }
     100%{ transform: translate(0,0) rotate(0); }
@@ -1722,9 +1753,7 @@
     color: var(--gm-accent-light); font-family: 'Cormorant Garamond', serif; font-size: 12px; letter-spacing: .1em;
     padding: 10px 24px; cursor: pointer; z-index: 9000; display: none;
 }
-.music-unlock-prompt:hover { background: var(--gm-accent-dim); color: #fff; }.notes-add-btn { background: none; border: 1px solid var(--border); color: var(--gm-accent-light); font-size: 16px; line-height: 1; width: 22px; height: 22px; border-radius: var(--radius); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .12s, border-color .12s; padding: 0 0 1px 0; }.notes-item { display: flex; align-items: center; gap: 4px; padding: 7px 10px 7px 12px; cursor: pointer; transition: background .1s; }
-.notes-item:hover { background: rgba(169,139,221,0.07); }
-.notes-item.active { background: rgba(169,139,221,0.12); border-left: 2px solid var(--gm-accent-dim); padding-left: 10px; }.notes-item.active .notes-item-name { color: var(--gm-accent-light); }/* ════════════════════════════════════════════
+.music-unlock-prompt:hover { background: var(--gm-accent-dim); color: #fff; }/* ════════════════════════════════════════════
    CONFIG MODAL
    ════════════════════════════════════════════ */
 .modal-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1000; display: none; }
@@ -1756,6 +1785,9 @@ body.light-mode {
     --track:rgba(50,38,14,.10); --track2:rgba(50,38,14,.15);
     --chromeV1:#ece2d8; --chromeV2:#e5dbcb; --railV:#e8dfce; --rail:#e8dfce;
     --frameShadow:rgba(70,52,22,.16); --pageGlow:rgba(106,71,163,.06); --hp1:#88c6a0;
+    --feed1:#cdc5b2; --feed2:#c2b9a3;
+    --deck1:#2d2440; --deck2:#1c1630;
+    --cardFace1:#fcf7eb; --cardFace2:#e9dfc9; --cardRed:#b03a3a; --cardInk:#2a2620;
 }
 /* The reskinned GM components are token-driven (or use the legacy aliases),
    so light mode follows the theme automatically — the old component-specific
@@ -1763,12 +1795,12 @@ body.light-mode {
 
 /* ── PLAYER CARD CAMERA ──────────────────── */
 .pc-camera-wrap {
+    position: relative;
     width: 100%;
-    aspect-ratio: 16 / 9;
+    height: 118px;
     overflow: hidden;
-    border-radius: var(--radius);
-    background: var(--bg2);
-    margin-bottom: 8px;
+    background: repeating-linear-gradient(135deg, var(--feed1) 0 12px, var(--feed2) 12px 24px);
+    border-bottom: 1px solid var(--line);
 }
 .pc-camera-frame {
     width: 100%;
@@ -1777,9 +1809,10 @@ body.light-mode {
     display: block;
 }
 /* "Lire la table" (frame 26): faces grow, the sheet stays underneath */
-.players-grid.read-table .pc-camera-wrap { aspect-ratio: 4 / 3; }
+.players-grid.read-table .pc-camera-wrap { height: 150px; }
 
 .pc-btn.spot { background: none; border: 1px solid var(--line2); color: var(--dim); }
+
 .pc-btn.spot:hover { background: var(--violetsoft); color: var(--violet2); border-color: var(--violet); }
 .pc-btn.spot.active { background: rgba(169,139,221,.18); color: var(--violet2); border-color: var(--violet); }
 

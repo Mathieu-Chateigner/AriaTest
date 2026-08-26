@@ -1117,7 +1117,7 @@ function renderPlayerCards() {
             spot:  el('button', { className: 'pc-btn spot', textContent: '☀', onclick: () => toggleSpotlight(charId),
                        title: 'Spotlight — la caméra de ce joueur passe en grand chez tous' }),
             hpNum: el('div', { className: 'pc-hp-num' }),
-            hpMax: el('div', { style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '9px', color: 'var(--parchment-dim)' } }),
+            hpMax: el('div', { className: 'pc-hp-max' }),
             hpBar: el('div', { className: 'pc-hp-bar' }),
             prot:  el('div', { className: 'pc-prot', title: 'Protection' }),
             stats: el('div', { className: 'pc-stats' }),
@@ -1127,16 +1127,15 @@ function renderPlayerCards() {
             // can ask for, for no benefit.
             cam:   el('iframe', { className: 'pc-camera-frame', allow: 'autoplay; fullscreen', allowFullscreen: true }),
         };
-        refs.camWrap = el('div', { className: 'pc-camera-wrap' }, refs.cam);
+        refs.camWrap = el('div', { className: 'pc-camera-wrap' }, refs.cam, refs.dot);
 
         const card = el('div', { className: 'player-card', dataset: { charId } },
+            refs.camWrap,
             el('div', { className: 'pc-header' },
-                refs.dot,
                 el('div', { style: { flex: '1', minWidth: '0' } }, refs.name, refs.cls),
                 refs.spot,
                 el('button', { className: 'pc-btn details', textContent: '≡', title: 'Voir la fiche', onclick: () => openPlayerDetails(charId) })),
             el('div', { className: 'pc-body' },
-                refs.camWrap,
                 el('div', { className: 'pc-hp-row' },
                     el('div', null, refs.hpNum, refs.hpMax),
                     el('div', { className: 'pc-hp-bar-wrap' }, refs.hpBar)),
@@ -1181,7 +1180,8 @@ function renderPlayerCards() {
         r.karma.className = `pc-karma-val${s.karma > 0 ? ' positive' : s.karma < 0 ? ' negative' : ''}`;
         // Hide rather than detach: removing the wrapper would kill the WebRTC
         // connection, and blanking the src reloads the frame on the way back.
-        r.camWrap.style.display = s.camSrc ? '' : 'none';
+        r.camWrap.classList.toggle('no-stream', !s.camSrc);
+        r.cam.style.display = s.camSrc ? '' : 'none';
         if (s.camSrc) setFrameSrc(r.cam, s.camSrc);
         else if (r.cam.src && r.cam.src !== 'about:blank') r.cam.src = 'about:blank';
     });
@@ -1258,13 +1258,14 @@ function openPlayerDetails(charId) {
                 textContent: pot.name, title: pot.desc || '',
                 onclick: () => sendPotionGrant(charId, pot.id) })))),
 
-        section('Attributs', el('div', { className: 'pdm-stats-row' },
-            el('div', { className: 'pdm-hp-block' },
-                el('span', { className: 'pdm-hp-num', style: { color: hpColor }, textContent: hp }),
-                el('span', { className: 'pdm-hp-sep', textContent: '/' }),
-                el('span', { className: 'pdm-hp-max', textContent: `${maxHP} PV` })),
-            ['FOR', 'DEX', 'END', 'INT', 'CHA'].filter(k => stats[k] !== undefined).map(k => statBlock(k, stats[k])),
-            p.protection?.nom && statBlock('Armure', p.protection.nom + (p.protection.valeur ? ' ' + p.protection.valeur : '')))),
+        section('Attributs', el('div', { className: 'pdm-attrs-row' },
+            el('div', { className: 'pdm-hp-panel' },
+                el('div', { className: 'pdm-hp-label', textContent: 'Points de vie' }),
+                el('div', { className: 'pdm-hp-num', style: { color: hpColor } }, String(hp),
+                    el('span', { className: 'pdm-hp-max', textContent: ` / ${maxHP}` }))),
+            el('div', { className: 'pdm-stats-grid' },
+                ['FOR', 'DEX', 'END', 'INT', 'CHA'].filter(k => stats[k] !== undefined).map(k => statBlock(k, stats[k])),
+                p.protection?.nom && statBlock('Armure', p.protection.nom + (p.protection.valeur ? ' ' + p.protection.valeur : ''))))),
 
         realWeapons.length && section('Armes', el('div', { className: 'pdm-list' },
             realWeapons.map(w => listRow(w.nom, w.degats || '—')))),
@@ -1685,7 +1686,7 @@ function _monsterCard(id, m) {
         name:   el('div', { className: 'mc-name' }),
         badge:  el('span', { className: 'group-badge' }),
         hpNum:  el('div', { className: 'mc-hp-num' }),
-        hpMax:  el('div', { style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '9px', color: 'rgba(255,150,150,.5)' } }),
+        hpMax:  el('div', { className: 'mc-hp-max' }),
         hpBar:  el('div', { className: 'mc-hp-bar' }),
         armor:  el('div', { style: { fontFamily: 'ui-monospace,Menlo,monospace', fontSize: '9px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'rgba(255,150,150,.5)' } }),
         stats:  el('div', { className: 'mc-stats' }),
@@ -1876,18 +1877,20 @@ function renderRollFeed() {
             const threshold = _finiteNum(d.threshold) ?? 0;
             const bm = _finiteNum(d.bonusMalus) ?? 0;
             // char / skillName arrive over Ably from any holder of the key.
+            const at = d.ts ?? d.receivedAt;
             feed.append(el('div', { className: `roll-entry ${type}${d.hidden ? ' hidden-roll' : ''}` },
-                el('div', { className: 're-char' },
-                    d.hidden && el('span', { className: 're-hidden-badge', textContent: 'MJ',
-                        title: 'Jet caché — visible uniquement par le MJ' }),
-                    d.char || d.playerId || '?'),
                 el('div', { className: 're-context' },
-                    el('div', { className: 're-skill', textContent: d.skillName }),
-                    !isDie && el('div', { className: 're-threshold',
-                        textContent: `Seuil : ${threshold}%${bm ? ` · BM : ${bm > 0 ? '+' : ''}${bm}` : ''}` })),
+                    el('div', { className: 're-char' },
+                        d.hidden && el('span', { className: 're-hidden-badge', textContent: 'MJ',
+                            title: 'Jet caché — visible uniquement par le MJ' }),
+                        d.char || d.playerId || '?'),
+                    el('div', { className: 're-skill',
+                        textContent: d.skillName + (isDie ? '' : ` · seuil ${threshold}%${bm ? ` · BM ${bm > 0 ? '+' : ''}${bm}` : ''}`) })),
                 el('div', { className: 're-result' },
-                    el('div', { className: 're-roll', textContent: roll }),
-                    !isDie && el('div', { className: `re-verdict ${vcls[type]}`, textContent: verdicts[type] }))));
+                    !isDie && el('div', { className: `re-verdict ${vcls[type]}`, textContent: verdicts[type] }),
+                    at && el('div', { className: 're-time',
+                        textContent: new Date(at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) })),
+                el('div', { className: 're-roll', textContent: roll })));
         });
     });
 }

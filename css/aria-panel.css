@@ -82,12 +82,18 @@ body::after {
     align-items: center;
     gap: 9px;
     grid-row: 2;
-    height: 38px;
-    padding: 0 10px 0 12px;
+    height: 44px;
+    padding: 0 14px;
     background: var(--field2);
+    border-top: 2px solid transparent;
     border-bottom: 1px solid var(--line);
     cursor: grab;
     user-select: none;
+    transition: background .15s, border-color .15s;
+}
+.content.split-mode > .split-pane-hdr.focused {
+    background: var(--accent-soft);
+    border-top-color: var(--gold);
 }
 .sph-grip { color: var(--dim); font-size: 11px; letter-spacing: -2px; flex-shrink: 0; }
 .sph-label {
@@ -209,18 +215,19 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     gap: 0;
 }
 .notes-sidebar {
-    width: 172px;
+    width: 260px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--line);
+    background: var(--rail);
+    border-right: 1px solid var(--line2);
+    padding: 18px 14px;
 }
 .notes-sidebar-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--line);
+    margin-bottom: 14px;
     flex-shrink: 0;
 }
 .notes-sidebar-title {
@@ -232,12 +239,46 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     text-transform: none;
 }
 .notes-add-btn:hover { background: rgba(var(--accent-rgb), 0.12); border-color: var(--gold-dim); }
-.notes-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.notes-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+/* One notes widget for both panels — the two copies had drifted (GM padding 7px vs
+   player 9px, and two different ways of marking the active row). */
+.notes-add-btn {
+    background: none;
+    border: 1px solid var(--line2);
+    color: var(--gold);
+    font-size: 15px;
+    line-height: 1;
+    width: 24px; height: 24px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s, border-color 0.12s;
+    padding: 0 0 1px 0;
+}
+.notes-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 12px;
+    cursor: pointer;
+    border-left: 2px solid var(--line2);
+    border-radius: 0 3px 3px 0;
+    transition: background 0.1s, border-color 0.1s;
+}
+.notes-item:hover { background: var(--accent-soft); }
+.notes-item.active { background: var(--accent-soft); border-left-color: var(--gold); }
+.notes-item.active .notes-item-name { color: var(--text); }
+/* Half-width pane: the notes widget steps down one notch (design frame 22). */
+.content.split-mode .notes-sidebar { width: 178px; padding: 14px 12px; }
+.content.split-mode .notes-editor { padding: 18px 20px; }
+.content.split-mode .notes-name-input { font-size: 21px; padding-bottom: 11px; margin-bottom: 14px; }
+.content.split-mode .notes-area { font-size: 15px; }
+.content.split-mode .notes-item { font-size: 13px; padding: 9px 11px; }
 .notes-item-name {
     flex: 1;
     font-family: 'Archivo', sans-serif;
     font-size: 14px;
-    color: var(--dim);
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -260,7 +301,7 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 0 0 0 14px;
+    padding: 22px 26px;
     min-width: 0;
 }
 .notes-name-input {
@@ -270,11 +311,11 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     border-bottom: 1px solid var(--line);
     color: var(--warm);
     font-family: 'Cormorant Garamond', serif;
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: 0.01em;
-    padding: 8px 4px;
-    margin-bottom: 14px;
+    padding: 0 0 12px;
+    margin-bottom: 16px;
     outline: none;
     transition: border-color 0.15s;
 }
@@ -285,14 +326,14 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     flex: 1;
     width: 100%;
     min-height: 360px;
-    background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 14px 16px;
+    background: none;
+    color: var(--dim);
+    border: none;
+    border-radius: 0;
+    padding: 0;
     font-family: 'Cormorant Garamond', serif;
-    font-size: 15px;
-    line-height: 1.65;
+    font-size: 16px;
+    line-height: 1.7;
     resize: vertical;
     outline: none;
     transition: border-color 0.15s;
@@ -320,6 +361,44 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     border-radius: 8px;
 }
 .deck-wrap.empty { opacity: 0.4; cursor: default; }
+/* Deck back, fly ghost and shuffle ghosts are one description: the panels differ
+   only in --deck1/--deck2 (ember-navy vs violet-dark), so no forked copy. */
+.deck-back,
+.card-back-face,
+.shuffle-ghost {
+    background: linear-gradient(135deg, var(--deck1), var(--deck2));
+    border: 1px solid var(--line2);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.deck-back {
+    width: 100%;
+    height: 100%;
+    box-shadow: 0 12px 30px -12px rgba(0,0,0,.8);
+}
+.card-back-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    backface-visibility: hidden;
+    border-radius: 10px;
+    box-shadow: 0 20px 50px -18px rgba(0,0,0,.85);
+}
+.shuffle-ghost { position: fixed; pointer-events: none; overflow: hidden; }
+.deck-pattern {
+    width: 88%;
+    height: 88%;
+    border: 1px solid rgba(var(--accent-rgb), .25);
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 34px;
+    color: rgba(var(--accent-rgb), .4);
+}
 .deck-count { font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .14em; color: var(--dim); }
 .card-action-btn.visible { visibility: visible; }
 .card-status { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); min-height: 18px; text-align: center; }
@@ -347,23 +426,24 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 10px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    padding: 14px 16px;
+    background: linear-gradient(160deg, var(--cardFace1), var(--cardFace2));
+    box-shadow: 0 20px 50px -18px rgba(0,0,0,.85);
     transform: rotateY(180deg);
 }
-.flip-face.c-black { background: var(--card-cream); color: var(--card-black); border: 2px solid #888; }
-.flip-face.c-red { background: var(--card-cream); color: var(--card-red);   border: 2px solid var(--card-red); }
-.flip-face.c-purple { background: var(--card-cream); color: var(--card-purple); border: 2px solid var(--card-purple); }
+.flip-face.c-black { color: var(--card-black); }
+.flip-face.c-red { color: var(--card-red); }
+.flip-face.c-purple { color: var(--card-purple); }
 .card-corner { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
-.rank { font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 700; }
-.suit-small { font-size: 13px; }
+.rank { font-family: 'Cormorant Garamond', serif; font-size: 30px; font-weight: 700; line-height: 1; }
+.suit-small { font-size: 26px; line-height: 1; }
 .br { transform: rotate(180deg); }
-.card-center { font-size: 58px; text-align: center; line-height: 1; align-self: center; }
+.card-center { font-family: 'Cormorant Garamond', serif; font-size: 54px; text-align: center; line-height: 1; align-self: center; }
 .shuffle-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 800; }
 .shuffle-ghost .deck-pattern { width: 88%; height: 88%; }
-.tracker-suits { display: flex; flex-direction: column; gap: 5px; }
-.suit-row-t { display: flex; align-items: center; gap: 8px; }
-.suit-sym { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+.tracker-suits { display: flex; flex-direction: column; gap: 9px; }
+.suit-row-t { display: flex; align-items: center; gap: 12px; }
+.suit-sym { font-size: 18px; width: 20px; text-align: center; flex-shrink: 0; }
 .c-black { color: var(--card-black); }
 .c-red { color: var(--card-red); }
 .c-purple { color: var(--card-purple); }
@@ -434,7 +514,7 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 }
 .sel-home-btn:hover { border-color: var(--gold); color: var(--gold-light); }
 .sel-brand { font-family: 'Cormorant Garamond', serif; font-size: 30px; font-weight: 600; color: var(--warm); letter-spacing: .2em; text-indent: .2em; }
-.sel-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 17px; color: var(--gold-light); letter-spacing: 0; text-transform: none; margin-top: -18px; }
+.sel-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 17px; color: var(--gold-light); letter-spacing: 0; text-transform: none; margin-top: -18px; margin-bottom: 12px; }
 .sel-grid { display: flex; flex-wrap: wrap; gap: 18px; justify-content: center; min-height: 60px; }
 .sel-empty { width: 100%; font-family: 'Cormorant Garamond', serif; font-size: 16px; font-style: italic; color: var(--dim); opacity: 0.7; text-align: center; padding: 24px 0; }
 .sel-card {
@@ -443,9 +523,9 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 4px;
-    padding: 22px 22px 20px;
+    padding: 26px 24px;
     cursor: pointer;
-    display: flex; flex-direction: column; gap: 13px;
+    display: flex; flex-direction: column; gap: 14px;
     text-align: left;
     transition: border-color 0.2s, transform 0.2s;
     user-select: none;
@@ -453,7 +533,7 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .sel-card:hover { border-color: rgba(var(--accent-rgb), .42); transform: translateY(-3px); }
 .sel-card-head { display: flex; align-items: center; justify-content: space-between; }
 .sel-card-diamond { width: 14px; height: 14px; border: 1.5px solid var(--gold); transform: rotate(45deg); flex-shrink: 0; }
-.sel-card-name { font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 600; color: var(--warm); line-height: 1.1; word-break: break-word; }
+.sel-card-name { font-family: 'Cormorant Garamond', serif; font-size: 23px; font-weight: 600; color: var(--warm); line-height: 1.1; word-break: break-word; }
 .sel-card-delete { position: absolute; top: 11px; right: 12px; background: none; border: none; color: var(--faint); cursor: pointer; font-size: 14px; opacity: 0; line-height: 1; padding: 2px 4px; transition: opacity 0.2s, color 0.2s; }
 .sel-card:hover .sel-card-delete { opacity: 0.5; }
 .sel-card-delete:hover { opacity: 1; color: var(--bad); }
@@ -471,7 +551,7 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .sel-confirm-btn { background: var(--gold); border: none; border-radius: 3px; color: var(--ink); font-family: 'Archivo', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 10px 22px; cursor: pointer; transition: filter 0.2s; }
 .sel-cancel-btn { background: transparent; border: 1px solid var(--line2); border-radius: 3px; color: var(--dim); font-family: 'Archivo', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 10px 22px; cursor: pointer; transition: border-color 0.2s, color 0.2s; }
 .sel-cancel-btn:hover { border-color: var(--text); color: var(--text); }
-.sel-save-row { display: flex; align-items: center; gap: 13px; padding: 11px 18px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); width: 100%; max-width: 440px; }
+.sel-save-row { display: flex; align-items: center; gap: 14px; padding: 11px 18px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); width: 100%; max-width: 440px; }
 .sel-save-icon { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); flex-shrink: 0; }
 .sel-save-label { flex: 1; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sel-save-label.connected { color: var(--ok); }
@@ -479,12 +559,13 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .sel-save-btn:hover { color: var(--gold-light); }
 .gateway-shell { display: flex; flex-direction: column; align-items: center; gap: 22px; width: 100%; max-width: 800px; }
 .gateway-brand { font-family: 'Cormorant Garamond', serif; font-size: 34px; font-weight: 600; color: var(--warm); letter-spacing: .2em; text-indent: .2em; }
-.gateway-brand-rule { width: 54px; height: 1px; background: linear-gradient(90deg, transparent, var(--gold), transparent); margin-top: -8px; margin-bottom: 14px; }
+.gateway-brand-rule { width: 54px; height: 1px; background: linear-gradient(90deg, transparent, var(--gold), transparent); margin-top: -16px; margin-bottom: 18px; }
 .gateway-cols { display: flex; gap: 22px; align-items: stretch; flex-wrap: wrap; justify-content: center; width: 100%; }
-.gateway-card { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 360px; max-width: 100%; padding: 28px 30px 26px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
+.gateway-card { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 360px; max-width: 100%; padding: 30px 30px 26px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
 .gateway-eyebrow { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .24em; text-transform: uppercase; color: var(--faint); margin-bottom: 12px; }
+.gateway-eyebrow.ember { color: var(--gold); }
 .gateway-card-title { font-family: 'Cormorant Garamond', serif; font-size: 23px; font-weight: 600; color: var(--warm); margin-bottom: 8px; }
-.gateway-desc { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 15px; color: var(--dim); text-align: left; line-height: 1.5; margin: 0 0 18px; }
+.gateway-desc { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 15.5px; color: var(--dim); text-align: left; line-height: 1.5; margin: 0 0 18px; }
 .gateway-key-box { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--gold-light); background: var(--field); border: 1px solid var(--accent-soft); border-radius: 3px; padding: 13px 14px; text-align: center; letter-spacing: 0.04em; word-break: break-all; width: 100%; box-sizing: border-box; margin-bottom: 18px; }
 .gateway-btn-row { display: flex; gap: 9px; width: 100%; margin-top: auto; }
 .gateway-btn { flex: 1; text-align: center; font-family: 'Archivo', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; background: var(--gold); border: none; color: var(--ink); padding: 12px 18px; border-radius: 3px; cursor: pointer; transition: filter 0.2s; }

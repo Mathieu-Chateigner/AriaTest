@@ -1298,8 +1298,10 @@ function _applySplitColumns() {
 
 // Cosmetic "Focus" chip — marks the focused pane (frames 22/24).
 function updateSplitFocus() {
-    document.querySelectorAll('.content > .split-pane-hdr').forEach((h, i) =>
-        h.querySelector('.sph-focus')?.classList.toggle('on', i === focusIdx));
+    document.querySelectorAll('.content > .split-pane-hdr').forEach((h, i) => {
+        h.classList.toggle('focused', i === focusIdx);
+        h.querySelector('.sph-focus')?.classList.toggle('on', i === focusIdx);
+    });
 }
 
 // Close pane i; the remaining panes share the freed width.
