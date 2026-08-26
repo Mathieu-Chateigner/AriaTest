@@ -98,7 +98,6 @@ let musicPlayingPlaylistId = null; // playlist the now-playing track belongs to
 let ablyMusic = null;
 const filesGrantedSessions = new Set();
 
-
 // Every row shape below comes from ENT in aria-supabase.js — see the note there.
 // A debounced "sync the whole list" is the same shape for monsters, potions, files
 // and music, so it is written once too.
@@ -118,11 +117,6 @@ async function syncCampaign(camp) {
     return await sbPut(ENT.campaign, camp, saveKey);
 }
 
-// Upsert a single monster's stats and attacks to Supabase.
-async function syncMonster(m) {
-    if (!_supabaseReady() || !currentCampaignId) return;
-    await sbPut(ENT.monster, m, currentCampaignId);
-}
 const debouncedSyncMonsters = _debouncedListSync(ENT.monster, () => monsters);
 
 // Insert a new roll entry into the campaign_rolls table.
@@ -137,18 +131,8 @@ async function insertCardHistory(cardId) {
     await sbInsert(ENT.cardDraw.table, toRow(ENT.cardDraw, { cardId }, currentCampaignId));
 }
 
-// Upsert a GM potion recipe to the campaign_potions table.
-async function syncPotion(p) {
-    if (!_supabaseReady() || !currentCampaignId) return;
-    await sbPut(ENT.potion, p, currentCampaignId);
-}
 const debouncedSyncPotions = _debouncedListSync(ENT.potion, () => gmPotions);
 
-// Upsert a campaign file record (URL, grants) to Supabase.
-async function syncFile(f) {
-    if (!_supabaseReady() || !currentCampaignId) return;
-    await sbPut(ENT.campaignFile, f, currentCampaignId);
-}
 const debouncedSyncFiles = _debouncedListSync(ENT.campaignFile, () => gmFiles);
 
 // Upsert a music track record. `position` is the track's index in the flattened
@@ -292,7 +276,6 @@ async function loadFromSupabase() {
     } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
 }
 
-
 // Every per-campaign localStorage key, named once — the GM-side twin of CHAR_KEYS.
 // campKey(which, id) is the only way to build one and _CAMPAIGN_KEY_PREFIXES, the
 // list every deletion path walks, is derived from the same table. deleteCampaign
@@ -327,7 +310,6 @@ function _clearLocalGMData() {
     getCampaigns().forEach(c => _dropCampaignKeys(c.id));
     localStorage.removeItem('aria-gm-campaigns');
 }
-
 
 // ═══════════════════════════════════════════
 //  CAMPAIGN MANAGEMENT
@@ -729,7 +711,6 @@ function addSelectOpt(panel, value, label, onClick) {
     panel.appendChild(opt);
 }
 
-
 // Apply the shared layout pass, then the GM-specific pane work.
 function renderTabLayout() {
     applyTabLayout();
@@ -742,7 +723,6 @@ function renderTabLayout() {
     updateGMPushIframe();
     finishTabLayout();
 }
-
 
 function copyOverlayUrl() {
     const base = window.location.href.replace(/aria-gm\.html.*$/, 'aria-overlay.html');
@@ -929,7 +909,6 @@ function toggleSpotlight(charId) {
     publishGMPresence();   // the spotlight lives in our presence data
     renderPlayerCards();
 }
-
 
 // The GM's camera UI: the topbar kill switch, the hidden push frame (both owned by
 // cam), and the "Votre caméra" preview in the Joueurs tab, which is ours.
@@ -1492,7 +1471,6 @@ function onAttackSelectChange() {
 // flat membership map are persisted in a dedicated localStorage key per campaign,
 // separate from the synced monsters / campaign_files tables (no schema change).
 // See the comment on the state declarations near the top of this file.
-
 
 // Load monster groups + membership from localStorage into module state.
 function loadMonsterGroups() {
@@ -2253,9 +2231,6 @@ function initGmDeck() {
 // identical markup.
 const fileViewer = makeFileViewer({ prefix: 'gm-', files: () => gmFiles });
 
-
-
-
 // ═══════════════════════════════════════════
 //  GM ALCHEMY
 // ═══════════════════════════════════════════
@@ -2463,7 +2438,6 @@ function _normalizeMusicData(raw) {
     return playlists;
 }
 
-
 // Advance to the next track when the current ends; loops or stops based on musicLoop flag.
 // Operates on the PLAYING playlist (not whichever the GM is currently viewing).
 function _musicAutoAdvance() {
@@ -2481,7 +2455,6 @@ function _musicAutoAdvance() {
     _musicTriggerPlay(tracks[nextIdx], nextIdx);
     publishMusicPlay(tracks[nextIdx]);
 }
-
 
 // Start the rAF loop that updates the music progress bar for file-based tracks.
 function _startMusicProgress() {

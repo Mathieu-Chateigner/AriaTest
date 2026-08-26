@@ -907,8 +907,6 @@
 }
 .pdm-tab-toggle:hover { border-color: var(--violet); color: var(--text); }
 .pdm-tab-toggle.active { background: rgba(91,201,142,0.12); border-color: rgba(91,201,142,0.4); color: var(--ok); }
-.pdm-alchemy-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0 10px; gap: 10px; }
-.pdm-alchemy-sub { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--faint); padding: 6px 0; }
 .pdm-money-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
 .pdm-coin-block { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--field2); border: 1px solid var(--line); border-radius: 3px; padding: 8px 4px; }
 .pdm-coin-dot { font-size: 18px; line-height: 1; }
@@ -1192,7 +1190,6 @@
     .gm-jets-layout { grid-template-columns: 1fr; }
     .gm-jets-console { border-right: none; border-bottom: 1px solid var(--line2); }
 }
-.gm-roll-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .gm-roll-form {
     background: var(--panel);
     border: 1px solid var(--line);
@@ -1765,8 +1762,7 @@
     padding: 24px;
     display: none;
     box-shadow: 0 12px 48px rgba(0,0,0,0.7);
-}.theme-toggle input:checked + .theme-toggle-slider { background: rgba(169,139,221,0.25); border-color: var(--gm-accent); }.sel-card-cta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--gm-accent-light); margin-top: 2px; }.sel-confirm-btn:hover { filter: brightness(1.1); }/* Join code on sel cards */
-.sel-card-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+}.theme-toggle input:checked + .theme-toggle-slider { background: rgba(169,139,221,0.25); border-color: var(--gm-accent); }.sel-card-cta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--gm-accent-light); margin-top: 2px; }.sel-confirm-btn:hover { filter: brightness(1.1); }
 .sel-card-row .sel-card-name { flex: 1; min-width: 0; }
 .sel-card-joincode { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--gm-accent-light); cursor: pointer; transition: color .15s; }
 .sel-card-joincode:hover { color: var(--gm-accent); }.gateway-btn:hover { filter: brightness(1.1); }/* ════════════════════════════════════════════

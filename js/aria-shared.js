@@ -1054,13 +1054,6 @@ function showGateway() {
     document.getElementById('file-gateway').style.display = 'flex';
 }
 
-// Both panels are always visible; just focus the existing-key input.
-function showGatewayExisting() {
-    document.getElementById('file-gateway').style.display = 'flex';
-    const input = document.getElementById('gateway-key-input');
-    if (input) { input.value = ''; input.focus(); }
-}
-
 // Hide the file-gateway panel.
 function hideGateway() {
     document.getElementById('file-gateway').style.display = 'none';

@@ -1333,7 +1333,6 @@ function renderDerived() {
     renderSkills();
     renderStats();
     updateHPDisplay();
-    renderInventorySidebar();
     renderCombatSidebar();
     renderPotions();
     renderPlayerFiles();
@@ -1476,36 +1475,6 @@ const MONEY_COINS = [
     { key: 'sceptre',  label: 'Sceptre',  color: '#c87533' },
     { key: 'sou',      label: 'Sou',      color: '#8a8a94' },
 ];
-// Render the inventory sidebar with items, vials (if alchemy enabled), and money.
-function renderInventorySidebar() {
-    const body = document.getElementById('inv-sidebar-body');
-    if (!body) return;  // inventory removed from the left sidebar (lives in the Inventaire tab)
-    const items = character.inventory || [];
-    const vials = character.vials ?? 0;
-    const showVials = playerTabs.alchemy && vials > 0;
-    if (!items.length && !showVials) { fill(body, el('div', { textContent: 'Vide', style: { fontFamily: "'Cormorant Garamond',serif", fontSize: '13px', color: 'var(--parchment-dim)', fontStyle: 'italic', opacity: '.5' } })); }
-    else {
-        const qty = n => el('span', { style: { color: 'var(--gold-dim)', fontFamily: "'Cormorant Garamond',serif", fontSize: '12px' }, textContent: '×' + n });
-        const item = (name, n) => el('div', { className: 'inv-item' },
-            el('span', { style: { fontStyle: 'italic' }, textContent: name }), qty(n));
-        fill(body,
-            showVials && item('Fioles vides', vials),
-            items.map(it => item(it.name || '—', it.qty || 1)));
-    }
-    const moneyEl = document.getElementById('inv-money-display');
-    if (moneyEl) {
-        const m = character.money || {};
-        if (character.ariaType === 'contemporary') {
-            const f = m.francs ?? 0;
-            fill(moneyEl, f > 0 && el('span', { style: { color: 'var(--parchment-dim)' }, title: 'Francs', textContent: `${f} F` }));
-        } else {
-            fill(moneyEl, MONEY_COINS.map(c => {
-                const v = m[c.key] ?? 0;
-                return v > 0 && el('span', { style: { color: c.color }, title: c.label, textContent: '●' + v });
-            }));
-        }
-    }
-}
 
 // Render the combat sidebar as the design's three sections: Réactions · Protection · Armes.
 function renderCombatSidebar() {
@@ -2788,7 +2757,6 @@ function applyCraft(success, recipeId) {
         saveCurrentCharacter();
         renderPotions();
         renderInventoryEditor();
-        renderInventorySidebar();
         sendPresence();
     }, 1500);
 }
@@ -2809,7 +2777,6 @@ function usePotion(i) {
     saveCurrentCharacter();
     renderPotions();
     renderInventoryEditor();
-    renderInventorySidebar();
     showToast('gm-heal-toast', `${p.name || 'Potion'} utilisée${p.qty > 0 ? ` (×${p.qty} restante${p.qty > 1 ? 's' : ''})` : ' — épuisée'}`);
 }
 // Render the skills percentage editor list, sorted alphabetically.

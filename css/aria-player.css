@@ -286,7 +286,6 @@
     border: 1px solid var(--line);
     border-radius: 20px;
 }
-.music-bar-note { color: var(--ember); font-size: 12px; flex-shrink: 0; }
 .music-bar-vol-icon { color: var(--ember); font-size: 12px; flex-shrink: 0; }
 .music-bar-title {
     font-family: 'Cormorant Garamond', serif;
@@ -345,13 +344,6 @@
     flex-direction: column;
     gap: 15px;
     overflow-y: auto;
-}
-.inv-sidebar-panel {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
 }
 .inv-sidebar-panel .panel-body {
     flex: 1;
@@ -547,51 +539,6 @@
     margin-top: 2px;
 }
 
-/* ── INVENTORY SIDEBAR ── */
-.inv-sidebar-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border);
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 15px;
-    color: var(--parchment);
-}
-.inv-sidebar-row:last-child { border-bottom: none; }
-.inv-sidebar-qty {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 12px;
-    color: var(--parchment-dim);
-}
-.inv-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border);
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 15px;
-    color: var(--parchment);
-}
-.inv-item:last-child { border-bottom: none; }
-.inv-item-qty {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 12px;
-    color: var(--parchment-dim);
-}
-.inv-money-display { display: flex; gap: 6px; }
-.inv-money-chip {
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 9.5px;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-    color: var(--ember2);
-    border: 1px solid rgba(236,164,86,0.3);
-    padding: 3px 8px;
-    border-radius: 3px;
-}
-
 /* ── TAB CONTENT ── */
 .tab-content {
     display: none;
@@ -662,14 +609,6 @@
     flex-shrink: 0;
     white-space: nowrap;
 }
-
-/* ── DIVIDER (ornament removed) ── */
-.ornamental-divider {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 20px 0;
-}
 .ornamental-divider .line {
     flex: 1;
     height: 1px;
@@ -678,7 +617,6 @@
 .ornamental-divider .line.rev {
     background: linear-gradient(90deg, var(--line2), transparent);
 }
-.ornamental-divider .gem { display: none; }
 
 /* ── SKILL LIST ── */
 .skill-list {
@@ -765,16 +703,6 @@
     flex-shrink: 0;
     position: relative;
 }
-.skill-badge {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 8px;
-    letter-spacing: 1px;
-    color: var(--gold-dim);
-    border: 1px solid var(--gold-dim);
-    padding: 2px 5px;
-    border-radius: 1px;
-    flex-shrink: 0;
-}
 /* Per-skill permanent modifier badge in the Compétences list (#12) */
 .skill-mod {
     font-family: 'Cormorant Garamond', serif;
@@ -794,48 +722,6 @@
 }
 .soigner-skill:hover {
     border-left-color: var(--success) !important;
-}
-
-/* Specials — .special-row is the spec name; JS reuses .skill-item with inline border override */
-.special-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-left: 2px solid var(--gold-wash-lg);
-    border-radius: var(--radius);
-    padding: 11px 14px;
-    cursor: pointer;
-    transition: border-color 0.18s, background 0.18s;
-    position: relative;
-    overflow: hidden;
-}
-.special-row::before {
-    content: '';
-    position: absolute; inset: 0;
-    background: linear-gradient(90deg, var(--gold-wash-sm) 0%, transparent 60%);
-    opacity: 0;
-    transition: opacity 0.18s;
-    pointer-events: none;
-}
-.special-row:hover { border-left-color: var(--gold-dim); background: var(--bg3); }
-.special-row:hover::before { opacity: 1; }
-
-.special-name {
-    flex: 1;
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 17px;
-    font-style: italic;
-    color: var(--parchment);
-}
-.special-pct {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--parchment-dim);
-    min-width: 40px;
-    text-align: right;
 }
 
 /* ═══════════════════════════════════════════
@@ -1171,7 +1057,6 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
     border-bottom: 1px solid var(--line);
 }
 .cs-weapons-hdr { display: grid; grid-template-columns: 1fr 80px 28px 24px; gap: 6px; }
-.cs-inv-hdr     { display: grid; grid-template-columns: 1fr 52px 28px;  gap: 6px; }
 .cs-specials-hdr { display: grid; grid-template-columns: 1.2fr 52px 48px 2fr auto; gap: 6px; }
 .editor-label {
     font-family: ui-monospace, Menlo, monospace;
@@ -1340,29 +1225,6 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
     padding: 2px 6px;
     border-radius: var(--radius);
     transition: color 0.18s;
-}
-/* Money editor — JS renders money-editor-row inside #inv-money-editor */
-.money-editor-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    padding: 12px 14px 10px;
-    border-bottom: 1px solid var(--border);
-}
-.money-field { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-.money-dot   { font-size: 16px; line-height: 1; }
-.money-label {
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 9px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--faint);
-}
-.money-input {
-    text-align: center;
-    width: 100%;
-    font-family: 'Archivo', sans-serif;
-    font-variant-numeric: tabular-nums;
 }/* ── CHARACTER SHEET ── */
 .char-sheet-wrap { display: flex; flex-direction: column; gap: 18px; }
 .cs-pair {
@@ -1598,20 +1460,6 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
     letter-spacing: 0.05em;
 }
 .alchemy-vials-ctrl { display: flex; align-items: center; gap: 10px; }
-.vial-btn {
-    background: none;
-    border: 1px solid var(--line2);
-    color: var(--ember);
-    font-family: 'Archivo', sans-serif;
-    font-size: 16px;
-    width: 28px; height: 28px;
-    border-radius: 3px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-.vial-btn:hover:not(:disabled) { border-color: var(--ember); background: var(--embersoft); }
-.vial-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .vial-count {
     font-family: 'Archivo', sans-serif;
     font-variant-numeric: tabular-nums;
@@ -1621,22 +1469,7 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
     min-width: 32px;
     text-align: center;
 }
-/* Vials row in inventory tab (JS generates .inv-row for vials) */
-.inv-vials-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 4px 12px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 8px;
-}
-.inv-vials-label {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--parchment);
-    letter-spacing: 0.04em;
-}
+
 .alchemy-section-hdr {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 9.5px;
@@ -1873,11 +1706,11 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
     width: 360px;
     text-align: center;
     will-change: transform, opacity;
+    /* The roll colour drives the corners, the skill label, the number and the
+       rule. The verdict stays --warm in every state (design frame 11): the
+       number is the value, the accent marks it — the label does not repeat it. */
+    --roll-col: var(--warm);
 }
-/* The roll colour drives the corners, the skill label, the number and the rule.
-   The verdict stays --warm in every state (design frame 11): the number is the
-   value, the accent marks it — the label does not repeat the signal. */
-.float-roll-card { --roll-col: var(--warm); }
 .float-roll-card.die       { --roll-col: var(--dim); }
 .float-roll-card.success   { --roll-col: var(--ok); }
 .float-roll-card.fail,
@@ -2081,14 +1914,7 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
 .stm-cancel { display: block; width: 100%; padding: 8px 14px; margin-top: 4px; background: none; border: 1px solid var(--border); color: var(--parchment-dim); font-family: 'Cormorant Garamond', serif; font-size: 12px; letter-spacing: 0.08em; cursor: pointer; border-radius: var(--radius); transition: all 0.15s; }
 .stm-cancel:hover { border-color: var(--gold-dim); color: var(--parchment); }.sel-card-class { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); margin-top: 3px; word-break: break-word; }.sel-card-campaign { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ember); }
 .sel-card-campaign.no-campaign { color: var(--faint); opacity: 0.7; font-style: normal; letter-spacing: 0.14em; }
-.sel-card-cta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--ember); margin-top: 2px; }.sel-confirm-btn:hover { filter: brightness(1.08); }/* Config section on selection screen */
-.sel-config-section { width: 100%; max-width: 440px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); padding: 18px; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.sel-config-title { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); margin-bottom: 4px; }
-.sel-config-label { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); margin-top: 8px; }
-.sel-config-input { background: var(--field); border: 1px solid var(--line2); border-radius: 3px; color: var(--text); font-family: 'Archivo', sans-serif; font-size: 14px; padding: 9px 11px; width: 100%; transition: border-color 0.2s; }
-.sel-config-input:focus { outline: none; border-color: var(--ember); }
-.sel-config-save-btn { margin-top: 8px; background: var(--ember); border: none; border-radius: 3px; color: var(--ink); font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding: 10px 20px; cursor: pointer; align-self: flex-end; transition: filter 0.2s; }
-.sel-config-save-btn:hover { filter: brightness(1.08); }.gateway-btn:hover { filter: brightness(1.08); }/* Music unlock prompt */
+.sel-card-cta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--ember); margin-top: 2px; }.sel-confirm-btn:hover { filter: brightness(1.08); }.gateway-btn:hover { filter: brightness(1.08); }/* Music unlock prompt */
 .music-unlock-prompt {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: var(--bg3); border: 1px solid var(--gold-dim); border-radius: var(--radius);
