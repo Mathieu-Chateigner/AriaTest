@@ -1765,7 +1765,20 @@
 }.theme-toggle input:checked + .theme-toggle-slider { background: rgba(169,139,221,0.25); border-color: var(--gm-accent); }.sel-card-cta { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--gm-accent-light); margin-top: 2px; }.sel-confirm-btn:hover { filter: brightness(1.1); }
 .sel-card-row .sel-card-name { flex: 1; min-width: 0; }
 .sel-card-joincode { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--gm-accent-light); cursor: pointer; transition: color .15s; }
-.sel-card-joincode:hover { color: var(--gm-accent); }.gateway-btn:hover { filter: brightness(1.1); }/* ════════════════════════════════════════════
+.sel-card-joincode:hover { color: var(--gm-accent); }.gateway-btn:hover { filter: brightness(1.1); }
+
+/* ─── Carte ─── */
+/* Scoped to .active (not a bare #tab-map rule): an ID selector's display:flex would
+   outrank .tab-content{display:none} regardless of the active class, keeping this
+   tab visibly stacked over whichever tab actually is active. See task-3-report.md. */
+#tab-map.active { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+.map-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.map-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* The stage centres the frame and scrolls if the pane is smaller than the minimum. */
+.map-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.map-empty { color: var(--parchment-dim); font-style: italic; padding: 24px; text-align: center; }
+
+/* ════════════════════════════════════════════
    LIGHT MODE
    ════════════════════════════════════════════ */
 body.light-mode {

@@ -638,6 +638,7 @@ function initApp() {
     console.log('[GM] initApp: campaign:', currentCampaignId, '| joinCode:', currentJoinCode, '| ablyKey:', config.ablyKey ? 'set' : 'MISSING', '| dddice:', config.dddiceKey ? 'set' : 'none');
     renderPlayerCards();
     renderMonsters();
+    renderMapTab();
     renderRollFeed();
     renderCardHistory();
     renderGMPotions();
@@ -1608,22 +1609,30 @@ function _groupChip(o) {
     return chip;
 }
 
-// Render a chip bar (monster or file). "Tous" first, then groups, then ＋.
+// Render a chip bar (monster, file, or map). "Tous" first (unless noTous), then groups, then ＋.
 function _renderGroupBar(type) {
-    const cfg = type === 'monster'
-        ? { barId: 'monster-group-bar', groups: monsterGroups, activeId: activeMonsterGroupId, total: monsters.length,
+    const cfgs = {
+        monster: { barId: 'monster-group-bar', groups: monsterGroups, activeId: activeMonsterGroupId, total: monsters.length,
             countOf: id => monsters.reduce((n, m) => n + (monsterGroupAssign[m.id] === id ? 1 : 0), 0),
-            select: selectMonsterGroup, add: addMonsterGroup, rename: renameMonsterGroup, del: deleteMonsterGroup }
-        : { barId: 'file-group-bar', groups: fileGroups, activeId: activeFileGroupId, total: gmFiles.length,
+            select: selectMonsterGroup, add: addMonsterGroup, rename: renameMonsterGroup, del: deleteMonsterGroup },
+        file: { barId: 'file-group-bar', groups: fileGroups, activeId: activeFileGroupId, total: gmFiles.length,
             countOf: id => gmFiles.reduce((n, f) => n + (fileGroupAssign[f.id] === id ? 1 : 0), 0),
-            select: selectFileGroup, add: addFileGroup, rename: renameFileGroup, del: deleteFileGroup };
+            select: selectFileGroup, add: addFileGroup, rename: renameFileGroup, del: deleteFileGroup },
+        // A map is always active: there is no "all maps" state, so no Tous chip, and the
+        // count is the map's POIs rather than a membership tally.
+        map: { barId: 'map-group-bar', groups: gmMaps, activeId: activeMapId, noTous: true, total: 0,
+            countOf: id => (gmMaps.find(m => m.id === id)?.pois || []).length,
+            select: selectMap, add: addMap, rename: renameMap, del: deleteMap },
+    };
+    const cfg = cfgs[type];
     const bar = document.getElementById(cfg.barId);
     if (!bar) return;
     bar.innerHTML = '';
-    bar.appendChild(_groupChip({ id: '', name: 'Tous', count: cfg.total, isTous: true, active: cfg.activeId === null, type, cfg }));
+    if (!cfg.noTous)
+        bar.appendChild(_groupChip({ id: '', name: 'Tous', count: cfg.total, isTous: true, active: cfg.activeId === null, type, cfg }));
     cfg.groups.forEach(g => bar.appendChild(_groupChip({ id: g.id, name: g.name, count: cfg.countOf(g.id), isTous: false, active: cfg.activeId === g.id, type, cfg })));
     const add = document.createElement('button');
-    add.className = 'group-chip-add'; add.title = 'Nouveau groupe'; add.textContent = '＋';
+    add.className = 'group-chip-add'; add.title = type === 'map' ? 'Nouvelle carte' : 'Nouveau groupe'; add.textContent = '＋';
     add.addEventListener('click', cfg.add);
     bar.appendChild(add);
 }
@@ -3138,4 +3147,61 @@ function renderGmFiles() {
                     title: isAll ? 'Révoquer accès global' : 'Accorder à tous', onclick: () => grantFileToAll(f.id) }),
                 el('button', { className: 'gm-file-del-btn', title: 'Supprimer', textContent: '✕', onclick: () => removeGmFile(f.id) }))));
     });
+}
+
+// ═══════════════════════════════════════════
+//  CARTE
+// ═══════════════════════════════════════════
+
+function addMap() {
+    const name = prompt('Nom de la nouvelle carte :', 'Carte ' + (gmMaps.length + 1));
+    if (name === null) return;
+    const m = { id: uid(), name: name.trim() || ('Carte ' + (gmMaps.length + 1)),
+                imageUrl: '', imagePath: '', sourceUrl: '', pois: [], positions: {} };
+    gmMaps.push(m);
+    activeMapId = m.id;
+    saveMaps();
+    renderMapTab();
+}
+
+function selectMap(id) { activeMapId = id; saveMaps(); renderMapTab(); }
+
+function renameMap(id) {
+    const m = gmMaps.find(x => x.id === id); if (!m) return;
+    const name = prompt('Nouveau nom de la carte :', m.name);
+    if (name === null) return;
+    const t = name.trim(); if (!t || t === m.name) return;
+    m.name = t; saveMaps(); renderMapTab();
+}
+
+// Delete a map, its Supabase row and its stored image. The image lives in the
+// campaign-files bucket but was never added to gmFiles, so nothing else references it.
+async function deleteMap(id) {
+    const m = gmMaps.find(x => x.id === id); if (!m) return;
+    if (!confirm(`Supprimer la carte « ${m.name} » et ses ${m.pois.length} point(s) d'intérêt ?`)) return;
+    if (m.imagePath) await deleteFileFromStorage(m.imagePath);
+    sbDelete(ENT.map.table, 'id=eq.' + encodeURIComponent(id));
+    gmMaps = gmMaps.filter(x => x.id !== id);
+    if (activeMapId === id) activeMapId = gmMaps[0] ? gmMaps[0].id : null;
+    saveMaps();
+    renderMapTab();
+}
+
+// Render the whole Carte tab. Every map mutation calls this; there is no partial render,
+// the tab holds at most one image and a handful of pins.
+function renderMapTab() {
+    // Drop a stale active id (map deleted on another device), then render the chips.
+    if (activeMapId && !_activeMap()) activeMapId = gmMaps[0] ? gmMaps[0].id : null;
+    _renderGroupBar('map');
+    const stage = document.getElementById('map-stage');
+    const bar   = document.getElementById('map-toolbar');
+    if (!stage || !bar) return;
+    const m = _activeMap();
+    if (!m) {
+        fill(bar);
+        fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune carte. Créez-en une avec ＋.' }));
+        return;
+    }
+    fill(bar);    // Task 4 fills the toolbar
+    fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une.' }));
 }

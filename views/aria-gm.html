@@ -113,6 +113,7 @@
             <div class="tabs">
                 <button class="tab-btn active" data-tab="tab-players" onclick="switchTab('tab-players',this)">Joueurs</button>
                 <button class="tab-btn" data-tab="tab-monsters" onclick="switchTab('tab-monsters',this)">Monstres</button>
+                <button class="tab-btn" data-tab="tab-map" onclick="switchTab('tab-map',this)">Carte</button>
                 <button class="tab-btn" data-tab="tab-gm-roll" onclick="switchTab('tab-gm-roll',this)">Jets</button>
                 <button class="tab-btn" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">Cartes</button>
                 <button class="tab-btn" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">Alchimie</button>
@@ -210,6 +211,13 @@
                 </div>
                 </div><!-- /.gm-col-main -->
                 </div><!-- /.gm-two-col -->
+            </div>
+
+            <!-- CARTE — POI map shell; image + pins land in tasks 4/5 -->
+            <div class="tab-content" id="tab-map">
+                <div class="map-bar" id="map-group-bar"></div>
+                <div class="map-toolbar" id="map-toolbar"></div>
+                <div class="map-stage" id="map-stage"></div>
             </div>
 
             <!-- JETS — roll console (left) + live feed (right), fused -->
