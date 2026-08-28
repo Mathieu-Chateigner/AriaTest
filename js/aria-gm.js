@@ -78,6 +78,7 @@ let gmPotions = [];
 let gmFiles = [];
 let gmMaps = [];          // [{ id, name, imageUrl, imagePath, sourceUrl, pois, positions }]
 let activeMapId = null;   // map shown to the table (local: campaign_maps has no flag for it)
+let mapSelectedPoiId = null;   // POI whose floating card is open (GM tab only)
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -3245,6 +3246,107 @@ async function deleteMap(id) {
     renderMapTab();
 }
 
+// Percentage coordinates of a pointer event inside the map frame. Percentages, not pixels:
+// the frame is exactly the rendered image, so these survive any pane size.
+function _mapPct(e, frame) {
+    const r = frame.getBoundingClientRect();
+    return {
+        x: Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width)  * 100)),
+        y: Math.min(100, Math.max(0, ((e.clientY - r.top)  / r.height) * 100)),
+    };
+}
+
+function mapAddPoi(x, y) {
+    const m = _activeMap(); if (!m) return;
+    const name = prompt('Nom du point d’intérêt :', 'Nouveau lieu');
+    if (name === null) return;
+    const poi = { id: uid(), name: name.trim() || 'Nouveau lieu', x, y,
+                  publicDesc: '', gmNote: '', discoveredBy: [], zone: [] };
+    m.pois.push(poi);
+    mapSelectedPoiId = poi.id;
+    saveMaps();
+    renderMapTab();
+}
+
+function mapSelectPoi(id) { mapSelectedPoiId = mapSelectedPoiId === id ? null : id; renderMapTab(); }
+
+function mapDeletePoi(id) {
+    const m = _activeMap(); if (!m) return;
+    const poi = m.pois.find(p => p.id === id); if (!poi) return;
+    if (!confirm(`Supprimer « ${poi.name} » ?`)) return;
+    m.pois = m.pois.filter(p => p.id !== id);
+    // A token can't stand on a POI that no longer exists. Deleting the POI takes its zone
+    // with it too — a zone belongs to a POI, there is no independent zone object.
+    Object.keys(m.positions).forEach(k => { if (m.positions[k] === id) delete m.positions[k]; });
+    if (mapSelectedPoiId === id) mapSelectedPoiId = null;
+    saveMaps();
+    renderMapTab();
+}
+
+// The pin layer: one element per POI, positioned in percentages. Names arrive from the GM
+// but tokens carry player names taken from presence, so everything is built with el() and
+// textContent — never a string template.
+function _mapPinLayer(m) {
+    const layer = el('div', { className: 'map-pins' });
+    m.pois.forEach(p => {
+        const discovered = (p.discoveredBy || []).length > 0;
+        const pin = el('div', {
+            className: 'map-pin' + (discovered ? ' discovered' : '') + (p.id === mapSelectedPoiId ? ' selected' : ''),
+            style: { left: p.x + '%', top: p.y + '%' },
+            onpointerdown: e => _mapDragPin(e, p),
+        },
+            el('span', { className: 'map-pin-dot' }),
+            el('span', { className: 'map-pin-label', textContent: p.name }));
+        layer.append(pin);
+    });
+    return layer;
+}
+
+// Drag a pin, or select it when the pointer never really moved. One handler for both, so a
+// click cannot be swallowed by a drag that travelled two pixels.
+function _mapDragPin(e, poi) {
+    e.preventDefault();
+    const frame = document.getElementById('map-frame');
+    const pin = e.currentTarget;
+    let moved = false;
+    pin.setPointerCapture(e.pointerId);
+    const onMove = ev => {
+        const { x, y } = _mapPct(ev, frame);
+        if (Math.abs(x - poi.x) > .5 || Math.abs(y - poi.y) > .5) moved = true;
+        poi.x = x; poi.y = y;
+        pin.style.left = x + '%'; pin.style.top = y + '%';
+    };
+    const onUp = () => {
+        pin.removeEventListener('pointermove', onMove);
+        pin.removeEventListener('pointerup', onUp);
+        if (moved) { saveMaps(); renderMapTab(); }
+        else mapSelectPoi(poi.id);
+    };
+    pin.addEventListener('pointermove', onMove);
+    pin.addEventListener('pointerup', onUp);
+}
+
+// The floating POI card. It anchors beside the selected pin and never on top of it: past
+// 55% of the width it flips to the left side. The three text layers are the whole point —
+// gmNote is the one that must never leave this panel.
+function _poiCard(m, poi) {
+    const side = poi.x > 55 ? ' left' : '';
+    return el('div', { className: 'map-poi-card' + side, style: { left: poi.x + '%', top: poi.y + '%' } },
+        el('div', { className: 'map-poi-head' },
+            el('input', { className: 'map-poi-name', value: poi.name,
+                oninput: e => { poi.name = e.target.value; saveMaps(); } }),
+            el('button', { className: 'map-poi-del', title: 'Supprimer', textContent: '✕',
+                onclick: () => mapDeletePoi(poi.id) })),
+        el('label', { className: 'map-poi-label', textContent: 'Description publique' }),
+        el('textarea', { className: 'map-poi-text', value: poi.publicDesc || '',
+            placeholder: 'Ce que lisent les joueurs qui ont découvert le lieu',
+            oninput: e => { poi.publicDesc = e.target.value; saveMaps(); } }),
+        el('label', { className: 'map-poi-label', textContent: 'Note MJ (privée)' }),
+        el('textarea', { className: 'map-poi-text gm', value: poi.gmNote || '',
+            placeholder: 'Ne quitte jamais ce panneau',
+            oninput: e => { poi.gmNote = e.target.value; saveMaps(); } }));
+}
+
 // Render the whole Carte tab. Every map mutation calls this; there is no partial render,
 // the tab holds at most one image and a handful of pins.
 function renderMapTab() {
@@ -3277,5 +3379,14 @@ function renderMapTab() {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));
         return;
     }
-    fill(stage, _mapFrame(m));
+    const sel = m.pois.find(p => p.id === mapSelectedPoiId) || null;
+    const frame = _mapFrame(m, _mapPinLayer(m), sel && _poiCard(m, sel));
+    // A click on the background places a POI; a click on a pin or the card must not.
+    frame.addEventListener('click', e => {
+        if (e.target.closest('.map-pin') || e.target.closest('.map-poi-card')) return;
+        if (mapSelectedPoiId) { mapSelectedPoiId = null; renderMapTab(); return; }
+        const { x, y } = _mapPct(e, frame);
+        mapAddPoi(x, y);
+    });
+    fill(stage, frame);
 }

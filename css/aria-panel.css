@@ -617,3 +617,23 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
 .aria-frame::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
                       opacity: .16; mix-blend-mode: overlay;
                       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+/* Pins and the floating POI card — geometry and idle appearance are identical on both
+   sides (task 8 reuses these as-is); only the GM's edit-mode fields (aria-gm.css) differ. */
+.map-pins { position: absolute; inset: 0; z-index: 2; }
+.map-pin { position: absolute; transform: translate(-50%, -50%); cursor: grab;
+           display: flex; flex-direction: column; align-items: center; gap: 2px; touch-action: none; }
+.map-pin-dot { width: 12px; height: 12px; border-radius: 50%;
+               border: 1px dashed var(--parchment-dim); background: transparent; }
+.map-pin.discovered .map-pin-dot { border: none; background: var(--gold);
+                                   box-shadow: 0 0 10px 3px rgba(var(--accent-rgb), .45); }
+.map-pin.selected  .map-pin-dot { box-shadow: 0 0 0 3px var(--gold-light), 0 0 12px 4px rgba(var(--accent-rgb), .6); }
+.map-pin-label { font-family: 'Cinzel', serif; font-size: 11px; white-space: nowrap;
+                 color: var(--parchment-dim); text-shadow: 0 1px 3px rgba(0,0,0,.9); }
+.map-pin.discovered .map-pin-label { color: var(--parchment); }
+.map-poi-card { position: absolute; z-index: 3; width: 240px; transform: translate(18px, -50%);
+                background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+                padding: 8px; display: flex; flex-direction: column; gap: 4px;
+                box-shadow: 0 8px 24px rgba(0,0,0,.6); }
+.map-poi-card.left { transform: translate(calc(-100% - 18px), -50%); }
+.map-poi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--parchment-dim); }
