@@ -3271,8 +3271,7 @@ function renderMapTab() {
             // never saw, and pasting the address bar back is the only way to fix that.
             oninput: e => { m.sourceUrl = e.target.value; saveMaps(); } }),
         m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
-            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
-        el('span', { className: 'map-upload-status', id: 'map-upload-status' }));
+            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }));
 
     if (!m.imageUrl) {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));

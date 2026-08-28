@@ -545,7 +545,15 @@ Dans `views/aria-gm.html`, dans `#tab-map`, avant `#map-stage` :
 ```html
                 <input type="file" id="map-image-input" accept="image/*" style="display:none"
                        onchange="handleMapImageUpload(this)">
+                <span class="map-upload-status" id="map-upload-status"></span>
 ```
+
+Le statut est un `<span>` **statique** dans le HTML, pas construit dans le `fill(bar, ...)` de
+l'étape 5 : ce `fill` fait un `replaceChildren()` sur la barre d'outils à chaque rendu, donc un
+nœud créé à l'intérieur serait détaché du document au rendu suivant et une écriture différée
+dans `status.textContent` (le cas de `handleMapImageUpload`, qui écrit après un `await`) n'atteindrait
+plus l'écran — le même raisonnement qui place déjà `#file-upload-progress` hors de ce que
+`renderGmFiles()` reconstruit côté Fichiers.
 
 - [ ] **Step 2: Déclarer les générateurs**
 
@@ -635,8 +643,7 @@ Remplacer les deux `fill(...)` de fin de `renderMapTab()` (Task 3, Step 4) par :
             // never saw, and pasting the address bar back is the only way to fix that.
             oninput: e => { m.sourceUrl = e.target.value; saveMaps(); } }),
         m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
-            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
-        el('span', { className: 'map-upload-status', id: 'map-upload-status' }));
+            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }));
 
     if (!m.imageUrl) {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));
