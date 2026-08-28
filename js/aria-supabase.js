@@ -225,6 +225,20 @@ const ENT = {
             grantedTo: { col: 'granted_to', to: v => v || [], def: _arr },
         },
     },
+    // pois/positions are jsonb: a map carries its own tokens and its own fog, so
+    // switching the active map moves nothing. The parent being campaign_id, the
+    // delete cascade picks the table up from childTables() with nothing to wire.
+    map: {
+        table: 'campaign_maps', parent: 'campaign_id',
+        fields: {
+            id: 'id', name: 'name',
+            imageUrl:  { col: 'image_url',  to: _str, def: '' },
+            imagePath: { col: 'image_path', to: _str, def: '' },
+            sourceUrl: { col: 'source_url', to: _str, def: '' },
+            pois:      { col: 'pois',       to: _orNull, def: _arr },
+            positions: { col: 'positions',  to: _orNull, def: _obj },
+        },
+    },
     music: {
         table: 'campaign_music', parent: 'campaign_id',
         fields: {

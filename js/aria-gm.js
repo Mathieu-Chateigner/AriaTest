@@ -76,6 +76,8 @@ let renderPlayerCardsTimer = null;
 let renderMonstersTimer = null;
 let gmPotions = [];
 let gmFiles = [];
+let gmMaps = [];          // [{ id, name, imageUrl, imagePath, sourceUrl, pois, positions }]
+let activeMapId = null;   // map shown to the table (local: campaign_maps has no flag for it)
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -134,6 +136,8 @@ async function insertCardHistory(cardId) {
 const debouncedSyncPotions = _debouncedListSync(ENT.potion, () => gmPotions);
 
 const debouncedSyncFiles = _debouncedListSync(ENT.campaignFile, () => gmFiles);
+
+const debouncedSyncMaps = _debouncedListSync(ENT.map, () => gmMaps, true);
 
 // Upsert a music track record. `position` is the track's index in the flattened
 // playlists — campaign_music has no playlist column (see _mergeMusicGrouping).
@@ -254,13 +258,14 @@ async function loadFromSupabase() {
         await Promise.all(campaigns.map(async c => {
             const scope = 'campaign_id=eq.' + encodeURIComponent(c.id) + '&select=*';
             const byPos = scope + '&order=position.asc';
-            const [mons, pots, files, kp, notes, music] = await Promise.all([
+            const [mons, pots, files, kp, notes, music, maps] = await Promise.all([
                 sbSelect(ENT.monster.table, scope),
                 sbSelect(ENT.potion.table, scope),
                 sbSelect(ENT.campaignFile.table, scope),
                 sbSelect(ENT.knownPlayer.table, scope),
                 sbSelect(ENT.campaignNote.table, byPos),
                 sbSelect(ENT.music.table, byPos),
+                sbSelect(ENT.map.table, byPos),
             ]);
             const store = (which, value) => localStorage.setItem(campKey(which, c.id), JSON.stringify(value));
             store('monsters', mons.map(m => fromRow(ENT.monster, m)));
@@ -271,6 +276,7 @@ async function loadFromSupabase() {
             kp.forEach(row => { if (row.char_id) known[row.char_id] = row.data; });
             store('knownPlayers', known);
             store('music', _mergeMusicGrouping(campKey('music', c.id), music.map(t => fromRow(ENT.music, t))));
+            store('maps', maps.map(m => fromRow(ENT.map, m)));
         }));
         return true;
     } catch(e) { console.warn('[ARIA] GM load failed:', e); return false; }
@@ -292,6 +298,8 @@ const CAMP_KEYS = {
     music:         'aria-gm-music-',
     monsterGroups: 'aria-gm-monster-groups-',
     fileGroups:    'aria-gm-file-groups-',
+    maps:          'aria-gm-maps-',
+    activeMap:     'aria-gm-active-map-',
     camera:        'aria-gm-camera-off-',
 };
 const _CAMPAIGN_KEY_PREFIXES = Object.values(CAMP_KEYS);
@@ -338,6 +346,13 @@ function filesKey()         { return campKey('files'); }
 function monsterGroupsKey() { return campKey('monsterGroups'); }
 // Return the campaign-scoped localStorage key for file groups.
 function fileGroupsKey()    { return campKey('fileGroups'); }
+// Return the campaign-scoped localStorage key for maps.
+function mapsKey()      { return campKey('maps'); }
+// Return the campaign-scoped localStorage key for the active map id.
+function activeMapKey() { return campKey('activeMap'); }
+
+// The map currently shown to the table, or null when the campaign has none.
+function _activeMap() { return gmMaps.find(m => m.id === activeMapId) || null; }
 // Return the campaign-scoped localStorage key for GM notes.
 function gmNotesKey()       { return campKey('notes'); }
 // Return the campaign-scoped localStorage key for the music playlist.
@@ -388,6 +403,11 @@ function loadCampaignState(id) {
     cardHistory = JSON.parse(localStorage.getItem(cardHistKey()) || '[]');
     gmPotions   = JSON.parse(localStorage.getItem(potionsKey())  || '[]');
     gmFiles     = JSON.parse(localStorage.getItem(filesKey())    || '[]');
+    gmMaps      = JSON.parse(localStorage.getItem(mapsKey()) || '[]');
+    activeMapId = localStorage.getItem(activeMapKey()) || null;
+    // The active map is a local preference (campaign_maps has no flag for it), so a
+    // fresh device falls back to the first map rather than showing nothing.
+    if (!_activeMap()) activeMapId = gmMaps[0] ? gmMaps[0].id : null;
     loadMonsterGroups();
     loadFileGroups();
     gmPlaylists = _normalizeMusicData(localStorage.getItem(musicKey()));
@@ -406,7 +426,7 @@ function loadCampaignState(id) {
         // applyPresenceSet, which arrives as soon as the channel attaches.
         players.set(p.charId, { ...p, online: false });
     });
-    console.log('[GM] loadCampaignState:', camp.name, '| joinCode:', currentJoinCode, '| type:', currentCampaignType, '| vdoRoom:', currentVdoRoom || '(none)', '| monsters:', monsters.length, '| knownPlayers:', players.size, '| playlists:', gmPlaylists.length, '| music tracks:', _allTracks().length, '| files:', gmFiles.length);
+    console.log('[GM] loadCampaignState:', camp.name, '| joinCode:', currentJoinCode, '| type:', currentCampaignType, '| vdoRoom:', currentVdoRoom || '(none)', '| monsters:', monsters.length, '| knownPlayers:', players.size, '| playlists:', gmPlaylists.length, '| music tracks:', _allTracks().length, '| files:', gmFiles.length, '| maps:', gmMaps.length);
     return true;
 }
 
@@ -1378,6 +1398,15 @@ function applyPlayerHeal(charId) {
 // ═══════════════════════════════════════════
 // Persist monsters to localStorage, debounce Supabase sync, and push state to overlay.
 function saveMonsters() { localStorage.setItem(monstersKey(), JSON.stringify(monsters)); debouncedSyncMonsters(); publishMonsterStateToOverlay(); }
+
+// Persist maps and push them to Supabase. Every map mutation goes through here, so the
+// broadcast added in Task 7 has exactly one place to hang off.
+function saveMaps() {
+    localStorage.setItem(mapsKey(), JSON.stringify(gmMaps));
+    localStorage.setItem(activeMapKey(), activeMapId || '');
+    debouncedSyncMaps();
+}
+
 // Add one or more monsters from the add-monster form (supports a count field).
 function addMonster() {
     const name = document.getElementById('amf-name').value.trim();
