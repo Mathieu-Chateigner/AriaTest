@@ -3153,6 +3153,64 @@ function renderGmFiles() {
 //  CARTE
 // ═══════════════════════════════════════════
 
+// Shortcuts to map GENERATORS — tools that take parameters and a seed in their URL, so
+// opening one pre-filled is worth code. Hand-driven editors (Inkarnate, Wonderdraft) have
+// nothing to pre-fill: for those the import button is already the whole integration.
+// Adding one is one line.
+const MAP_GENERATORS = [
+    { label: 'Ville médiévale', url: s => `https://watabou.github.io/city-generator/?size=15&seed=${s}` },
+    { label: 'Village',         url: s => `https://watabou.github.io/village-generator/?seed=${s}` },
+    { label: 'Royaume',         url: () => 'https://azgaar.github.io/Fantasy-Map-Generator/' },
+];
+
+// Open a generator with a fresh seed and remember the URL we opened as the map's source,
+// so `Rouvrir la source` comes back to the same town at the same settings. The seed lives
+// in the URL — storing it separately would be the same information twice.
+function openMapGenerator(gen) {
+    const m = _activeMap(); if (!m) return;
+    const url = gen.url(Math.floor(Math.random() * 1e9));
+    m.sourceUrl = url;
+    saveMaps();
+    renderMapTab();
+    window.open(url, '_blank', 'noopener');
+}
+
+// Upload a map background. It goes to the campaign-files bucket like any GM file but is
+// NOT added to gmFiles, so it never shows up in the Fichiers tab. Replacing an image
+// deletes the previous object rather than leaking it in storage.
+async function handleMapImageUpload(input) {
+    const file = input.files[0];
+    input.value = '';
+    const m = _activeMap();
+    if (!file || !m) return;
+    if (file.size > 20 * 1024 * 1024) { alert('Image trop volumineuse (max 20 Mo).'); return; }
+    const status = document.getElementById('map-upload-status');
+    if (status) status.textContent = 'Envoi en cours…';
+    try {
+        const old = m.imagePath;
+        const { path, url } = await uploadFileToStorage(file);
+        m.imagePath = path;
+        m.imageUrl  = url;
+        saveMaps();
+        renderMapTab();
+        if (old) deleteFileFromStorage(old);
+        if (status) { status.textContent = '✓ Image importée.'; setTimeout(() => { status.textContent = ''; }, 2500); }
+    } catch (e) {
+        if (status) status.textContent = `Erreur : ${e.message}`;
+        console.warn('[GM] map image upload failed:', e);
+    }
+}
+
+// The map frame: a shrink-wrapping container around the image, plus whatever layers the
+// caller passes. Frame and image both cap at 100% of the stage, so the frame is exactly the
+// rendered image — which is what makes the percentage coordinates land on the right pixel
+// whatever the pane's aspect ratio.
+function _mapFrame(m, ...layers) {
+    return el('div', { className: 'aria-frame', id: 'map-frame' },
+        el('img', { className: 'aria-map', src: m.imageUrl, alt: m.name, draggable: false }),
+        ...layers);
+}
+
 function addMap() {
     const name = prompt('Nom de la nouvelle carte :', 'Carte ' + (gmMaps.length + 1));
     if (name === null) return;
@@ -3202,6 +3260,23 @@ function renderMapTab() {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune carte. Créez-en une avec ＋.' }));
         return;
     }
-    fill(bar);    // Task 4 fills the toolbar
-    fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une.' }));
+    fill(bar,
+        el('button', { className: 'gm-btn', textContent: m.imageUrl ? 'Remplacer l’image' : 'Importer une image',
+            onclick: () => document.getElementById('map-image-input').click() }),
+        el('span', { className: 'map-gen-label', textContent: 'Générer :' }),
+        MAP_GENERATORS.map(g => el('button', { className: 'gm-btn ghost', textContent: g.label,
+            onclick: () => openMapGenerator(g) })),
+        el('input', { className: 'map-source-input', value: m.sourceUrl || '', placeholder: 'URL source (optionnel)',
+            // Editable on purpose: options changed inside the generator land on a URL Aria
+            // never saw, and pasting the address bar back is the only way to fix that.
+            oninput: e => { m.sourceUrl = e.target.value; saveMaps(); } }),
+        m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
+            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
+        el('span', { className: 'map-upload-status', id: 'map-upload-status' }));
+
+    if (!m.imageUrl) {
+        fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));
+        return;
+    }
+    fill(stage, _mapFrame(m));
 }

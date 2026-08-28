@@ -595,3 +595,25 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
     padding: 3px 7px;
 }
 .sel-card-type.contemporary { color: var(--dim); border-color: var(--line2); }
+
+/* ─── Carte ─── */
+/* display lives on the .map-tab class, not the #tab-map id: an ID selector would
+   also outrank .tab-content.active:not(.split-primary){display:none} at <900px
+   split-mode (line 331), leaving a non-primary Carte pane stuck visible. */
+.tab-content.active.map-tab { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+/* The stage centres the frame and scrolls if the pane is smaller than the minimum. */
+.map-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.map-empty { color: var(--parchment-dim); font-style: italic; padding: 24px; text-align: center; }
+/* The frame shrink-wraps the rendered image: both cap at 100% of the stage, so a
+   percentage coordinate always lands on the same pixel of the picture. */
+.aria-frame { position: relative; display: inline-block; max-width: 100%; max-height: 100%;
+              box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .4), inset 0 0 26px rgba(9,8,4,.85); }
+.aria-map   { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto;
+              filter: sepia(.45) saturate(.75) contrast(1.08) brightness(.92); }
+/* Vignette and grain sit above the image and below the pins; both are inert to the mouse
+   so a click still reaches the frame's placement handler. */
+.aria-frame::after  { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+                      background: radial-gradient(ellipse at 50% 45%, transparent 52%, rgba(9,8,4,.72) 100%); }
+.aria-frame::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+                      opacity: .16; mix-blend-mode: overlay;
+                      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
