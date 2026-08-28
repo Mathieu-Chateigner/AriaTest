@@ -224,6 +224,7 @@ async function _syncAllGMData() {
         await sbPutAll(ENT.monster,      _campJSON('monsters', cid, []), cid);
         await sbPutAll(ENT.potion,       _campJSON('potions',  cid, []), cid);
         await sbPutAll(ENT.campaignFile, _campJSON('files',    cid, []), cid);
+        await sbPutAll(ENT.map, _campJSON('maps', cid, []), cid, true);
         // Music is grouped into playlists locally but stored flat — campaign_music
         // has no playlist column, so position is the index across all playlists.
         await sbPutAll(ENT.music, _normalizeMusicData(localStorage.getItem(campKey('music', cid))).flatMap(p => p.tracks), cid, true);

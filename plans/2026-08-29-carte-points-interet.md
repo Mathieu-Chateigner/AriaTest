@@ -163,7 +163,7 @@ le prochain lot l'écraserait de toute façon.
 **Files:**
 - Modify: `js/aria-supabase.js` — `ENT.map`, après l'entrée `campaignFile`
 - Modify: `js/aria-gm.js` — `CAMP_KEYS`, globales, accesseurs, `loadCampaignState`, `saveMaps`,
-  `debouncedSyncMaps`, `loadFromSupabase`
+  `debouncedSyncMaps`, `loadFromSupabase`, `_syncAllGMData`
 
 **Interfaces:**
 - Consomme : `ENT`, `toRow`, `fromRow`, `sbPutAll`, `childTables()` (`js/aria-supabase.js`) ;
@@ -287,6 +287,17 @@ et `maps` au tableau destructuré, puis, à côté des autres `store(…)` :
 **Ne pas** l'entourer d'un `if (maps.length)` : les tables enfants du MJ se restaurent
 inconditionnellement — une table vide veut dire « supprimé sur un autre appareil », et un garde
 ressusciterait les cartes supprimées à la synchro suivante.
+
+`_syncAllGMData()` est le seul endroit du fichier où la liste des entités campagne-scopées est
+maintenue à la main plutôt que dérivée de `ENT` — elle tourne à chaque `loadFromSupabase()` réussi
+et à la création d'une clé de sauvegarde (`confirmNewKey()`). Une nouvelle entité doit donc y être
+ajoutée explicitement, sinon elle reste locale-only dès que sa synchro par-champ existe. Dans
+`_syncAllGMData()`, à côté des autres `sbPutAll` de la boucle par campagne (après celui de
+`ENT.campaignFile`) :
+
+```js
+        await sbPutAll(ENT.map, _campJSON('maps', cid, []), cid, true);
+```
 
 - [ ] **Step 7: Vérifier**
 
