@@ -329,7 +329,7 @@ par fichier touché (`js/aria-supabase.js`, `js/aria-gm.js`) disant quoi et pour
 
 **Files:**
 - Modify: `views/aria-gm.html` — bouton d'onglet entre `Monstres` et `Jets`, et le
-  `<div class="tab-content" id="tab-map">`
+  `<div class="tab-content map-tab" id="tab-map">`
 - Modify: `js/aria-gm.js` — troisième branche de `_renderGroupBar()`, gestion des cartes,
   `renderMapTab()`
 - Modify: `css/aria-gm.css` — mise en page de l'onglet
@@ -354,7 +354,7 @@ Dans `views/aria-gm.html`, entre les boutons `Monstres` et `Jets` (ligne 115) :
 Et, après le `</div>` du bloc `id="tab-monsters"` :
 
 ```html
-            <div class="tab-content" id="tab-map">
+            <div class="tab-content map-tab" id="tab-map">
                 <div class="map-bar" id="map-group-bar"></div>
                 <div class="map-toolbar" id="map-toolbar"></div>
                 <div class="map-stage" id="map-stage"></div>
@@ -476,9 +476,17 @@ après `renderMonsters();`. Toute mutation de carte rappelle `renderMapTab()` el
 
 Dans `css/aria-gm.css`, en fin de fichier, avant le bloc `body.light-mode` :
 
+Le sélecteur qui pilote `display` doit rester basé sur la classe `.map-tab`, jamais sur
+l'id `#tab-map` : un sélecteur d'ID l'emporterait sur `.tab-content.active:not(.split-primary)
+{ display: none; }` (le repli du moteur de volets sous 900px), laissant un volet Carte non
+prioritaire visible en permanence au lieu de se cacher.
+
 ```css
 /* ─── Carte ─── */
-#tab-map { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+/* display lives on the .map-tab class, not the #tab-map id: an ID selector would
+   also outrank .tab-content.active:not(.split-primary){display:none} at <900px
+   split-mode, leaving a non-primary Carte pane stuck visible. */
+.tab-content.active.map-tab { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .map-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .map-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 /* The stage centres the frame and scrolls if the pane is smaller than the minimum. */
