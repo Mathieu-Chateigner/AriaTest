@@ -72,12 +72,19 @@ function syncCameraWidget(el, widget, live) {
     if (!sid || !live.has(sid)) {
         // Nobody is pushing this stream — show the (invisible) placeholder rather
         // than a black rectangle. Already a placeholder ⇒ nothing to do.
+        console.log('[OVERLAY] camera widget', widget.id, '→ placeholder |',
+            !sid ? 'no streamId configured (pick one in the overlay editor)'
+                 : `streamId ${sid} is not live | live now: ${[...live].join(', ') || '(nobody)'}`);
         if (iframe || !el.firstChild) el.innerHTML = '<div class="ow-camera-empty">—</div>';
         return;
     }
     const src = vdoCamSrc(sid);
-    if (iframe) { if (iframe.src !== src) iframe.src = src; }
-    else el.innerHTML = renderWidgetContent(widget);
+    if (iframe) {
+        if (iframe.src !== src) { console.log('[OVERLAY] camera widget', widget.id, '→ re-src', src.replace(/([?&]password=)[^&]*/, '$1***')); iframe.src = src; }
+    } else {
+        console.log('[OVERLAY] camera widget', widget.id, '→ new iframe', src.replace(/([?&]password=)[^&]*/, '$1***'));
+        el.innerHTML = renderWidgetContent(widget);
+    }
 }
 // Re-src camera widget iframes after the room/password arrive, and swap them for a
 // placeholder when their stream stops. Camera widgets are skipped by
@@ -198,8 +205,24 @@ if (ABLY_KEY) {
         gmLiveStreamId = gmSid;
         vdoRoom = room;
         vdoRoomPassword = pw;
+        console.log('[OVERLAY] presence applied |', members?.length ?? 0, 'members |',
+            'GM:', gm ? 'present' : 'absent (room kept from cache)',
+            '| room:', vdoRoom || '(none — every camera widget stays a placeholder)',
+            '| MJ stream:', gmLiveStreamId || '(none)',
+            '| player streams:', [...presenceCache.values()].map(p => `${p.name}=${p.streamId || '-'}`).join(', ') || '(none)',
+            '| camsChanged:', camsChanged);
         if (camsChanged) refreshCameraWidgets();
     }
+    // Print the whole overlay-side camera path. Type ariaCamDiag() in the OBS browser
+    // source console (right-click the source → Interact is not enough; use the
+    // remote debugger), or just read the presence line above.
+    window.ariaCamDiag = () => {
+        console.log('[OVERLAY] room:', vdoRoom || '(none)', '| password:', vdoRoomPassword ? '(set)' : '(none)',
+            '| MJ stream:', gmLiveStreamId || '(none)', '| live streams:', [...liveStreamIds()].join(', ') || '(none)');
+        console.log('[OVERLAY] camera widgets:', overlayConfig.widgets.filter(w => w.type === 'camera')
+            .map(w => ({ id: w.id, streamId: w.config?.streamId || '(unset)', live: liveStreamIds().has(w.config?.streamId || '') })));
+        return 'see console';
+    };
     // Live monster HP — the GM publishes monster-state on the (campaign-scoped) damage
     // channel, so it must be received here, not on aria-overlay-config.
     dmgCh.subscribe('monster-state', msg => {

@@ -702,6 +702,7 @@ function updateCamerasTabVisibility() {
     const hasAny = camerasAvailable();
     const btn = document.getElementById('tab-btn-cameras');
     if (!btn) return;
+    console.log('[VDO] Caméras tab', hasAny ? 'SHOWN' : 'HIDDEN (no vdoRoom)', '| pane open:', openPanes.includes('tab-cameras'));
     btn.style.display = hasAny ? '' : 'none';
     if (!hasAny && openPanes.includes('tab-cameras')) {
         if (openPanes.length === 1) switchTab('tab-skills');
@@ -854,6 +855,7 @@ function renderPresenceRail() {
         tile._label.textContent = label;
         tile.classList.toggle('spotlit', !!spot && sid === spot);
     });
+    console.log('[VDO] renderPresenceRail |', [...expected].map(([sid, l]) => `${l}=${sid}`).join(', ') || '(no tiles)');
 }
 
 // The stream ID a rendered camera cell is showing, read back off its iframe URL.
@@ -889,7 +891,12 @@ function renderCamerasTab() {
     const warn = document.getElementById('cameras-warning');
     if (warn) {
         let msg = '';
-        if (vdoRoom && !window.isSecureContext) {
+        // file:// is a *secure context* per spec (W3C lists it as potentially
+        // trustworthy), so isSecureContext alone could never detect the case this
+        // warning exists for — it was dead code, and a player opening the page from
+        // disk got no explanation at all. Test the scheme; keep isSecureContext for
+        // the plain-http case, which is a real one (python -m http.server).
+        if (vdoRoom && (location.protocol === 'file:' || !window.isSecureContext)) {
             msg = '⚠ Caméra indisponible : la page doit être servie en HTTPS (page GitHub Pages) — depuis un fichier local le navigateur refuse l’accès webcam. Vous voyez les autres, ils ne vous voient pas.';
         } else if (vdoRoom && cam.off) {
             msg = '📹 Votre caméra est coupée — les autres ne vous voient pas. Bouton 🚫 dans la barre du haut pour rétablir.';
@@ -902,6 +909,7 @@ function renderCamerasTab() {
         }
         warn.textContent = msg;
         warn.style.display = msg ? '' : 'none';
+        if (msg) console.warn('[VDO] cameras warning:', msg);
     }
     // Self tile: a muted viewer of our own pushed stream. The camera itself belongs to
     // #vdo-push-frame; there is no native <video> path. No room or camera cut ⇒ nothing
@@ -1027,6 +1035,11 @@ function renderCamerasTab() {
     grid.querySelectorAll('.camera-cell').forEach(cell =>
         cell.classList.toggle('spotlit', !!spot && cellSid(cell) === spot));
     if (presenceMode === 'tablee') applyStageMain();
+    // What the grid decided to show, and why it might be empty. A tile only exists
+    // for a stream someone advertises, and only while a room is known.
+    console.log('[VDO] renderCamerasTab | self tile:', cam.live() ? cam.streamId() : 'none (' + (cam.off ? 'camera cut' : !vdoRoom ? 'no room' : 'not live') + ')',
+        '| peer/MJ tiles:', [...expected].map(([sid, l]) => `${l}=${sid}`).join(', ') || '(none)',
+        '| cells in DOM:', grid.querySelectorAll('.camera-cell').length);
 }
 
 // Tablée: clicking a face promotes it to the big stage tile (frame 25).
@@ -2406,11 +2419,49 @@ function applyPresenceSet(members) {
         knownPlayers[charId] = { name: d.name };
         if (d.streamId) peerCameras.set(charId, { name: d.name || charId, streamId: d.streamId });
     });
+    // Everything the camera layer depends on arrives here and nowhere else, so this
+    // is the log that says whether the session even has a picture to render: no GM
+    // member ⇒ no room ⇒ nothing is published by anybody, and every downstream
+    // "black tile" question is answered already.
+    console.log('[VDO] presence applied |', members?.length ?? 0, 'members →', byId.size, 'participants |',
+        'GM:', gm ? 'present' : 'ABSENT (no room, no session)',
+        '| room:', vdoRoom || '(none)', vdoRoomPassword ? '(password set)' : '(no password)',
+        '| roomChanged:', roomChanged,
+        '| MJ streamId:', gmStreamId || '(none — MJ not publishing)',
+        '| spotlight:', spotlightCharId || '(none)',
+        '| peers publishing:', [...peerCameras].map(([id, p]) => `${p.name}=${p.streamId}`).join(', ') || '(none)');
     // The room is what decides whether we publish at all, so a change to it changes
     // the stream ID we advertise — say so now rather than leaving receivers to guess.
     if (roomChanged) { cam.syncPushFrame(); sendPresence(); }
     updateCamerasTabVisibility();   // → renderPresenceUI + renderCamerasTab
 }
+
+// One command that prints the whole camera path for this tab: our own publishing
+// state (cam.diag), what the GM told us, who else is publishing, and what is
+// actually rendered right now with the URL of every tile. Type ariaCamDiag() in the
+// console — this is the thing to paste into a bug report.
+window.ariaCamDiag = function () {
+    const tiles = [...document.querySelectorAll('#cameras-grid .camera-cell')].map(c => ({
+        self: !!c.dataset.self, sid: cellSid(c),
+        src: (c.querySelector('iframe')?.src || '(none)').replace(/([?&]password=)[^&]*/, '$1***'),
+    }));
+    const rail = [...document.querySelectorAll('#presence-rail-grid .pr-tile')].map(t => ({
+        label: t._label?.textContent,
+        src: (t._frame?.src || '(none)').replace(/([?&]password=)[^&]*/, '$1***'),
+    }));
+    console.log('[VDO] ── camera diagnostic ─────────────────────────────');
+    console.log('[VDO] me:', cam.diag());
+    console.log('[VDO] session: room=', vdoRoom || '(none)', '| MJ stream=', gmStreamId || '(none)',
+        '| spotlight=', spotlightCharId || '(none)', '| ably=', ablyPresence ? 'connected' : 'NOT CONNECTED',
+        '| campaignKey=', character.campaignKey || '(EMPTY — this character is on the global channels, it will never see a GM on a join code)');
+    console.log('[VDO] peers:', [...peerCameras].map(([id, p]) => `${p.name} → ${p.streamId}`));
+    console.log('[VDO] Caméras tab:', camerasAvailable() ? 'available' : 'hidden (no room)',
+        '| pane open:', openPanes.includes('tab-cameras'), '| mode:', presenceMode);
+    console.log('[VDO] grid tiles:', tiles);
+    console.log('[VDO] rail tiles:', rail);
+    cam.pushStats();
+    return 'see console — cam.pushStats() reply arrives in a moment';
+};
 // Update the Ably status dot and text labels in the topbar and config modal.
 function setAblyStatus(ok) {
     // classList (not className=) so extra classes like .tb-conn-dot on the topbar dot survive.

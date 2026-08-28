@@ -883,9 +883,36 @@ function applyPresenceSet(members) {
         publishGMPresence();
     }
     saveKnownPlayers();
+    // Who the table thinks is publishing. A player with no streamId here is either
+    // camera-off, on file://, or has not received our room yet — the GM card for them
+    // will show the hatched placeholder, not a black rectangle.
+    console.log('[GM] presence applied |', members?.length ?? 0, 'members →', byId.size, 'players |',
+        'room:', currentVdoRoom || '(NONE — nobody can publish; set it in ⚙)',
+        '| online publishers:', [...players].filter(([, p]) => p.online && p.streamId).map(([id, p]) => `${p.name}=${p.streamId}`).join(', ') || '(none)',
+        '| online without a stream:', [...players].filter(([, p]) => p.online && !p.streamId).map(([, p]) => p.name).join(', ') || '(none)');
     clearTimeout(renderPlayerCardsTimer);
     renderPlayerCardsTimer = setTimeout(renderPlayerCards, 150);
 }
+
+// One command that prints the whole GM-side camera path: our own publishing state,
+// the room we are advertising, and every player card's camera decision with its URL.
+// Type ariaCamDiag() in the console.
+window.ariaCamDiag = function () {
+    console.log('[GM] ── camera diagnostic ─────────────────────────────');
+    console.log('[GM] me:', cam.diag());
+    console.log('[GM] session: room=', currentVdoRoom || '(NONE)', '| password=', currentVdoRoomPassword ? '(set)' : '(none)',
+        '| joinCode=', currentJoinCode || '(none)', '| ably=', ablyPresence ? 'connected' : 'NOT CONNECTED',
+        '| spotlight=', gmSpotlightCharId || '(none)', '| Joueurs pane open=', openPanes.includes('tab-players'));
+    console.log('[GM] player cards:', [...players].map(([id, p]) => {
+        const s = _playerCardState(p, id);
+        return { name: p.name, online: s.online, streamId: p.streamId || '(none)',
+                 tile: s.camSrc ? s.camSrc.replace(/([?&]password=)[^&]*/, '$1***')
+                     : !p.streamId ? '(placeholder — player advertises no stream)'
+                     : !s.online ? '(placeholder — player offline)' : '(placeholder — no room set)' };
+    }));
+    cam.pushStats();
+    return 'see console — cam.pushStats() reply arrives in a moment';
+};
 // ═══════════════════════════════════════════
 //  PRESENCE — "Lire la table" + Spotlight (design frame 26)
 // ═══════════════════════════════════════════
@@ -927,6 +954,8 @@ function updateGMPushIframe() {
     // safe to *leave loaded* behind a display:none pane, which keeps its WebRTC
     // connection up. Dropped with the pane; renderTabLayout() rebuilds it on reopen.
     if (!cam.live() || !openPanes.includes('tab-players')) {
+        console.log('[GM] "Votre caméra" preview hidden —',
+            !cam.live() ? (cam.off ? 'camera cut locally' : !currentVdoRoom ? 'no vdoRoom set' : 'not live') : 'Joueurs pane is closed');
         if (wrap.innerHTML) wrap.innerHTML = '';
         section.style.display = 'none';   // nothing published ⇒ no empty preview box
         return;
@@ -2145,7 +2174,12 @@ function saveConfig() {
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     ablyPresence = null; gmPresenceEntered = false;
     if (config.ablyKey) initAbly();   // re-enters presence with the new room
-    cam.acquireLock();
+    // No cam.acquireLock() here. The lock is named after currentCampaignId, which
+    // this modal cannot change, so we already hold it — and acquireLock() *releases*
+    // first, which dropped lockHeld to false for the round-trip of the re-grant. The
+    // updateGMPushIframe() below then ran with lockHeld false, blanked the push frame
+    // and logged "another tab holds the push lock" at the exact moment the GM had
+    // just set the room. Worse, a second GM tab sitting in the queue could take it.
     updateGMPushIframe();
     // Setting or clearing the room changes whether player cards may carry a camera at
     // all. Without this the grid waited for the next presence heartbeat (up to 5s) —

@@ -702,6 +702,11 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
                       onChange = () => {}, announce = () => {} }) {
     let off = false, lockHeld = false, _release = null, _abort = null;
 
+    // Every log line that carries a VDO.ninja URL goes through this: the room
+    // password is enough to join the room and watch the whole table, and these logs
+    // get pasted into bug reports.
+    const _redact = u => String(u).replace(/([?&]password=)[^&]*/, '$1***');
+
     // The stream id is a pure function of the owner UUID, so every tab of one
     // participant derives the same one — which is exactly why only one may push.
     const streamId = () => { const id = ownerId(); return id ? sidPrefix + id.slice(0, 8) : ''; };
@@ -809,22 +814,34 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             if (!frame) { console.warn(tag, 'push frame not found: #' + frameId); return; }
             if (!(live() && lockHeld)) {
                 const why = off ? 'camera cut locally'
-                          : !room() ? 'no vdoRoom'
+                          : !room() ? 'no vdoRoom (the GM has not set one, or its presence has not arrived)'
                           : !ownerId() ? 'nothing open'
                           : 'another tab holds the push lock';
-                console.log(tag, why, '— clearing push iframe');
+                console.log(tag, 'NOT PUSHING —', why, '| clearing push iframe |', cam.diag());
                 cam.blankPushFrame();
                 return;
             }
             // Blank &view: "no streams will play; only publishing will be allowed" —
             // without it the push page joins as a full room client and downloads (and
             // renders) every other guest's video next to the self preview.
-            let src = `https://vdo.ninja/?push=${streamId()}&room=${encodeURIComponent(room())}&view&autostart&webcam&noaudio&cleanoutput`;
+            // &audiodevice=0 — NOT &noaudio. &noaudio is a *viewer-side* option: it
+            // silences incoming streams and does nothing to what we publish, so the
+            // push page kept asking for the microphone. Chrome asks for camera AND
+            // mic in one prompt, and denying it fails getUserMedia outright — the
+            // webcam then never starts and nothing on screen says why. &audiodevice=0
+            // disables the mic before capture, so only the camera is requested.
+            let src = `https://vdo.ninja/?push=${streamId()}&room=${encodeURIComponent(room())}&view&autostart&webcam&audiodevice=0&cleanoutput`;
             if (password()) src += `&password=${encodeURIComponent(password())}`;
-            // Redacted: this log gets pasted into bug reports, and the room password
-            // is enough to join the room and watch every player.
-            console.log(tag, 'push:', src.replace(/([?&]password=)[^&]*/, '$1***'));
-            if (frame.src !== src) frame.src = src;
+            if (frame.src === src) { console.log(tag, 'PUSHING (unchanged):', _redact(src)); return; }
+            console.log(tag, 'PUSHING:', _redact(src));
+            // The load event is the last thing this side can observe by itself.
+            // Everything after it happens inside a cross-origin iframe, so ask
+            // VDO.ninja directly once it has had time to get the webcam.
+            frame.onload = () => {
+                console.log(tag, 'push iframe loaded — requesting VDO.ninja stats in 5s');
+                setTimeout(() => cam.pushStats(), 5000);
+            };
+            frame.src = src;
         },
 
         // Blank the push iframe without touching the kill switch — for leaving a
@@ -833,7 +850,11 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         // would load a second copy of the whole app inside the hidden iframe.
         blankPushFrame() {
             const frame = document.getElementById(frameId);
-            if (frame && frame.src && frame.src !== 'about:blank') frame.src = 'about:blank';
+            if (frame && frame.src && frame.src !== 'about:blank') {
+                console.log(tag, 'push iframe blanked — the webcam is released');
+                frame.onload = null;   // don't run the stats probe against about:blank
+                frame.src = 'about:blank';
+            }
         },
 
         // Sync the 📹 kill-switch button. Hidden while no room is set — nothing is
@@ -846,7 +867,71 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             btn.textContent = off ? '🚫' : '📹';
             btn.title = off ? 'Caméra coupée — cliquer pour rétablir' : 'Couper ma caméra';
         },
+
+        // ── Diagnostics ───────────────────────────────────────────────────────
+        // The picture crosses four boundaries before it exists: the GM's presence
+        // data has to carry a room, this tab has to win the Web Lock, the kill
+        // switch has to be off, and a cross-origin iframe has to actually be granted
+        // the webcam. None of them reports failure back here, and each one failing
+        // looks identical from the outside (a black tile, or no tile). So print every
+        // term at once rather than guessing which one stopped.
+        diag() {
+            const frame = document.getElementById(frameId);
+            return {
+                tag,
+                owner:        ownerId() || '(none — no character/campaign open)',
+                room:         room() || '(none — no picture is possible without it)',
+                password:     password() ? '(set)' : '(none)',
+                killSwitch:   off ? 'CUT — this participant opted out' : 'on',
+                lockHeld:     lockHeld ? 'yes — this tab owns the webcam' : 'no — another tab of this participant is pushing, or the grant has not landed',
+                live:         live(),
+                streamId:     streamId() || '(none)',
+                advertisedId: cam.advertisedId() || '(empty — peers will not open a tile for us)',
+                pushFrame:    !frame ? `(missing #${frameId})`
+                              : (!frame.src || frame.src === 'about:blank') ? '(blank — not publishing)'
+                              : _redact(frame.src),
+                protocol:        location.protocol,
+                isSecureContext: window.isSecureContext,
+                webLocks:        !!navigator.locks,
+                mediaDevices:    !!navigator.mediaDevices,
+            };
+        },
+        logDiag(why) { console.log(tag, 'CAM DIAG' + (why ? ' — ' + why : ''), cam.diag()); },
+
+        // Ask the push iframe what VDO.ninja itself sees. This is the only signal
+        // that crosses the iframe boundary: local state can say "we should be
+        // publishing" while the webcam was never granted, or granted and reaching
+        // nobody. total_outbound_connections in the reply is the number that settles
+        // it. The answer arrives asynchronously on the message listener below.
+        pushStats() {
+            const frame = document.getElementById(frameId);
+            if (!frame?.contentWindow || !frame.src || frame.src === 'about:blank') {
+                console.log(tag, 'pushStats: no push iframe loaded — nothing to ask');
+                return;
+            }
+            console.log(tag, 'pushStats: asking VDO.ninja…');
+            frame.contentWindow.postMessage({ getStats: true }, '*');
+        },
     };
+
+    // What the push iframe reports about itself. VDO.ninja posts its own actions to
+    // the parent window and answers {getStats:true}; both are logged verbatim,
+    // because a device-permission failure inside that iframe is otherwise completely
+    // invisible from here — the app goes on believing it is publishing.
+    window.addEventListener('message', e => {
+        const frame = document.getElementById(frameId);
+        if (!frame || !e.source || e.source !== frame.contentWindow) return;
+        const d = e.data;
+        if (d && d.stats) {
+            const out = d.stats.total_outbound_connections;
+            console.log(tag, 'push stats ←', out === 0 ? 'NOBODY IS RECEIVING THIS STREAM (0 outbound)' : `${out} outbound connection(s)`, d.stats);
+        } else if (d && d.action) {
+            console.log(tag, 'push action ←', d.action, d.value ?? '');
+        } else {
+            console.log(tag, 'push message ←', d);
+        }
+    });
+
     return cam;
 }
 
