@@ -392,6 +392,21 @@ async function runMigration(saveKey, type) {
     }
 }
 
+// ═══════════════════════════════════════════
+//  MAP VISIBILITY
+//  One broadcast reaches every client, so these two decide what each one draws. They
+//  live here because aria-supabase.js is the only file the four pages all load —
+//  aria-shared.js is panels-only. Given how many divergent twins this project has
+//  already paid for, there must be exactly one copy of each rule.
+// ═══════════════════════════════════════════
+
+// What gets drawn in the clear: pin, name, description. A charId is a player's view;
+// null is the table view (GM tab, GM overlay).
+function visiblePois(state, charId) {
+    return (state?.pois || []).filter(p => charId ? (p.discoveredBy || []).includes(charId)
+                                                  : (p.discoveredBy || []).length > 0);
+}
+
 // Load the 100 most recent rolls for a character from Supabase.
 async function loadCharacterRolls(charId) {
     return await sbSelect('character_rolls',

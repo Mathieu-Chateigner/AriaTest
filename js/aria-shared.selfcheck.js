@@ -82,4 +82,28 @@ assert.ok(!rollPassesFilter(plainOk, S('die')));
 assert.ok(rollPassesFilter(die, S('success', 'die')));
 assert.ok(rollPassesFilter(plainFail, S('success', 'fail')));
 
+// ── Map filters (aria-supabase.js) ────────────────────────────────────────────
+// Loaded by all four pages, so both filters are written once. They decide what each
+// spectator sees; a divergence here is a leak on stream.
+const sbSrc = fs.readFileSync(__dirname + '/aria-supabase.js', 'utf8');
+const { visiblePois } =
+    new Function(sbSrc + '\nreturn { visiblePois };')();
+
+const poiA = { id: 'a', name: 'Taverne', x: 10, y: 10, publicDesc: 'ok', discoveredBy: ['alice'], zone: [] };
+const poiB = { id: 'b', name: 'Crypte',  x: 20, y: 20, publicDesc: '',   discoveredBy: ['bob'],   zone: [[0,0],[10,0],[10,10]] };
+const poiC = { id: 'c', name: 'Secret',  x: 30, y: 30, publicDesc: '',   discoveredBy: [],        zone: [] };
+const mapState = { pois: [poiA, poiB, poiC], fog: [], positions: {}, players: {} };
+
+// 1. A player sees only the POIs whose discoveredBy contains them.
+assert.deepStrictEqual(visiblePois(mapState, 'alice').map(p => p.id), ['a']);
+assert.deepStrictEqual(visiblePois(mapState, 'bob').map(p => p.id),   ['b']);
+// 2. The table view (null charId) sees the union of every discovery.
+assert.deepStrictEqual(visiblePois(mapState, null).map(p => p.id), ['a', 'b']);
+// 3. A POI nobody has discovered appears in neither view.
+assert.ok(!visiblePois(mapState, 'alice').some(p => p.id === 'c'));
+assert.ok(!visiblePois(mapState, null).some(p => p.id === 'c'));
+// 4. An empty pois list does not throw.
+assert.deepStrictEqual(visiblePois({ pois: [] }, 'alice'), []);
+assert.deepStrictEqual(visiblePois({ pois: [] }, null), []);
+
 console.log('aria-shared self-check: all assertions passed');
