@@ -2194,7 +2194,14 @@ function initAbly() {
         ablyMap.subscribe('state', msg => {
             // `state` replaces, it never patches: drop what we had and take this.
             mapState = msg.data || null;
+            // The cache follows the state unconditionally, same as the publisher that
+            // sends it: a null state (last map deleted) must clear the cached key too,
+            // not just skip writing it. Otherwise a stale cache outlives the map it
+            // pictures and loadCharacterState() resurrects a deleted map on next load,
+            // with no GM online to correct it. A cached picture of a deleted map is
+            // worse than no picture.
             if (mapState) localStorage.setItem(charKey('map'), JSON.stringify(mapState));
+            else localStorage.removeItem(charKey('map'));
             mapSelectedPoiId = null;
             // An acceptance is recognised by the token having arrived, not by a message.
             if (mapPendingPoiId && mapState?.positions?.[currentCharId] === mapPendingPoiId) mapPendingPoiId = null;
@@ -3146,9 +3153,15 @@ function renderMapTab() {
 // leaves the list — otherwise the place's name would leak through its own note.
 function renderMapNotesDrawer() {
     const list = document.getElementById('map-notes-list');
+    const empty = document.getElementById('map-notes-empty');
     if (!list) return;
     const pois = _mapVisible();
-    if (!pois.length) { clearKeyed(list); fill(list, el('div', { className: 'map-empty', textContent: 'Aucun lieu découvert.' })); return; }
+    // The empty-state message lives as a sibling of #map-notes-list, not inside it —
+    // reconcile() only tracks children it created itself (container._ariaKeyed), so a
+    // message appended as a plain child via fill() was invisible to it: never in `seen`,
+    // never removed, and every later row landed after it. Toggling a sibling keeps
+    // reconcile() the sole owner of the list.
+    if (empty) empty.style.display = pois.length ? 'none' : '';
     // Presence churn (an HP tick, a tab-config change, anyone's saveCurrentCharacter())
     // republishes the map constantly, and this drawer is the writing surface — it was
     // chosen for exactly this reason (spec decision 10). reconcile() keeps each row's
