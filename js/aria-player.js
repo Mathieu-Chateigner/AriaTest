@@ -114,7 +114,10 @@ let ablyMap = null;
 let mapState = null;         // last public map state received (or the cached one)
 let mapSelectedPoiId = null;
 let mapPendingPoiId = null;   // request sent, waiting for the token to move
-let mapDeniedPoiId  = null;   // last refusal, cleared by the next state
+let mapDeniedPoiId  = null;   // last refusal — sticky until the player asks again
+                               // (requestMove() clears it). Deliberate: the GM publishes a
+                               // `state` on every unrelated map edit, and an unseen refusal
+                               // must not be wiped by one before the player has read it.
 let mapNotes = {};   // { poiId: text } — private, never leaves character_state
 
 // ── PRESENCE ──────────────────────────────────────────────────────────────────
@@ -569,7 +572,7 @@ function switchCharacter() {
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     ablyPresence = null; presenceEntered = false;
-    ablyMap = null; mapState = null; mapSelectedPoiId = null; mapNotes = {};
+    ablyMap = null; mapState = null; mapSelectedPoiId = null; mapPendingPoiId = null; mapDeniedPoiId = null; mapNotes = {};
     cam.releaseLock();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     localStorage.removeItem(LAST_CHAR_KEY);   // deliberate exit — don't auto-re-enter

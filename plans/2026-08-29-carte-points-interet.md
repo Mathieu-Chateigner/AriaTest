@@ -1725,7 +1725,9 @@ Dans `applyPresenceSet()`, après `const gm = [...byId.values()].find(d => d.rol
 
 ```js
 let mapPendingPoiId = null;   // request sent, waiting for the token to move
-let mapDeniedPoiId  = null;   // last refusal, cleared by the next state
+let mapDeniedPoiId  = null;   // last refusal, sticky until the player asks again — a `state`
+                               // broadcast (the GM publishes one on every map edit) must not
+                               // wipe a refusal the player hasn't seen yet
 
 function requestMove(poiId) {
     if (!ablyMap || !gmOnline) return;
@@ -1813,10 +1815,16 @@ function denyMove(i) {
 
 - [ ] **Step 6: Afficher le badge et la liste**
 
+`moveRequests.length > 0`, pas `moveRequests.length` — `append()`/`fill()` (aria-shared.js)
+ne sautent que `null`, `undefined`, `false` et `''` ; `0` leur échappe et devient un nœud
+texte `"0"` planté dans la barre d'outils à chaque rendu sans demande en attente (le cas
+courant). Même piège que Task 15 (`(poi.zone || []).length`) — utiliser `> 0` partout où une
+longueur sert de garde à un enfant `el()`.
+
 Dans la barre d'outils de `renderMapTab()`, après `Vue table` :
 
 ```js
-        moveRequests.length && el('details', { className: 'map-queue' },
+        moveRequests.length > 0 && el('details', { className: 'map-queue' },
             el('summary', { textContent: `⚑ ${moveRequests.length}` }),
             el('div', { className: 'map-queue-list' },
                 moveRequests.map((r, i) => el('div', { className: 'map-queue-row' },
@@ -1851,7 +1859,37 @@ function _renderMapTabBadge() {
 .map-move-btn.denied   { border-color: var(--fail); color: var(--fail); }
 ```
 
-- [ ] **Step 8: Vérifier**
+- [ ] **Step 8: Nettoyer au changement de campagne / personnage**
+
+`moveRequests` et le pending/denied state du joueur sont en mémoire, jamais persistés — ils
+doivent être vidés partout où le reste de l'état carte l'est déjà, sinon ils survivent au
+changement.
+
+Dans `js/aria-gm.js`, `switchCampaign()`, à côté de la remise à zéro existante :
+
+```js
+    moveRequests = [];
+    mapSelectedPoiId = null;
+    mapTableView = false;
+    _renderMapTabBadge();
+```
+
+Pas seulement cosmétique côté MJ : une entrée de `moveRequests` qui survit à un changement de
+campagne pointe vers un `charId` de la campagne quittée, et `acceptMove()` appelle
+`mapBringHere(charId, poiId)` sans revérifier l'appartenance — accepter cette entrée écrirait
+l'id d'un joueur d'une autre campagne dans `positions` de la campagne nouvellement ouverte.
+
+Dans `js/aria-player.js`, `switchCharacter()`, sur la ligne qui remet déjà `ablyMap`, `mapState`,
+`mapSelectedPoiId` et `mapNotes` à zéro, ajouter `mapPendingPoiId` et `mapDeniedPoiId` :
+
+```js
+    ablyMap = null; mapState = null; mapSelectedPoiId = null; mapPendingPoiId = null; mapDeniedPoiId = null; mapNotes = {};
+```
+
+Sans ça, une demande en attente ou un refus du personnage précédent suit le joueur sur l'onglet
+Carte d'un autre personnage.
+
+- [ ] **Step 9: Vérifier**
 
 Deux onglets, MJ et joueur.
 
@@ -1859,13 +1897,16 @@ Deux onglets, MJ et joueur.
    désactive ; le MJ voit `⚑1` **sur le bouton d'onglet**, même en étant sur un autre onglet.
 2. Le MJ valide : le jeton du joueur arrive, le bouton du joueur redevient normal et se
    désactive parce qu'il est déjà là. Aucun message d'acceptation n'a circulé.
-3. Le MJ refuse : le bouton du joueur passe à `Refusé` ; le `state` suivant le remet à neuf.
+3. Le MJ refuse : le bouton du joueur passe à `Refusé` et reste cliquable ; un `state` non lié
+   (le MJ édite autre chose sur la carte) ne le remet PAS à neuf — c'est délibéré, un refus ne
+   doit pas s'effacer avant d'avoir été vu. Cliquer à nouveau sur `Refusé` relance une demande
+   (`requestMove()` efface `mapDeniedPoiId`).
 4. Le MJ ferme son onglet : côté joueur le bouton devient `MJ absent` et est désactivé,
    dans les 15 s (délai de purge de la présence Ably).
 5. Le joueur demande deux fois de suite : une seule ligne dans la file.
 6. Deux joueurs demandent : deux lignes, chacune avec son couple ✓ / ✕.
 
-- [ ] **Step 9: Mettre à jour `commits`**
+- [ ] **Step 10: Mettre à jour `commits`**
 
 Première ligne : `feat: demandes de deplacement validees par le MJ`.
 
@@ -2339,7 +2380,7 @@ Dans `_poiCard(m, poi)`, avant la parenthèse fermante :
             el('button', { className: 'gm-btn ghost',
                 textContent: (poi.zone || []).length ? 'Modifier la zone' : 'Tracer une zone',
                 onclick: () => startZoneEdit(poi.id) }),
-            (poi.zone || []).length && el('button', { className: 'gm-btn ghost', textContent: 'Effacer la zone',
+            (poi.zone || []).length > 0 && el('button', { className: 'gm-btn ghost', textContent: 'Effacer la zone',
                 onclick: () => clearZone(poi.id) }))
 ```
 

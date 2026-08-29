@@ -607,6 +607,14 @@ function switchCampaign() {
     ablyInstance = null;
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyMap = null;
     ablyPresence = null; gmPresenceEntered = false;
+    // moveRequests is in-memory only, never persisted — a stale entry surviving the switch
+    // would carry a charId from the campaign just left, and acceptMove() doesn't re-check
+    // membership before calling mapBringHere(), so accepting it would write a foreign id
+    // into the new campaign's positions.
+    moveRequests = [];
+    mapSelectedPoiId = null;
+    mapTableView = false;
+    _renderMapTabBadge();
     players.clear();
     // Emptying the Map is not enough — nothing re-renders the grid on this path
     // (renderTabLayout doesn't touch player cards), so #players-grid kept live
