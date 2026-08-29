@@ -110,6 +110,9 @@ let pendingSecondaryRoll = null; // { callback, mapFn } for non-d100 dice (d6, d
 let dddiceRollSafetyTimer = null; // fallback timer in case RollFinished never fires
 let ablyRolls = null, ablyCards = null, ablyDamage = null, ablyMusic = null, ablyRollsHidden = null;
 let ablyPresence = null;     // the aria-presence channel — its presence set IS the roster
+let ablyMap = null;
+let mapState = null;         // last public map state received (or the cached one)
+let mapSelectedPoiId = null;
 
 // ── PRESENCE ──────────────────────────────────────────────────────────────────
 // Who is here is not something this app computes. Every participant enters the
@@ -276,6 +279,7 @@ const CHAR_KEYS = {
     rolls:  'aria-player-rolls-',
     tabs:   'aria-player-tabs-',
     camera: 'aria-camera-off-',
+    map:    'aria-map-',
 };
 const _CHAR_KEY_PREFIXES = Object.values(CHAR_KEYS);
 
@@ -412,6 +416,7 @@ function loadCharacterState(id) {
     if (character.karma === undefined) character.karma = 0;
     deck.load(JSON.parse(localStorage.getItem(cardKey()) || 'null'));
     playerRollHistory = JSON.parse(localStorage.getItem(charKey('rolls', id)) || '[]');
+    mapState = _charJSON('map', id, null);
     console.log('[PLAYER] loadCharacterState:', data.name, '| class:', data.class, '| charId:', id, '| campaignKey:', data.campaignKey || 'none', '| ariaType:', data.ariaType || 'ancient', '| skills:', (data.skills || []).length, '| potionRecipes:', (data.potionRecipes || []).length);
     return true;
 }
@@ -556,6 +561,7 @@ function switchCharacter() {
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     ablyPresence = null; presenceEntered = false;
+    ablyMap = null; mapState = null; mapSelectedPoiId = null;
     cam.releaseLock();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     localStorage.removeItem(LAST_CHAR_KEY);   // deliberate exit — don't auto-re-enter
@@ -671,6 +677,8 @@ function applyTabVisibility() {
     btnCards.style.display = playerTabs.cards ? '' : 'none';
     btnAlchemy.style.display = playerTabs.alchemy ? '' : 'none';
     if (btnFiles) btnFiles.style.display = playerFiles.length > 0 ? '' : 'none';
+    const btnMap = document.getElementById('tab-btn-map');
+    if (btnMap) btnMap.style.display = (mapState && mapState.imageUrl) ? '' : 'none';
     // If the currently active tab was just hidden, fall back to Compétences
     if (!playerTabs.cards && document.getElementById('tab-cards').classList.contains('active')) {
         switchTab('tab-skills', document.querySelector('.tab-btn'));
@@ -681,6 +689,9 @@ function applyTabVisibility() {
     if (!playerFiles.length && document.getElementById('tab-files')?.classList.contains('active')) {
         switchTab('tab-skills', document.querySelector('.tab-btn'));
     }
+    if (!(mapState && mapState.imageUrl) && document.getElementById('tab-map')?.classList.contains('active')) {
+        switchTab('tab-skills', document.querySelector('.tab-btn'));
+    }
     renderInventoryEditor();
     updateCamerasTabVisibility();
     const btnStats = document.getElementById('tab-btn-stats');
@@ -688,6 +699,7 @@ function applyTabVisibility() {
         const isContemporary = character.ariaType === 'contemporary';
         btnStats.style.display = isContemporary ? 'none' : '';
     }
+    renderMapTab();
     renderTabLayout(); // re-assert layout / prune panes whose tab was just hidden
 }
 
@@ -2165,6 +2177,17 @@ function initAbly() {
                 musicIsPlaying = true;
             }
         });
+        ablyMap = ablyInstance.channels.get(campaignChannel('aria-map'));
+        ablyMap.subscribe('state', msg => {
+            // `state` replaces, it never patches: drop what we had and take this.
+            mapState = msg.data || null;
+            if (mapState) localStorage.setItem(charKey('map'), JSON.stringify(mapState));
+            mapSelectedPoiId = null;
+            applyTabVisibility();   // → renderMapTab, and shows the tab on first arrival
+            renderMapTab();
+        });
+        // Covers arriving late: the GM answers a request with the whole state.
+        ablyMap.publish('request', {});
         ablyInstance.connection.on('connected',    () => { console.log('[PLAYER] Ably connected'); setAblyStatus(true); sendPresence(); });
         ablyInstance.connection.on('failed',       () => { console.error('[PLAYER] Ably connection FAILED'); setAblyStatus(false); });
         ablyInstance.connection.on('disconnected', () => console.warn('[PLAYER] Ably disconnected'));
@@ -3008,6 +3031,67 @@ function renderPlayerFiles() {
             el('div', { className: 'pf-name', textContent: f.name }),
             el('button', { className: 'pf-open-btn', textContent: 'Ouvrir', onclick: () => fileViewer.open(f.id) })));
     });
+}
+
+// ═══════════════════════════════════════════
+//  CARTE
+// ═══════════════════════════════════════════
+
+// The POIs this character may see. One definition, shared with the GM tab and both
+// overlays — see visiblePois() in aria-supabase.js.
+function _mapVisible() { return visiblePois(mapState, currentCharId); }
+
+// Tokens standing on one POI, as { charId, name, isMe }. Other players' tokens fall out
+// for free: we only render POIs we know, so a player standing somewhere we don't know has
+// nowhere to be drawn.
+function _mapTokensAt(poiId) {
+    const pos = mapState?.positions || {};
+    return Object.keys(pos)
+        .filter(cid => pos[cid] === poiId)
+        .map(cid => ({ charId: cid, name: cid === currentCharId ? 'Vous' : (mapState.players?.[cid] || '?'),
+                       isMe: cid === currentCharId }));
+}
+
+function renderMapTab() {
+    const stage = document.getElementById('map-stage');
+    const title = document.getElementById('map-title');
+    if (!stage || !title) return;
+    if (!mapState || !mapState.imageUrl) { title.textContent = ''; fill(stage); return; }
+    title.textContent = mapState.name || '';
+
+    const pins = el('div', { className: 'map-pins' });
+    _mapVisible().forEach(p => {
+        pins.append(el('div', {
+            className: 'map-pin discovered' + (p.id === mapSelectedPoiId ? ' selected' : ''),
+            style: { left: p.x + '%', top: p.y + '%' },
+            onclick: () => { mapSelectedPoiId = mapSelectedPoiId === p.id ? null : p.id; renderMapTab(); },
+        },
+            el('span', { className: 'map-pin-dot' }),
+            el('span', { className: 'map-pin-label', textContent: p.name }),
+            el('div', { className: 'map-tokens' },
+                _mapTokensAt(p.id).map(t => el('span', {
+                    className: 'map-token' + (t.isMe ? ' me' : ''), textContent: t.name })))));
+    });
+
+    const sel = _mapVisible().find(p => p.id === mapSelectedPoiId) || null;
+    fill(stage, el('div', { className: 'aria-frame', id: 'map-frame' },
+        el('img', { className: 'aria-map', src: mapState.imageUrl, alt: mapState.name || '', draggable: false }),
+        pins,
+        sel && _poiCardPlayer(sel)));
+
+    document.getElementById('map-frame')?.addEventListener('click', e => {
+        if (e.target.closest('.map-pin') || e.target.closest('.map-poi-card')) return;
+        if (mapSelectedPoiId) { mapSelectedPoiId = null; renderMapTab(); }
+    });
+}
+
+// The floating card READS; the drawer writes. A floating card closes on an outside click,
+// and a player is not made to type into a volatile container — see Task 10 for the drawer.
+function _poiCardPlayer(poi) {
+    return el('div', { className: 'map-poi-card' + (poi.x > 55 ? ' left' : ''),
+                       style: { left: poi.x + '%', top: poi.y + '%' } },
+        el('div', { className: 'map-poi-title', textContent: poi.name }),
+        poi.publicDesc && el('div', { className: 'map-poi-desc', textContent: poi.publicDesc }));
 }
 
 

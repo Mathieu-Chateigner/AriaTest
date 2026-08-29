@@ -199,6 +199,7 @@
                 <button class="tab-btn" id="tab-btn-cards" data-tab="tab-cards" onclick="switchTab('tab-cards',this)">Cartes</button>
                 <button class="tab-btn" id="tab-btn-alchemy" data-tab="tab-alchemy" onclick="switchTab('tab-alchemy',this)">Alchimie</button>
                 <button class="tab-btn" id="tab-btn-files" data-tab="tab-files" style="display:none;" onclick="switchTab('tab-files',this)">Documents</button>
+                <button class="tab-btn" id="tab-btn-map" data-tab="tab-map" style="display:none;" onclick="switchTab('tab-map',this)">Carte</button>
                 <button class="tab-btn" id="tab-btn-cameras" data-tab="tab-cameras" style="display:none;" onclick="switchTab('tab-cameras',this)">Caméras</button>
                 <button class="tab-btn" data-tab="tab-char" onclick="switchTab('tab-char',this)">Personnage</button>
             </div>
@@ -367,6 +368,12 @@
             <div class="tab-content" id="tab-files">
                 <div class="player-files-list" id="player-files-list"></div>
                 <div class="alchemy-empty" id="player-files-empty">Aucun document disponible.</div>
+            </div>
+
+            <!-- CARTE -->
+            <div class="tab-content map-tab" id="tab-map">
+                <div class="map-title" id="map-title"></div>
+                <div class="map-stage" id="map-stage"></div>
             </div>
 
             <!-- CAMERAS -->

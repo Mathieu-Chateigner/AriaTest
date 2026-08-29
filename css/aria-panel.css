@@ -637,3 +637,9 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
                 box-shadow: 0 8px 24px rgba(0,0,0,.6); }
 .map-poi-card.left { transform: translate(calc(-100% - 18px), -50%); }
 .map-poi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--parchment-dim); }
+
+/* Tokens under a pin — one per character standing there. Shared with the GM tab
+   (task 9); the GM has no ".me" variant, since it has no character of its own. */
+.map-tokens { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.map-token { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+             padding: 1px 7px; font-size: 10px; color: var(--parchment); white-space: nowrap; }
