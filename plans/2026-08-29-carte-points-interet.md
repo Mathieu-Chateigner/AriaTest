@@ -1131,9 +1131,18 @@ diffusion : `publishMapState();`
 
 - [ ] **Step 5: Démonter à la sortie de campagne**
 
+Deux sites, pas un seul : `switchCampaign()` **et** `saveConfig()` ferment tous deux
+`ablyInstance` puis relancent `initAbly()` — `saveConfig()` compte autant que
+`switchCampaign()`, sinon `ablyMap` reste pointé sur un canal lié à une connexion déjà
+fermée pendant tout l'intervalle entre le `close()` et le prochain `initAbly()`.
+
 Dans `switchCampaign()`, ajouter `ablyMap = null;` à la ligne qui remet les canaux à `null`
 (à côté de `ablyMusic = null;`). L'ordre importe : `ablyInstance.close()` d'abord, comme
 aujourd'hui.
+
+Dans `saveConfig()`, même ajout à la ligne équivalente (`ablyInstance = null; ablyRolls =
+null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;`), juste
+avant le `if (config.ablyKey) initAbly();` qui la suit.
 
 - [ ] **Step 6: Rediffuser quand le roster bouge**
 

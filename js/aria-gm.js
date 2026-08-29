@@ -2220,7 +2220,7 @@ function saveConfig() {
     // Close the old Ably connection before reinit — nulling the refs without closing
     // leaves the old WebSocket subscribed, duplicating every incoming roll/presence.
     if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
-    ablyInstance = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
+    ablyInstance = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyMap = null;
     if (config.dddiceKey && config.dddiceRoom) initDddice();
     ablyPresence = null; gmPresenceEntered = false;
     if (config.ablyKey) initAbly();   // re-enters presence with the new room
