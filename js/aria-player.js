@@ -113,6 +113,7 @@ let ablyPresence = null;     // the aria-presence channel — its presence set I
 let ablyMap = null;
 let mapState = null;         // last public map state received (or the cached one)
 let mapSelectedPoiId = null;
+let mapNotes = {};   // { poiId: text } — private, never leaves character_state
 
 // ── PRESENCE ──────────────────────────────────────────────────────────────────
 // Who is here is not something this app computes. Every participant enters the
@@ -195,6 +196,7 @@ function _charStateRow(charId) {
         hp:    hp !== null ? parseInt(hp) : null,
         cards: _charJSON('cards', charId),
         tabs:  _charJSON('tabs', charId),
+        map_notes: _charJSON('mapNotes', charId, {}),
         updated_at: _nowISO(),
     };
 }
@@ -280,6 +282,7 @@ const CHAR_KEYS = {
     tabs:   'aria-player-tabs-',
     camera: 'aria-camera-off-',
     map:    'aria-map-',
+    mapNotes: 'aria-map-notes-',
 };
 const _CHAR_KEY_PREFIXES = Object.values(CHAR_KEYS);
 
@@ -338,6 +341,7 @@ async function loadFromSupabase() {
             if (s.hp !== null && s.hp !== undefined) localStorage.setItem(charKey('hp', s.character_id), s.hp);
             if (s.cards) localStorage.setItem(charKey('cards', s.character_id), JSON.stringify(s.cards));
             if (s.tabs)  localStorage.setItem(charKey('tabs',  s.character_id), JSON.stringify(s.tabs));
+            if (s.map_notes) localStorage.setItem(charKey('mapNotes', s.character_id), JSON.stringify(s.map_notes));
         });
 
         _storeByParent('notes', ENT.characterNote, notes, 'character_id');
@@ -417,6 +421,7 @@ function loadCharacterState(id) {
     deck.load(JSON.parse(localStorage.getItem(cardKey()) || 'null'));
     playerRollHistory = JSON.parse(localStorage.getItem(charKey('rolls', id)) || '[]');
     mapState = _charJSON('map', id, null);
+    mapNotes = _charJSON('mapNotes', id, {}) || {};
     console.log('[PLAYER] loadCharacterState:', data.name, '| class:', data.class, '| charId:', id, '| campaignKey:', data.campaignKey || 'none', '| ariaType:', data.ariaType || 'ancient', '| skills:', (data.skills || []).length, '| potionRecipes:', (data.potionRecipes || []).length);
     return true;
 }
@@ -561,7 +566,7 @@ function switchCharacter() {
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} ablyInstance = null; }
     ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
     ablyPresence = null; presenceEntered = false;
-    ablyMap = null; mapState = null; mapSelectedPoiId = null;
+    ablyMap = null; mapState = null; mapSelectedPoiId = null; mapNotes = {};
     cam.releaseLock();   // before resetCameraState: it blanks the push iframe
     resetCameraState();
     localStorage.removeItem(LAST_CHAR_KEY);   // deliberate exit — don't auto-re-enter
@@ -3052,6 +3057,16 @@ function _mapTokensAt(poiId) {
                        isMe: cid === currentCharId }));
 }
 
+let _mapNoteTimer = null;
+// Auto-save a map note. localStorage is the runtime truth; character_state is the
+// persistence layer, reached through the same debounced state sync as HP and tabs.
+function saveMapNote(poiId, text) {
+    mapNotes[poiId] = text;
+    localStorage.setItem(charKey('mapNotes'), JSON.stringify(mapNotes));
+    clearTimeout(_mapNoteTimer);
+    _mapNoteTimer = setTimeout(() => debouncedSyncState(), 500);
+}
+
 function renderMapTab() {
     const stage = document.getElementById('map-stage');
     const title = document.getElementById('map-title');
@@ -3064,7 +3079,14 @@ function renderMapTab() {
         pins.append(el('div', {
             className: 'map-pin discovered' + (p.id === mapSelectedPoiId ? ' selected' : ''),
             style: { left: p.x + '%', top: p.y + '%' },
-            onclick: () => { mapSelectedPoiId = mapSelectedPoiId === p.id ? null : p.id; renderMapTab(); },
+            onclick: () => {
+                mapSelectedPoiId = mapSelectedPoiId === p.id ? null : p.id;
+                renderMapTab();
+                // The card reads, the drawer writes: clicking a pin unfolds the drawer and
+                // puts the caret on that POI's row.
+                const dr = document.getElementById('map-notes-drawer');
+                if (dr && mapSelectedPoiId) { dr.open = true; document.getElementById('map-note-' + p.id)?.focus(); }
+            },
         },
             el('span', { className: 'map-pin-dot' }),
             el('span', { className: 'map-pin-label', textContent: p.name }),
@@ -3083,6 +3105,22 @@ function renderMapTab() {
         if (e.target.closest('.map-pin') || e.target.closest('.map-poi-card')) return;
         if (mapSelectedPoiId) { mapSelectedPoiId = null; renderMapTab(); }
     });
+
+    renderMapNotesDrawer();
+}
+
+// The grouping view AND the only writing surface. One row per DISCOVERED POI: it is
+// filtered by _mapVisible(), so if the GM takes a discovery back the note stays stored but
+// leaves the list — otherwise the place's name would leak through its own note.
+function renderMapNotesDrawer() {
+    const list = document.getElementById('map-notes-list');
+    if (!list) return;
+    const pois = _mapVisible();
+    if (!pois.length) { fill(list, el('div', { className: 'map-empty', textContent: 'Aucun lieu découvert.' })); return; }
+    fill(list, pois.map(p => el('div', { className: 'map-note-row' },
+        el('span', { className: 'map-note-name', textContent: p.name }),
+        el('input', { className: 'map-note-input', id: 'map-note-' + p.id, value: mapNotes[p.id] || '',
+            placeholder: 'Ma note', oninput: e => saveMapNote(p.id, e.target.value) }))));
 }
 
 // The floating card READS; the drawer writes. A floating card closes on an outside click,
@@ -3091,7 +3129,9 @@ function _poiCardPlayer(poi) {
     return el('div', { className: 'map-poi-card' + (poi.x > 55 ? ' left' : ''),
                        style: { left: poi.x + '%', top: poi.y + '%' } },
         el('div', { className: 'map-poi-title', textContent: poi.name }),
-        poi.publicDesc && el('div', { className: 'map-poi-desc', textContent: poi.publicDesc }));
+        poi.publicDesc && el('div', { className: 'map-poi-desc', textContent: poi.publicDesc }),
+        mapNotes[poi.id] && el('div', { className: 'map-poi-label', textContent: 'Ma note' }),
+        mapNotes[poi.id] && el('div', { className: 'map-poi-mynote', textContent: mapNotes[poi.id] }));
 }
 
 
