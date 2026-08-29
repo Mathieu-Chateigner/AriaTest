@@ -2085,8 +2085,10 @@ Dans `js/aria-shared.selfcheck.js`, sous les assertions de `visiblePois`, et en 
 ```js
 // state.pois carries what at least one player discovered, state.fog what nobody did but
 // which has a zone. fogZones() recomposes, per spectator, the set of black districts.
+// poiC must be in this state (not just declared) for assertion 7 to mean anything — without
+// it, "c does not appear" is true by construction and the assertion cannot fail.
 const fogState = {
-    pois: [poiA, poiB],                            // a: alice, b: bob (b has a zone)
+    pois: [poiA, poiB, poiC],                       // a: alice, b: bob (zone), c: nobody, no zone
     fog:  [{ id: 'd', zone: [[50,50],[60,50],[60,60]] }],   // nobody discovered d
 };
 // 5. A POI nobody discovered, with a zone, is in the fog.

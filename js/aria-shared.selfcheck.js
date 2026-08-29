@@ -109,7 +109,7 @@ assert.deepStrictEqual(visiblePois({ pois: [] }, null), []);
 // state.pois carries what at least one player discovered, state.fog what nobody did but
 // which has a zone. fogZones() recomposes, per spectator, the set of black districts.
 const fogState = {
-    pois: [poiA, poiB],                            // a: alice, b: bob (b has a zone)
+    pois: [poiA, poiB, poiC],                       // a: alice, b: bob (zone), c: nobody, no zone
     fog:  [{ id: 'd', zone: [[50,50],[60,50],[60,60]] }],   // nobody discovered d
 };
 // 5. A POI nobody discovered, with a zone, is in the fog.
@@ -124,7 +124,12 @@ assert.ok(!fogZones(fogState, 'alice').some(z => z.id === 'c'));
 // 8. No fog entry carries a name or a description. This is the assertion that guards the
 //    "geometry only" rule: a player must be able to draw a black district without
 //    learning anything about what is in it.
-for (const z of fogZones(fogState, 'alice')) {
+const aliceFog = fogZones(fogState, 'alice');
+// Non-empty on purpose: a loop over an empty array would pass vacuously, the exact failure
+// mode assertion 7 just had. Alice's fog must hold d (nobody found it) and b (Bob did,
+// she did not).
+assert.strictEqual(aliceFog.length, 2);
+for (const z of aliceFog) {
     assert.deepStrictEqual(Object.keys(z).sort(), ['id', 'zone']);
     assert.strictEqual(z.name, undefined);
     assert.strictEqual(z.publicDesc, undefined);
