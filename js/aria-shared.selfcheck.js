@@ -86,8 +86,8 @@ assert.ok(rollPassesFilter(plainFail, S('success', 'fail')));
 // Loaded by all four pages, so both filters are written once. They decide what each
 // spectator sees; a divergence here is a leak on stream.
 const sbSrc = fs.readFileSync(__dirname + '/aria-supabase.js', 'utf8');
-const { visiblePois } =
-    new Function(sbSrc + '\nreturn { visiblePois };')();
+const { visiblePois, fogZones } =
+    new Function(sbSrc + '\nreturn { visiblePois, fogZones };')();
 
 const poiA = { id: 'a', name: 'Taverne', x: 10, y: 10, publicDesc: 'ok', discoveredBy: ['alice'], zone: [] };
 const poiB = { id: 'b', name: 'Crypte',  x: 20, y: 20, publicDesc: '',   discoveredBy: ['bob'],   zone: [[0,0],[10,0],[10,10]] };
@@ -105,5 +105,29 @@ assert.ok(!visiblePois(mapState, null).some(p => p.id === 'c'));
 // 4. An empty pois list does not throw.
 assert.deepStrictEqual(visiblePois({ pois: [] }, 'alice'), []);
 assert.deepStrictEqual(visiblePois({ pois: [] }, null), []);
+
+// state.pois carries what at least one player discovered, state.fog what nobody did but
+// which has a zone. fogZones() recomposes, per spectator, the set of black districts.
+const fogState = {
+    pois: [poiA, poiB],                            // a: alice, b: bob (b has a zone)
+    fog:  [{ id: 'd', zone: [[50,50],[60,50],[60,60]] }],   // nobody discovered d
+};
+// 5. A POI nobody discovered, with a zone, is in the fog.
+assert.ok(fogZones(fogState, 'alice').some(z => z.id === 'd'));
+assert.ok(fogZones(fogState, null).some(z => z.id === 'd'));
+// 6. A POI Bob discovered and Alice did not is in Alice's fog, not in Bob's.
+assert.ok(fogZones(fogState, 'alice').some(z => z.id === 'b'));
+assert.ok(!fogZones(fogState, 'bob').some(z => z.id === 'b'));
+// 7. An undiscovered POI WITHOUT a zone shows up nowhere — neither clear nor fogged.
+assert.ok(!visiblePois(fogState, 'alice').some(p => p.id === 'c'));
+assert.ok(!fogZones(fogState, 'alice').some(z => z.id === 'c'));
+// 8. No fog entry carries a name or a description. This is the assertion that guards the
+//    "geometry only" rule: a player must be able to draw a black district without
+//    learning anything about what is in it.
+for (const z of fogZones(fogState, 'alice')) {
+    assert.deepStrictEqual(Object.keys(z).sort(), ['id', 'zone']);
+    assert.strictEqual(z.name, undefined);
+    assert.strictEqual(z.publicDesc, undefined);
+}
 
 console.log('aria-shared self-check: all assertions passed');

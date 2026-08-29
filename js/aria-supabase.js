@@ -407,6 +407,15 @@ function visiblePois(state, charId) {
                                                   : (p.discoveredBy || []).length > 0);
 }
 
+// What gets drawn in black: geometry, no text. state.fog holds the POIs nobody has
+// discovered (id + zone, nothing else); the rest are POIs someone else found and this
+// spectator has not. Both end up as { id, zone } — mapping is what strips the name.
+function fogZones(state, charId) {
+    const mine = new Set(visiblePois(state, charId).map(p => p.id));
+    return [...(state?.fog || []), ...(state?.pois || []).filter(p => p.zone?.length && !mine.has(p.id))]
+           .map(p => ({ id: p.id, zone: p.zone }));
+}
+
 // Load the 100 most recent rolls for a character from Supabase.
 async function loadCharacterRolls(charId) {
     return await sbSelect('character_rolls',

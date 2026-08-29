@@ -992,7 +992,7 @@ assert.deepStrictEqual(visiblePois({ pois: [] }, null), []);
 node js/aria-shared.selfcheck.js
 ```
 
-Attendu : `TypeError: visiblePois is not a function`.
+Attendu : `ReferenceError: visiblePois is not defined` (pas `TypeError` — le `return { visiblePois }` du `new Function(...)` référence le nom avant tout appel, donc c'est une erreur de résolution, pas un appel sur une valeur non-fonction).
 
 - [ ] **Step 3: Écrire les fonctions**
 
@@ -2114,7 +2114,7 @@ for (const z of fogZones(fogState, 'alice')) {
 node js/aria-shared.selfcheck.js
 ```
 
-Attendu : `TypeError: fogZones is not a function`.
+Attendu : `ReferenceError: fogZones is not defined` (même cause qu'à la tâche 6 : le `return { visiblePois, fogZones }` référence le nom avant tout appel).
 
 - [ ] **Step 3: Écrire la fonction**
 
