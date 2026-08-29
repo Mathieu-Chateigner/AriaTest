@@ -1806,6 +1806,14 @@
 .map-poi-disc  { display: flex; flex-wrap: wrap; gap: 6px; }
 .map-poi-check { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--parchment); }
 .map-poi-bring { display: flex; flex-wrap: wrap; gap: 4px; }
+.map-poi-zone { display: flex; gap: 4px; }
+/* Zone tracing overlay: vertex handles over the map frame, GM-only. */
+.map-zone-edit { position: absolute; inset: 0; z-index: 3; }
+.zone-vertex { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+               border-radius: 50%; background: var(--gold-light); border: 1px solid var(--bg);
+               cursor: grab; touch-action: none; }
+.zone-vertex.first { background: var(--success); }
+.map-zone-hint { font-size: 11px; color: var(--parchment-dim); }
 .map-queue > summary { cursor: pointer; color: var(--gold-light); font-size: 12px; }
 .map-queue-list { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
 .map-queue-row  { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--parchment); }

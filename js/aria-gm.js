@@ -82,6 +82,8 @@ let mapSelectedPoiId = null;   // POI whose floating card is open (GM tab only)
 let mapTableView = false;      // preview what the table sees, through the very same filter
 let moveRequests = [];   // [{ charId, charName, poiId }] — persistent badge, not a toast:
                          // the GM may be looking elsewhere for ten minutes.
+let zoneEditPoiId = null;   // POI whose zone is being traced
+let zoneDraft = [];         // vertices placed so far, in percentages
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -668,6 +670,14 @@ function initApp() {
     applyReadTable();
     if (!gmClickHandlerRegistered) {
         document.addEventListener('click', e => { if (!e.target.closest('.gm-select')) closeAllSelects(); });
+        // Suppr removes the last placed vertex while a zone trace is in progress. Registered
+        // here, once, alongside the click handler above — not inside renderMapTab(), which
+        // runs on every map mutation and would stack a new listener each time.
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Delete' || !zoneEditPoiId) return;
+            zoneDraft.pop();
+            renderMapTab();
+        });
         gmClickHandlerRegistered = true;
     }
     const campaigns = getCampaigns();
@@ -3336,6 +3346,37 @@ function mapToggleDiscovered(poiId, charId) {
     renderMapTab();
 }
 
+// Zone tracing commands. A zone belongs to its POI (poi.zone) — there is no independent
+// zone object, so starting/closing/cancelling a trace only ever touches that one field.
+function startZoneEdit(poiId) {
+    const m = _activeMap(); if (!m) return;
+    zoneEditPoiId = poiId;
+    zoneDraft = [...(m.pois.find(p => p.id === poiId)?.zone || [])];
+    renderMapTab();
+}
+
+// Close the polygon: three vertices is the minimum that encloses anything.
+function closeZone() {
+    const m = _activeMap();
+    const poi = m?.pois.find(p => p.id === zoneEditPoiId);
+    if (!poi) return;
+    if (zoneDraft.length < 3) { alert('Une zone demande au moins trois sommets.'); return; }
+    poi.zone = zoneDraft;
+    zoneEditPoiId = null; zoneDraft = [];
+    saveMaps();
+    renderMapTab();
+}
+
+function cancelZoneEdit() { zoneEditPoiId = null; zoneDraft = []; renderMapTab(); }
+
+function clearZone(poiId) {
+    const m = _activeMap();
+    const poi = m?.pois.find(p => p.id === poiId); if (!poi) return;
+    poi.zone = [];
+    saveMaps();
+    renderMapTab();
+}
+
 // Accept/refuse a pending move request. There is no acceptance message: mapBringHere()
 // saves and republishes state, and the moved token is the answer. A refusal is the only
 // outcome that needs to be said, since nothing else would show it to the player.
@@ -3420,6 +3461,50 @@ function _mapDragPin(e, poi) {
     pin.addEventListener('pointercancel', end);
 }
 
+// The tracing layer: click to place a vertex, click the first vertex to close, drag a
+// vertex to correct it, Suppr to remove the last one.
+function _zoneEditLayer() {
+    const layer = el('div', { className: 'map-zone-edit' });
+    zoneDraft.forEach(([x, y], i) => {
+        layer.append(el('div', {
+            className: 'zone-vertex' + (i === 0 ? ' first' : ''),
+            style: { left: x + '%', top: y + '%' },
+            onpointerdown: e => {
+                e.stopPropagation();
+                if (i === 0 && zoneDraft.length >= 3) { closeZone(); return; }
+                _zoneDragVertex(e, i);
+            },
+        }));
+    });
+    return layer;
+}
+
+// Same pointer pattern as _mapDragPin: one shared teardown for pointerup AND pointercancel
+// (a drag that ends abnormally — touch-scroll takeover, alt-tab — fires neither pointerup nor
+// click, and would otherwise leak a listener pair), plus an isConnected bail-out in onMove for
+// a re-render that detaches this node mid-drag (Suppr / closeZone / an incoming Ably state).
+function _zoneDragVertex(e, i) {
+    e.preventDefault();
+    const frame = document.getElementById('map-frame');
+    const node = e.currentTarget;
+    node.setPointerCapture(e.pointerId);
+    const onMove = ev => {
+        if (!node.isConnected) return;
+        const { x, y } = _mapPct(ev, frame);
+        zoneDraft[i] = [x, y];
+        node.style.left = x + '%'; node.style.top = y + '%';
+    };
+    const end = () => {
+        node.removeEventListener('pointermove', onMove);
+        node.removeEventListener('pointerup', end);
+        node.removeEventListener('pointercancel', end);
+        renderMapTab();
+    };
+    node.addEventListener('pointermove', onMove);
+    node.addEventListener('pointerup', end);
+    node.addEventListener('pointercancel', end);
+}
+
 // The floating POI card. It anchors beside the selected pin and never on top of it: past
 // 55% of the width it flips to the left side. The three text layers are the whole point —
 // gmNote is the one that must never leave this panel.
@@ -3451,7 +3536,13 @@ function _poiCard(m, poi) {
                 textContent: pl.name || pl.charId,
                 // One button per player, no drag and drop: this is the most frequent action
                 // in play, it has to be one click and no aiming.
-                onclick: () => mapBringHere(pl.charId, poi.id) }))));
+                onclick: () => mapBringHere(pl.charId, poi.id) }))),
+        el('div', { className: 'map-poi-zone' },
+            el('button', { className: 'gm-btn ghost',
+                textContent: (poi.zone || []).length ? 'Modifier la zone' : 'Tracer une zone',
+                onclick: () => startZoneEdit(poi.id) }),
+            (poi.zone || []).length > 0 && el('button', { className: 'gm-btn ghost', textContent: 'Effacer la zone',
+                onclick: () => clearZone(poi.id) })));
 }
 
 // Render the whole Carte tab. Every map mutation calls this; there is no partial render,
@@ -3483,6 +3574,10 @@ function renderMapTab() {
             onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
         el('button', { className: 'gm-btn ghost' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
             onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }),
+        zoneEditPoiId && el('span', { className: 'map-zone-hint',
+            textContent: `Tracé en cours (${zoneDraft.length} sommets) — cliquez le premier sommet pour fermer, Suppr pour annuler le dernier` }),
+        zoneEditPoiId && el('button', { className: 'gm-btn', textContent: 'Fermer la zone', onclick: closeZone }),
+        zoneEditPoiId && el('button', { className: 'gm-btn ghost', textContent: 'Annuler', onclick: cancelZoneEdit }),
         moveRequests.length > 0 && el('details', { className: 'map-queue' },
             el('summary', { textContent: `⚑ ${moveRequests.length}` }),
             el('div', { className: 'map-queue-list' },
@@ -3502,9 +3597,22 @@ function renderMapTab() {
     const st = buildMapState();
     const clear = mapTableView ? visiblePois(st, null) : m.pois.filter(p => (p.zone || []).length);
     const fog   = mapTableView ? fogZones(st, null) : [];
-    const frame = _mapFrame(m, _mapZoneLayer(clear, fog), _mapPinLayer(m), sel && _poiCard(m, sel));
+    const frame = _mapFrame(m,
+        _mapZoneLayer(clear, fog),
+        zoneEditPoiId && _mapZoneLayer([{ id: 'draft', zone: zoneDraft }], []),
+        _mapPinLayer(m),
+        zoneEditPoiId && _zoneEditLayer(),
+        sel && _poiCard(m, sel));
     // A click on the background places a POI; a click on a pin or the card must not.
     frame.addEventListener('click', e => {
+        // While tracing a zone, a background click places a vertex instead — and never a POI.
+        if (zoneEditPoiId) {
+            if (e.target.closest('.zone-vertex')) return;   // handled by the vertex itself
+            const { x, y } = _mapPct(e, frame);
+            zoneDraft.push([x, y]);
+            renderMapTab();
+            return;
+        }
         if (e.target.closest('.map-pin') || e.target.closest('.map-poi-card')) return;
         if (mapSelectedPoiId) { mapSelectedPoiId = null; renderMapTab(); return; }
         const { x, y } = _mapPct(e, frame);
