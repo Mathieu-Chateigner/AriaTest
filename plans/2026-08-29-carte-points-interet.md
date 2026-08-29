@@ -2205,9 +2205,16 @@ function _mapZoneLayer(clear, fog) {
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('preserveAspectRatio', 'none');
     const add = (z, cls) => {
-        if (!z.zone?.length) return;
+        // z.zone is remote-controlled: it arrives over Ably ('aria-map' / 'state') with no
+        // validation, so anyone holding the Ably key can publish garbage in its place. An
+        // uncaught throw here would abort el()'s argument evaluation and take down the whole
+        // renderMapTab() — a malformed zone must be silently skipped, never trusted.
+        if (!Array.isArray(z.zone) || z.zone.length < 3) return;
+        const pts = z.zone.filter(v => Array.isArray(v) && v.length === 2)
+            .map(([x, y]) => `${Number(x) || 0},${Number(y) || 0}`);
+        if (pts.length < 3) return;
         const poly = document.createElementNS(SVG_NS, 'polygon');
-        poly.setAttribute('points', z.zone.map(([x, y]) => `${x},${y}`).join(' '));
+        poly.setAttribute('points', pts.join(' '));
         poly.setAttribute('class', cls);
         // Without this the stroke thickness distorts the moment the map changes size —
         // and it changes size constantly in the pane engine.
@@ -2246,11 +2253,20 @@ Panneau joueur, dans `renderMapTab()` — la couche passe avant `pins` :
 ```js
 // Zones first, pins after: a black district must not swallow the tokens standing on it.
 function _owZones(charId) {
-    const pts = z => z.zone.map(([x, y]) => `${Number(x) || 0},${Number(y) || 0}`).join(' ');
+    // mapState comes straight off Ably ('aria-map' / 'state') with no validation — anyone
+    // holding the key can publish a malformed zone. A throw here would blank the whole
+    // widget, and on the overlay that kills the live OBS output mid-stream, so a bad shape
+    // renders as no polygon instead of blowing up the render.
+    const poly = (z, cls) => {
+        if (!Array.isArray(z.zone) || z.zone.length < 3) return '';
+        const pts = z.zone.filter(v => Array.isArray(v) && v.length === 2)
+            .map(([x, y]) => `${Number(x) || 0},${Number(y) || 0}`);
+        return pts.length >= 3 ? `<polygon class="${cls}" vector-effect="non-scaling-stroke" points="${pts.join(' ')}"/>` : '';
+    };
     const clear = visiblePois(mapState, charId).filter(p => p.zone?.length)
-        .map(z => `<polygon class="ow-zone-known" vector-effect="non-scaling-stroke" points="${pts(z)}"/>`).join('');
+        .map(z => poly(z, 'ow-zone-known')).join('');
     const fog = fogZones(mapState, charId)
-        .map(z => `<polygon class="ow-zone-fog" vector-effect="non-scaling-stroke" points="${pts(z)}"/>`).join('');
+        .map(z => poly(z, 'ow-zone-fog')).join('');
     return `<svg class="ow-map-zones" viewBox="0 0 100 100" preserveAspectRatio="none">${clear}${fog}</svg>`;
 }
 ```

@@ -234,9 +234,16 @@ function _mapZoneLayer(clear, fog) {
     svg.setAttribute('viewBox', '0 0 100 100');
     svg.setAttribute('preserveAspectRatio', 'none');
     const add = (z, cls) => {
-        if (!z.zone?.length) return;
+        // z.zone is remote-controlled: it arrives over Ably ('aria-map' / 'state') with no
+        // validation, so anyone holding the Ably key can publish garbage in its place. An
+        // uncaught throw here would abort el()'s argument evaluation and take down the whole
+        // renderMapTab() — a malformed zone must be silently skipped, never trusted.
+        if (!Array.isArray(z.zone) || z.zone.length < 3) return;
+        const pts = z.zone.filter(v => Array.isArray(v) && v.length === 2)
+            .map(([x, y]) => `${Number(x) || 0},${Number(y) || 0}`);
+        if (pts.length < 3) return;
         const poly = document.createElementNS(SVG_NS, 'polygon');
-        poly.setAttribute('points', z.zone.map(([x, y]) => `${x},${y}`).join(' '));
+        poly.setAttribute('points', pts.join(' '));
         poly.setAttribute('class', cls);
         // Without this the stroke thickness distorts the moment the map changes size —
         // and it changes size constantly in the pane engine.
