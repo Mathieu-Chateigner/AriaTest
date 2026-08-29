@@ -3496,7 +3496,13 @@ function renderMapTab() {
         return;
     }
     const sel = m.pois.find(p => p.id === mapSelectedPoiId) || null;
-    const frame = _mapFrame(m, _mapPinLayer(m), sel && _poiCard(m, sel));
+    // Table view previews exactly what the table sees — fogZones()/visiblePois() through the
+    // null charId, same filter the overlay uses. Edit view shows every POI with a drawn zone,
+    // since the MJ is editing geometry rather than checking what's revealed.
+    const st = buildMapState();
+    const clear = mapTableView ? visiblePois(st, null) : m.pois.filter(p => (p.zone || []).length);
+    const fog   = mapTableView ? fogZones(st, null) : [];
+    const frame = _mapFrame(m, _mapZoneLayer(clear, fog), _mapPinLayer(m), sel && _poiCard(m, sel));
     // A click on the background places a POI; a click on a pin or the card must not.
     frame.addEventListener('click', e => {
         if (e.target.closest('.map-pin') || e.target.closest('.map-poi-card')) return;
@@ -3530,7 +3536,12 @@ function buildMapState() {
             .map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y,
                          publicDesc: p.publicDesc || '', discoveredBy: p.discoveredBy || [],
                          zone: p.zone || [] })),
-        fog: [],                      // Task 14 fills this with geometry only
+        // Geometry only: no name, no description, no pin coordinates. This is what lets a
+        // player draw a black district without learning anything about what is in it. A POI
+        // with no zone and no discovery appears nowhere at all.
+        fog: (m.pois || [])
+            .filter(p => (p.discoveredBy || []).length === 0 && (p.zone || []).length)
+            .map(p => ({ id: p.id, zone: p.zone })),
         positions: m.positions || {},
         players: names,
     };

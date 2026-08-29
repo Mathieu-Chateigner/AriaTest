@@ -1773,6 +1773,8 @@
    only the GM has a group bar / toolbar on this tab. */
 .map-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .map-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* The MJ sees through the fog: dashed outline, translucent fill, not opaque. */
+.zone-fog { fill: rgba(9,8,4,.55); stroke: var(--parchment-dim); stroke-width: 1; stroke-dasharray: 3 3; }
 .gm-btn {
     font-family: 'Archivo', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .06em;
     text-transform: uppercase; padding: 8px 14px; cursor: pointer; border-radius: 3px;

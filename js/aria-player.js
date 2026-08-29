@@ -3128,6 +3128,7 @@ function renderMapTab() {
     const sel = _mapVisible().find(p => p.id === mapSelectedPoiId) || null;
     fill(stage, el('div', { className: 'aria-frame', id: 'map-frame' },
         el('img', { className: 'aria-map', src: mapState.imageUrl, alt: mapState.name || '', draggable: false }),
+        _mapZoneLayer(_mapVisible().filter(p => (p.zone || []).length), fogZones(mapState, currentCharId)),
         pins,
         sel && _poiCardPlayer(sel)));
 

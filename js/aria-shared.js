@@ -214,6 +214,40 @@ function fill(node, ...kids) {
     return node;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Zones are <polygon>s in a viewBox of 0–100 on both axes, which is exactly the percentage
+// coordinate system the pins already use. Hover, outline and fill are native CSS — no
+// collision maths, no canvas. The reveal is a transition on fill and opacity.
+//
+// el() cannot build this: document.createElement('svg') makes an HTML element that never
+// renders as a graphic — SVG needs createElementNS. This is the one layer hand-rolled for
+// that reason; the rest of the panel DOM still goes through el().
+//
+// Same JS on both panels — it's the CSS (.zone-known / .zone-fog) that tells the MJ's
+// see-through fog from the player's opaque black. aria-overlay.js does not load this file
+// and builds its own string-based equivalent (_owZones) — that is a different rendering
+// model, not a duplicate of this one.
+function _mapZoneLayer(clear, fog) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'map-zones');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const add = (z, cls) => {
+        if (!z.zone?.length) return;
+        const poly = document.createElementNS(SVG_NS, 'polygon');
+        poly.setAttribute('points', z.zone.map(([x, y]) => `${x},${y}`).join(' '));
+        poly.setAttribute('class', cls);
+        // Without this the stroke thickness distorts the moment the map changes size —
+        // and it changes size constantly in the pane engine.
+        poly.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(poly);
+    };
+    clear.forEach(z => add(z, 'zone-known'));
+    fog.forEach(z => add(z, 'zone-fog'));
+    return svg;
+}
+
 // Keyed in-place reconciliation of a container's children.
 //
 // Removing an iframe from the DOM terminates its WebRTC connection, so a container

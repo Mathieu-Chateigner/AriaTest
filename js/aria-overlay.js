@@ -104,18 +104,29 @@ function refreshCameraWidgets() {
     });
 }
 
+// Zones first, pins after: a black district must not swallow the tokens standing on it.
+function _owZones(charId) {
+    const pts = z => z.zone.map(([x, y]) => `${Number(x) || 0},${Number(y) || 0}`).join(' ');
+    const clear = visiblePois(mapState, charId).filter(p => p.zone?.length)
+        .map(z => `<polygon class="ow-zone-known" vector-effect="non-scaling-stroke" points="${pts(z)}"/>`).join('');
+    const fog = fogZones(mapState, charId)
+        .map(z => `<polygon class="ow-zone-fog" vector-effect="non-scaling-stroke" points="${pts(z)}"/>`).join('');
+    return `<svg class="ow-map-zones" viewBox="0 0 100 100" preserveAspectRatio="none">${clear}${fog}</svg>`;
+}
+
 // Create the <img> once and only re-assign src when it differs — the setFrameSrc guard,
 // for the same reason: this output runs for hours and a reload is a visible flash. Only
-// the pin layer is rebuilt, and only when a state arrives.
+// the zone and pin layers are rebuilt, and only when a state arrives.
 function syncMapWidget(el, widget) {
     if (!mapState || !mapState.imageUrl) { el.innerHTML = ''; return; }
     let img = el.querySelector('img.ow-map-img');
     if (!img) {
-        el.innerHTML = `<div class="ow-map"><img class="ow-map-img" src="${esc(mapState.imageUrl)}" alt=""><div class="ow-map-pins"></div></div>`;
+        el.innerHTML = `<div class="ow-map"><img class="ow-map-img" src="${esc(mapState.imageUrl)}" alt=""><div class="ow-map-zones-wrap"></div><div class="ow-map-pins"></div></div>`;
         img = el.querySelector('img.ow-map-img');
     } else if (img.getAttribute('src') !== mapState.imageUrl) {
         img.setAttribute('src', mapState.imageUrl);
     }
+    el.querySelector('.ow-map-zones-wrap').innerHTML = _owZones(MAP_CHAR_ID);
     const pos = mapState.positions || {};
     const names = mapState.players || {};
     // This file builds strings and has its own esc(); every interpolated field goes

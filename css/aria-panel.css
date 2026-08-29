@@ -618,6 +618,12 @@ body.dock-dragging .tab-btn, body.dock-dragging .split-pane-hdr { cursor: grabbi
                       opacity: .16; mix-blend-mode: overlay;
                       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 
+/* Zones sit above the image and below the pins. Hover and outline are native. */
+.map-zones { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.map-zones polygon { pointer-events: auto; transition: fill .4s ease, opacity .4s ease; }
+.zone-known { fill: rgba(var(--accent-rgb), .10); stroke: var(--gold); stroke-width: 1.5; }
+.zone-known:hover { fill: rgba(var(--accent-rgb), .20); }
+
 /* Pins and the floating POI card — geometry and idle appearance are identical on both
    sides (task 8 reuses these as-is); only the GM's edit-mode fields (aria-gm.css) differ. */
 .map-pins { position: absolute; inset: 0; z-index: 2; }

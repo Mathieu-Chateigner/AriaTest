@@ -1932,6 +1932,8 @@ body.light-mode .rh-date::-webkit-calendar-picker-indicator { filter: none; }
    variant is player-specific — the GM has no character of its own to mark. */
 .map-title { font-family: 'Cinzel', serif; color: var(--gold-light); font-size: 14px; }
 .map-token.me { border-color: var(--gold); color: var(--gold-light); }
+/* Opaque for the player: an undiscovered zone hides everything under it, no see-through. */
+.zone-fog { fill: rgb(9,8,4); stroke: none; }
 .map-poi-title { font-family: 'Cinzel', serif; color: var(--gold-light); font-size: 13px; }
 .map-poi-desc  { font-size: 12px; color: var(--parchment); white-space: pre-wrap; }
 .map-drawer { border-top: 1px solid var(--border); padding-top: 6px; }
