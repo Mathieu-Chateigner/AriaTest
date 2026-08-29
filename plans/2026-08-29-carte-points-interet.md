@@ -1479,7 +1479,7 @@ Dans `_mapPinLayer()`, ajouter la couche de pastilles sous l'étiquette, comme c
 Dans la barre d'outils de `renderMapTab()` :
 
 ```js
-        el('button', { className: 'gm-btn' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
+        el('button', { className: 'gm-btn ghost' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
             onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }),
 ```
 
@@ -1498,7 +1498,12 @@ Et, dans `_mapPinLayer()`, filtrer la liste rendue :
 .map-poi-disc  { display: flex; flex-wrap: wrap; gap: 6px; }
 .map-poi-check { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--parchment); }
 .map-poi-bring { display: flex; flex-wrap: wrap; gap: 4px; }
+.gm-btn.ghost.active { background: var(--violetsoft); border-color: var(--violet); color: var(--violet2); }
 ```
+
+Le bouton `Vue table` reprend la convention `.active` déjà établie ailleurs dans le fichier
+(`.rf-pill.rf-player.active`, `.music-ctrl-btn.active`, `.group-chip.active`, …) : contour au
+repos, rempli une fois activé.
 
 `.map-tokens` / `.map-token` sont déjà dans `css/aria-panel.css` (tâche 8) : rien à ajouter pour
 les pastilles.

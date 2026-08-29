@@ -3442,7 +3442,7 @@ function renderMapTab() {
             oninput: e => { m.sourceUrl = e.target.value; saveMaps(); } }),
         m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
             onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
-        el('button', { className: 'gm-btn' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
+        el('button', { className: 'gm-btn ghost' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
             onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }));
 
     if (!m.imageUrl) {
