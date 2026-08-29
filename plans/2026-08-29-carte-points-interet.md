@@ -799,27 +799,41 @@ function _mapPinLayer(m) {
 }
 
 // Drag a pin, or select it when the pointer never really moved. One handler for both, so a
-// click cannot be swallowed by a drag that travelled two pixels.
+// click cannot be swallowed by a drag that travelled two pixels. `moved` compares against the
+// gesture's origin (x0/y0), captured once — comparing against poi.x/poi.y as they get reassigned
+// on every move would measure one frame's delta instead of the total displacement, and a slow
+// drag (well under 0.5% per coalesced pointermove) would never trip it, silently discarding the
+// move on release. pointercancel runs the same teardown as pointerup: a gesture that ends
+// abnormally (touch-scroll takeover, an OS gesture, alt-tab mid-drag) fires neither pointerup nor
+// click, and the pin commonly outlives that (typing in the card's textareas calls saveMaps()
+// without a re-render), so a leaked listener pair would double up on the next real drag.
 function _mapDragPin(e, poi) {
     e.preventDefault();
     const frame = document.getElementById('map-frame');
     const pin = e.currentTarget;
+    const x0 = poi.x, y0 = poi.y;
     let moved = false;
     pin.setPointerCapture(e.pointerId);
     const onMove = ev => {
+        // Guards a re-render mid-drag detaching the frame/pin — not reachable yet, but Task 7's
+        // Ably state receive path will make it so. A detached frame's rect is zero-sized, and
+        // dividing by that writes NaN into poi.x/poi.y.
+        if (!pin.isConnected) return;
         const { x, y } = _mapPct(ev, frame);
-        if (Math.abs(x - poi.x) > .5 || Math.abs(y - poi.y) > .5) moved = true;
+        if (Math.abs(x - x0) > .5 || Math.abs(y - y0) > .5) moved = true;
         poi.x = x; poi.y = y;
         pin.style.left = x + '%'; pin.style.top = y + '%';
     };
-    const onUp = () => {
+    const end = () => {
         pin.removeEventListener('pointermove', onMove);
-        pin.removeEventListener('pointerup', onUp);
+        pin.removeEventListener('pointerup', end);
+        pin.removeEventListener('pointercancel', end);
         if (moved) { saveMaps(); renderMapTab(); }
         else mapSelectPoi(poi.id);
     };
     pin.addEventListener('pointermove', onMove);
-    pin.addEventListener('pointerup', onUp);
+    pin.addEventListener('pointerup', end);
+    pin.addEventListener('pointercancel', end);
 }
 ```
 
