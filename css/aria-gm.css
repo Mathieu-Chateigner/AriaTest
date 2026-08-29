@@ -1804,6 +1804,9 @@
 .map-poi-disc  { display: flex; flex-wrap: wrap; gap: 6px; }
 .map-poi-check { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--parchment); }
 .map-poi-bring { display: flex; flex-wrap: wrap; gap: 4px; }
+.map-queue > summary { cursor: pointer; color: var(--gold-light); font-size: 12px; }
+.map-queue-list { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.map-queue-row  { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--parchment); }
 
 /* ════════════════════════════════════════════
    LIGHT MODE

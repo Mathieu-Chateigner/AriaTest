@@ -113,6 +113,8 @@ let ablyPresence = null;     // the aria-presence channel — its presence set I
 let ablyMap = null;
 let mapState = null;         // last public map state received (or the cached one)
 let mapSelectedPoiId = null;
+let mapPendingPoiId = null;   // request sent, waiting for the token to move
+let mapDeniedPoiId  = null;   // last refusal, cleared by the next state
 let mapNotes = {};   // { poiId: text } — private, never leaves character_state
 
 // ── PRESENCE ──────────────────────────────────────────────────────────────────
@@ -137,6 +139,7 @@ let mapNotes = {};   // { poiId: text } — private, never leaves character_stat
 // that refreshed, are one participant; the newest `ts` wins.
 let peerCameras = new Map(); // charId → { name, streamId }
 let gmStreamId = '';
+let gmOnline = false;   // a request sent with no GM in the set waits for an answer nobody got
 let vdoRoom = '';
 let vdoRoomPassword = '';
 // Presence density (design frame 25): 'reduit' (dots) | 'bandeau' (rail) | 'tablee' (stage)
@@ -2188,7 +2191,15 @@ function initAbly() {
             mapState = msg.data || null;
             if (mapState) localStorage.setItem(charKey('map'), JSON.stringify(mapState));
             mapSelectedPoiId = null;
+            // An acceptance is recognised by the token having arrived, not by a message.
+            if (mapPendingPoiId && mapState?.positions?.[currentCharId] === mapPendingPoiId) mapPendingPoiId = null;
             applyTabVisibility();   // → renderMapTab, and shows the tab on first arrival
+            renderMapTab();
+        });
+        ablyMap.subscribe('move-denied', msg => {
+            if (msg.data?.charId !== currentCharId) return;
+            mapPendingPoiId = null;
+            mapDeniedPoiId = msg.data.poiId;
             renderMapTab();
         });
         // Covers arriving late: the GM answers a request with the whole state.
@@ -2430,6 +2441,9 @@ function applyPresenceSet(members) {
     // reach this state, because the reconnected tab has already entered by the time
     // the dropped connection is reaped.
     const gm = [...byId.values()].find(d => d.role === 'gm');
+    const gmWas = gmOnline;
+    gmOnline = !!gm;
+    if (gmWas !== gmOnline) renderMapTab();   // the move button is gated on it
     const room = gm ? (gm.vdoRoom || '') : '';
     const pw = gm ? (gm.vdoRoomPassword || '') : '';
     const roomChanged = room !== vdoRoom || pw !== vdoRoomPassword;
@@ -3057,6 +3071,19 @@ function _mapTokensAt(poiId) {
                        isMe: cid === currentCharId }));
 }
 
+// Ask the GM to move our token onto a POI. No GM in the presence set ⇒ no request:
+// publishing anyway would leave the button stuck on "sent" waiting for an answer
+// nobody received. There is no acceptance message — a `state` with our token on
+// this POI clears mapPendingPoiId (see the `state` subscriber above); only a
+// refusal needs to be told to us.
+function requestMove(poiId) {
+    if (!ablyMap || !gmOnline) return;
+    mapPendingPoiId = poiId;
+    mapDeniedPoiId = null;
+    ablyMap.publish('move-request', { charId: currentCharId, charName: character.name || '', poiId });
+    renderMapTab();
+}
+
 let _mapNoteTimer = null;
 // Auto-save a map note. localStorage is the runtime truth; character_state is the
 // persistence layer, reached through the same debounced state sync as HP and tabs.
@@ -3131,7 +3158,15 @@ function _poiCardPlayer(poi) {
         el('div', { className: 'map-poi-title', textContent: poi.name }),
         poi.publicDesc && el('div', { className: 'map-poi-desc', textContent: poi.publicDesc }),
         mapNotes[poi.id] && el('div', { className: 'map-poi-label', textContent: 'Ma note' }),
-        mapNotes[poi.id] && el('div', { className: 'map-poi-mynote', textContent: mapNotes[poi.id] }));
+        mapNotes[poi.id] && el('div', { className: 'map-poi-mynote', textContent: mapNotes[poi.id] }),
+        el('button', {
+            className: 'map-move-btn' + (mapDeniedPoiId === poi.id ? ' denied' : ''),
+            disabled: !gmOnline || mapPendingPoiId === poi.id || mapState?.positions?.[currentCharId] === poi.id,
+            textContent: !gmOnline                     ? 'MJ absent'
+                       : mapPendingPoiId === poi.id    ? 'Demande envoyée…'
+                       : mapDeniedPoiId  === poi.id    ? 'Refusé'
+                       : 'Demander à s’y rendre',
+            onclick: () => requestMove(poi.id) }));
 }
 
 

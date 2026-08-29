@@ -80,6 +80,8 @@ let gmMaps = [];          // [{ id, name, imageUrl, imagePath, sourceUrl, pois, 
 let activeMapId = null;   // map shown to the table (local: campaign_maps has no flag for it)
 let mapSelectedPoiId = null;   // POI whose floating card is open (GM tab only)
 let mapTableView = false;      // preview what the table sees, through the very same filter
+let moveRequests = [];   // [{ charId, charName, poiId }] — persistent badge, not a toast:
+                         // the GM may be looking elsewhere for ten minutes.
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -805,6 +807,17 @@ function initAbly() {
         // A late joiner — a player connecting an hour in, or an OBS browser source
         // restarted mid-session — asks, and gets the whole state back.
         ablyMap.subscribe('request', () => publishMapState());
+        // Incoming move requests are remote-controlled — anyone holding the Ably key can
+        // publish one — so charId is validated the same way handlePresence() validates it.
+        ablyMap.subscribe('move-request', msg => {
+            const d = msg.data || {};
+            if (!_isIdToken(d.charId) || !d.poiId) return;
+            // One pending request per player: asking twice replaces, it doesn't queue.
+            moveRequests = moveRequests.filter(r => r.charId !== d.charId);
+            moveRequests.push({ charId: d.charId, charName: String(d.charName || ''), poiId: d.poiId });
+            renderMapTab();
+            _renderMapTabBadge();
+        });
         ablyInstance.connection.on('connected', () => { console.log('[GM] Ably connected'); setAblyStatus(true); });
         ablyInstance.connection.on('failed',    () => { console.error('[GM] Ably connection FAILED'); setAblyStatus(false); });
         ablyInstance.connection.on('disconnected', () => console.warn('[GM] Ably disconnected'));
@@ -3315,6 +3328,24 @@ function mapToggleDiscovered(poiId, charId) {
     renderMapTab();
 }
 
+// Accept/refuse a pending move request. There is no acceptance message: mapBringHere()
+// saves and republishes state, and the moved token is the answer. A refusal is the only
+// outcome that needs to be said, since nothing else would show it to the player.
+function acceptMove(i) {
+    const r = moveRequests[i]; if (!r) return;
+    moveRequests.splice(i, 1);
+    mapBringHere(r.charId, r.poiId);   // saveMaps → publishMapState: the moved token IS the answer
+    _renderMapTabBadge();
+}
+
+function denyMove(i) {
+    const r = moveRequests[i]; if (!r) return;
+    moveRequests.splice(i, 1);
+    if (ablyMap) ablyMap.publish('move-denied', { charId: r.charId, poiId: r.poiId });
+    renderMapTab();
+    _renderMapTabBadge();
+}
+
 // The pin layer: one element per POI, positioned in percentages. Names arrive from the GM
 // but tokens carry player names taken from presence, so everything is built with el() and
 // textContent — never a string template.
@@ -3443,7 +3474,14 @@ function renderMapTab() {
         m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
             onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
         el('button', { className: 'gm-btn ghost' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
-            onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }));
+            onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }),
+        moveRequests.length > 0 && el('details', { className: 'map-queue' },
+            el('summary', { textContent: `⚑ ${moveRequests.length}` }),
+            el('div', { className: 'map-queue-list' },
+                moveRequests.map((r, i) => el('div', { className: 'map-queue-row' },
+                    el('span', { textContent: `${r.charName || r.charId} → ${(_activeMap()?.pois.find(p => p.id === r.poiId)?.name) || '?'}` }),
+                    el('button', { className: 'gm-btn', textContent: '✓', onclick: () => acceptMove(i) }),
+                    el('button', { className: 'gm-btn ghost', textContent: '✕', onclick: () => denyMove(i) }))))));
 
     if (!m.imageUrl) {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));
@@ -3459,6 +3497,13 @@ function renderMapTab() {
         mapAddPoi(x, y);
     });
     fill(stage, frame);
+}
+
+// Mirror the queue count onto the Carte tab button — the tab may not even be open.
+function _renderMapTabBadge() {
+    const btn = document.querySelector('.tab-btn[data-tab="tab-map"]');
+    if (!btn) return;
+    btn.textContent = moveRequests.length ? `Carte ⚑${moveRequests.length}` : 'Carte';
 }
 
 // The public projection of the active map. This is the ONLY place the broadcast payload is
