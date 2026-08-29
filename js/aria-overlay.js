@@ -125,14 +125,23 @@ function _owZones(charId) {
 
 // Create the <img> once and only re-assign src when it differs — the setFrameSrc guard,
 // for the same reason: this output runs for hours and a reload is a visible flash. Only
-// the zone and pin layers are rebuilt, and only when a state arrives.
+// the zone and pin layers are rebuilt, and only when a state arrives. The image sits inside
+// .ow-map-frame (shrink-wrapped to the rendered picture, like .aria-frame in the panels) —
+// see the CSS comment above .ow-map-frame for why the layers must be inset:0 of THAT, not
+// of the widget box.
 function syncMapWidget(el, widget) {
-    if (!mapState || !mapState.imageUrl) { el.innerHTML = ''; return; }
+    if (!mapState || !mapState.imageUrl) {
+        console.log('[OVERLAY] map widget', widget.id, '→ placeholder | no active map');
+        el.innerHTML = '';
+        return;
+    }
     let img = el.querySelector('img.ow-map-img');
     if (!img) {
-        el.innerHTML = `<div class="ow-map"><img class="ow-map-img" src="${esc(mapState.imageUrl)}" alt=""><div class="ow-map-zones-wrap"></div><div class="ow-map-pins"></div></div>`;
+        console.log('[OVERLAY] map widget', widget.id, '→ new image |', mapState.imageUrl);
+        el.innerHTML = `<div class="ow-map"><div class="ow-map-frame"><img class="ow-map-img" src="${esc(mapState.imageUrl)}" alt=""><div class="ow-map-zones-wrap"></div><div class="ow-map-pins"></div></div></div>`;
         img = el.querySelector('img.ow-map-img');
     } else if (img.getAttribute('src') !== mapState.imageUrl) {
+        console.log('[OVERLAY] map widget', widget.id, '→ re-src |', mapState.imageUrl);
         img.setAttribute('src', mapState.imageUrl);
     }
     el.querySelector('.ow-map-zones-wrap').innerHTML = _owZones(MAP_CHAR_ID);

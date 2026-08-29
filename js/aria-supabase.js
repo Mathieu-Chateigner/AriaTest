@@ -403,8 +403,16 @@ async function runMigration(saveKey, type) {
 // What gets drawn in the clear: pin, name, description. A charId is a player's view;
 // null is the table view (GM tab, GM overlay).
 function visiblePois(state, charId) {
-    return (state?.pois || []).filter(p => charId ? (p.discoveredBy || []).includes(charId)
-                                                  : (p.discoveredBy || []).length > 0);
+    // `state` arrives straight off Ably ('aria-map' / 'state') with no validation, and
+    // anyone holding the key can publish one — the key is pasted into OBS overlay URLs.
+    // A `pois` that is a string or a number would throw out of .filter, and this is the
+    // chokepoint all four pages route through: on the overlay that throw escapes
+    // renderWidgetLayer() and kills the live output mid-stream. Same rule as the one
+    // _mapZoneLayer/_owZones already apply to a malformed zone — a bad payload renders
+    // as nothing, never as an exception.
+    const pois = Array.isArray(state?.pois) ? state.pois : [];
+    return pois.filter(p => charId ? (p.discoveredBy || []).includes(charId)
+                                   : (p.discoveredBy || []).length > 0);
 }
 
 // What gets drawn in black: geometry, no text. state.fog holds the POIs nobody has
@@ -412,7 +420,11 @@ function visiblePois(state, charId) {
 // spectator has not. Both end up as { id, zone } — mapping is what strips the name.
 function fogZones(state, charId) {
     const mine = new Set(visiblePois(state, charId).map(p => p.id));
-    return [...(state?.fog || []), ...(state?.pois || []).filter(p => p.zone?.length && !mine.has(p.id))]
+    // Same guard as visiblePois() above, and for the same reason — a non-array `fog` or
+    // `pois` must render as nothing, not throw.
+    const fog  = Array.isArray(state?.fog)  ? state.fog  : [];
+    const pois = Array.isArray(state?.pois) ? state.pois : [];
+    return [...fog, ...pois.filter(p => p.zone?.length && !mine.has(p.id))]
            .map(p => ({ id: p.id, zone: p.zone }));
 }
 

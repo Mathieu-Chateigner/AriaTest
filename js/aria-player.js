@@ -114,10 +114,12 @@ let ablyMap = null;
 let mapState = null;         // last public map state received (or the cached one)
 let mapSelectedPoiId = null;
 let mapPendingPoiId = null;   // request sent, waiting for the token to move
-let mapDeniedPoiId  = null;   // last refusal — sticky until the player asks again
-                               // (requestMove() clears it). Deliberate: the GM publishes a
-                               // `state` on every unrelated map edit, and an unseen refusal
-                               // must not be wiped by one before the player has read it.
+let mapDeniedPoiId  = null;   // last refusal — holds until the player asks again, with no
+                               // timeout: only requestMove() clears it, so a player who never
+                               // re-asks keeps seeing this same refusal for the rest of the
+                               // session, however old. Deliberate: the GM publishes a `state`
+                               // on every unrelated map edit, and an unseen refusal must not
+                               // be wiped by one before the player has read it.
 let mapNotes = {};   // { poiId: text } — private, never leaves character_state
 
 // ── PRESENCE ──────────────────────────────────────────────────────────────────
@@ -2197,7 +2199,6 @@ function initAbly() {
             // An acceptance is recognised by the token having arrived, not by a message.
             if (mapPendingPoiId && mapState?.positions?.[currentCharId] === mapPendingPoiId) mapPendingPoiId = null;
             applyTabVisibility();   // → renderMapTab, and shows the tab on first arrival
-            renderMapTab();
         });
         ablyMap.subscribe('move-denied', msg => {
             if (msg.data?.charId !== currentCharId) return;
@@ -3147,11 +3148,22 @@ function renderMapNotesDrawer() {
     const list = document.getElementById('map-notes-list');
     if (!list) return;
     const pois = _mapVisible();
-    if (!pois.length) { fill(list, el('div', { className: 'map-empty', textContent: 'Aucun lieu découvert.' })); return; }
-    fill(list, pois.map(p => el('div', { className: 'map-note-row' },
-        el('span', { className: 'map-note-name', textContent: p.name }),
-        el('input', { className: 'map-note-input', id: 'map-note-' + p.id, value: mapNotes[p.id] || '',
-            placeholder: 'Ma note', oninput: e => saveMapNote(p.id, e.target.value) }))));
+    if (!pois.length) { clearKeyed(list); fill(list, el('div', { className: 'map-empty', textContent: 'Aucun lieu découvert.' })); return; }
+    // Presence churn (an HP tick, a tab-config change, anyone's saveCurrentCharacter())
+    // republishes the map constantly, and this drawer is the writing surface — it was
+    // chosen for exactly this reason (spec decision 10). reconcile() keeps each row's
+    // node identity, and the activeElement check below leaves an input the player is
+    // typing in alone; without both, a rebuild-by-fill() reset the caret on every tick.
+    reconcile(list, pois.map(p => [p.id, p]),
+        (id, p) => el('div', { className: 'map-note-row' },
+            el('span', { className: 'map-note-name' }),
+            el('input', { className: 'map-note-input', id: 'map-note-' + p.id,
+                placeholder: 'Ma note', oninput: e => saveMapNote(p.id, e.target.value) })),
+        (node, p) => {
+            node.querySelector('.map-note-name').textContent = p.name;
+            const input = node.querySelector('.map-note-input');
+            if (input !== document.activeElement) input.value = mapNotes[p.id] || '';
+        });
 }
 
 // The floating card READS; the drawer writes. A floating card closes on an outside click,

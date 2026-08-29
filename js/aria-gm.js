@@ -84,6 +84,11 @@ let moveRequests = [];   // [{ charId, charName, poiId }] — persistent badge, 
                          // the GM may be looking elsewhere for ten minutes.
 let zoneEditPoiId = null;   // POI whose zone is being traced
 let zoneDraft = [];         // vertices placed so far, in percentages
+// Serialised { charId: name } snapshot, compared in applyPresenceSet() so the map is
+// republished (and the open POI card, if any, refreshed) only when the roster actually
+// changed — not on every presence event, which during play is constant (an HP tick, a
+// tab-config change, anyone's saveCurrentCharacter()).
+let _lastMapPlayerNames = '';
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -524,6 +529,11 @@ function deleteCampaign(id) {
         files.forEach(f => { if (f.path) deleteFileFromStorage(f.path); });
         const tracks = _normalizeMusicData(localStorage.getItem(campKey('music', id))).flatMap(p => p.tracks);
         tracks.forEach(t => { if (t.type === 'file' && t.path) deleteMusicFileFromStorage(t.path); });
+        // Map images go through the same campaign-files bucket (uploadFileToStorage), and
+        // aria-gm-maps-{id} / campaign_maps are their only record of the path — deleteMap()
+        // already does this one map at a time; this is the same cleanup for the whole campaign.
+        const maps = JSON.parse(localStorage.getItem(campKey('maps', id)) || '[]');
+        maps.forEach(m => { if (m.imagePath) deleteFileFromStorage(m.imagePath); });
     } catch(_) {}
     // The child tables come from ENT, so adding a campaign-scoped entity cannot
     // leave rows behind here. This used to be nine hand-written sbDelete calls.
@@ -954,8 +964,24 @@ function applyPresenceSet(members) {
     clearTimeout(renderPlayerCardsTimer);
     renderPlayerCardsTimer = setTimeout(renderPlayerCards, 150);
     // state.players carries display names from presence — republish so a player who
-    // connects after the map was last saved still gets their name on the token.
-    publishMapState();
+    // connects after the map was last saved still gets their name on the token. But only
+    // when that projection actually changed: applyPresenceSet() runs on every presence
+    // event, and gating on the real signal (not "an event happened") is what keeps a
+    // player's map-notes drawer input and the GM's own open POI card (below) from losing
+    // their caret to someone else's HP tick.
+    const names = {};
+    players.forEach((p, charId) => { names[charId] = p.name || ''; });
+    const namesSig = JSON.stringify(names);
+    if (namesSig !== _lastMapPlayerNames) {
+        _lastMapPlayerNames = namesSig;
+        publishMapState();
+        // The open card's "Découvert par" / "Amener ici" lists are built from `players`
+        // too (_poiCard) — refresh on the same signal so a player who connects after the
+        // card was opened gets a button without waiting on the next map edit. An
+        // unconditional renderMapTab() here would cost the GM their caret exactly the way
+        // the unguarded publish cost the player theirs.
+        if (mapSelectedPoiId) renderMapTab();
+    }
 }
 
 // One command that prints the whole GM-side camera path: our own publishing state,
@@ -3336,7 +3362,10 @@ function mapBringHere(charId, poiId) {
     renderMapTab();
 }
 
-function mapToggleDiscovered(poiId, charId) {
+// Same (charId, poiId) argument order as mapBringHere() just above — they used to be
+// mirrored (poiId, charId) here, eight lines apart with both params opaque strings, which
+// is silent to swap by accident.
+function mapToggleDiscovered(charId, poiId) {
     const m = _activeMap(); if (!m) return;
     const poi = m.pois.find(p => p.id === poiId); if (!poi) return;
     poi.discoveredBy = poi.discoveredBy.includes(charId)
@@ -3529,7 +3558,7 @@ function _poiCard(m, poi) {
         el('div', { className: 'map-poi-disc' },
             [...players.values()].map(pl => el('label', { className: 'map-poi-check' },
                 el('input', { type: 'checkbox', checked: poi.discoveredBy.includes(pl.charId),
-                    onchange: () => mapToggleDiscovered(poi.id, pl.charId) }),
+                    onchange: () => mapToggleDiscovered(pl.charId, poi.id) }),
                 el('span', { textContent: pl.name || pl.charId })))),
         el('label', { className: 'map-poi-label', textContent: 'Amener ici' }),
         el('div', { className: 'map-poi-bring' },
@@ -3597,13 +3626,18 @@ function renderMapTab() {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));
         return;
     }
-    const sel = m.pois.find(p => p.id === mapSelectedPoiId) || null;
     // Table view previews exactly what the table sees — fogZones()/visiblePois() through the
     // null charId, same filter the overlay uses. Edit view shows every POI with a drawn zone,
     // since the MJ is editing geometry rather than checking what's revealed.
     const st = buildMapState();
     const clear = mapTableView ? visiblePois(st, null) : m.pois.filter(p => (p.zone || []).length);
     const fog   = mapTableView ? fogZones(st, null) : [];
+    // The floating card must not lie either: in table view it only opens for a POI the
+    // table can actually see — same visiblePois() ids as `clear` above, matched against the
+    // real m.pois object (not buildMapState()'s stripped clone) so the card can still edit
+    // gmNote and the rest.
+    const visibleIds = mapTableView ? new Set(visiblePois(st, null).map(p => p.id)) : null;
+    const sel = m.pois.find(p => p.id === mapSelectedPoiId && (!visibleIds || visibleIds.has(p.id))) || null;
     const frame = _mapFrame(m,
         _mapZoneLayer(clear, fog),
         zoneEditPoiId && _mapZoneLayer([{ id: 'draft', zone: zoneDraft }], []),
@@ -3612,6 +3646,16 @@ function renderMapTab() {
         sel && _poiCard(m, sel));
     // A click on the background places a POI; a click on a pin or the card must not.
     frame.addEventListener('click', e => {
+        // Third connectivity guard in this file (see _mapDragPin/_zoneDragVertex above): a
+        // click that starts a trace (or any other card action) re-renders synchronously via
+        // renderMapTab() -> fill(stage, frame), detaching THIS frame — but the event path was
+        // fixed at dispatch, so this same click still bubbles to the now-detached listener.
+        // A detached frame's getBoundingClientRect() is zero-sized, so _mapPct() below would
+        // divide by zero and the clamp would turn the result into a bogus [100, 100] vertex.
+        if (!frame.isConnected) return;
+        // The card must stay usable while tracing — its name input and textareas are inside
+        // it, and without this a click there falls through to the vertex-placing branch below.
+        if (e.target.closest('.map-poi-card')) return;
         // While tracing a zone, a background click places a vertex instead — and never a POI.
         if (zoneEditPoiId) {
             if (e.target.closest('.zone-vertex')) return;   // handled by the vertex itself
@@ -3663,12 +3707,16 @@ function buildMapState() {
 }
 
 let _mapPubTimer = null;
-// Broadcast the map, debounced: a drag fires a mutation per pointer move.
+// Broadcast the map, debounced: a drag fires a mutation per pointer move. `state` replaces
+// wholesale on both receivers (mapState = msg.data || null, in both aria-player.js and
+// aria-overlay.js) — so publishing null when there is no active map (deleting the last one)
+// is how a map gets taken OFF the table, not a special case: withholding the publish here
+// left players/overlay holding the last map forever, including across a reload via the
+// aria-map-{charId} cache.
 function publishMapState() {
     clearTimeout(_mapPubTimer);
     _mapPubTimer = setTimeout(() => {
         if (!ablyMap) return;
-        const state = buildMapState();
-        if (state) ablyMap.publish('state', state);
+        ablyMap.publish('state', buildMapState());
     }, 150);
 }

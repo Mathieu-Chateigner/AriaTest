@@ -2103,7 +2103,12 @@ assert.ok(!fogZones(fogState, 'alice').some(z => z.id === 'c'));
 // 8. No fog entry carries a name or a description. This is the assertion that guards the
 //    "geometry only" rule: a player must be able to draw a black district without
 //    learning anything about what is in it.
-for (const z of fogZones(fogState, 'alice')) {
+const aliceFog = fogZones(fogState, 'alice');
+// Non-empty on purpose: a loop over an empty array would pass vacuously, the exact failure
+// mode assertion 7 just had. Alice's fog must hold d (nobody found it) and b (Bob did,
+// she did not).
+assert.strictEqual(aliceFog.length, 2);
+for (const z of aliceFog) {
     assert.deepStrictEqual(Object.keys(z).sort(), ['id', 'zone']);
     assert.strictEqual(z.name, undefined);
     assert.strictEqual(z.publicDesc, undefined);

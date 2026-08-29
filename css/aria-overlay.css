@@ -1022,11 +1022,18 @@ body.shake {
    renders as nothing at all rather than a stray dash where a face used to be. */
 .ow-camera-empty { width: 100%; height: 100%; visibility: hidden; }
 
-/* Map widget — shows the owner's discovered POIs (visiblePois) and player tokens. */
+/* Map widget — shows the owner's discovered POIs (visiblePois) and player tokens.
+   .ow-map centres and letterboxes the image; .ow-map-frame shrink-wraps the RENDERED
+   picture (mirrors .aria-frame in aria-panel.css), so the zone/pin layers below — both
+   inset:0 of the frame, not of .ow-map — land on the same pixel of the image regardless
+   of the widget box's aspect ratio. Positioning them against .ow-map directly (the old
+   markup) agreed with the image only when the widget happened to share its ratio. */
 .ow-map { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.ow-map-frame { position: relative; display: inline-block; max-width: 100%; max-height: 100%; }
 .ow-map-img { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;
               filter: sepia(.45) saturate(.75) contrast(1.08) brightness(.92); }
 /* Zones sit above the image and below the pins — same order as the two panels. */
+.ow-map-zones-wrap { position: absolute; inset: 0; }
 .ow-map-zones  { position: absolute; inset: 0; width: 100%; height: 100%; }
 .ow-zone-known { fill: rgba(201,168,76,.10); stroke: #c9a84c; stroke-width: 1.5; }
 .ow-zone-fog   { fill: rgb(9,8,4); stroke: none; }
