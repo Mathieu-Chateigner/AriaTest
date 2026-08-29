@@ -14,6 +14,11 @@ function campaignChannel(base) { return CAMPAIGN ? `${base}-${CAMPAIGN}` : base;
 // interpolated field below must be escaped to prevent on-stream XSS in OBS.
 function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+let mapState = null;
+// The overlay already knows whose it is: a player overlay shows that character's view, a
+// GM overlay the table's. GM notes are in neither — they are never in the payload at all.
+const MAP_CHAR_ID = OVERLAY_ID.startsWith('player_') ? OVERLAY_ID.slice(7) : null;
+
 let overlayConfig = { widgets: [] };
 // Set once a layout-update has been applied. loadOverlayConfig() runs at startup and
 // awaits Supabase; the editor publishes over Ably and writes to the DB concurrently,
@@ -97,6 +102,32 @@ function refreshCameraWidgets() {
         if (!widget || widget.type !== 'camera') return;
         syncCameraWidget(el, widget, live);
     });
+}
+
+// Create the <img> once and only re-assign src when it differs — the setFrameSrc guard,
+// for the same reason: this output runs for hours and a reload is a visible flash. Only
+// the pin layer is rebuilt, and only when a state arrives.
+function syncMapWidget(el, widget) {
+    if (!mapState || !mapState.imageUrl) { el.innerHTML = ''; return; }
+    let img = el.querySelector('img.ow-map-img');
+    if (!img) {
+        el.innerHTML = `<div class="ow-map"><img class="ow-map-img" src="${esc(mapState.imageUrl)}" alt=""><div class="ow-map-pins"></div></div>`;
+        img = el.querySelector('img.ow-map-img');
+    } else if (img.getAttribute('src') !== mapState.imageUrl) {
+        img.setAttribute('src', mapState.imageUrl);
+    }
+    const pos = mapState.positions || {};
+    const names = mapState.players || {};
+    // This file builds strings and has its own esc(); every interpolated field goes
+    // through it. Names arrive over Ably — anyone with the key can publish one.
+    el.querySelector('.ow-map-pins').innerHTML = visiblePois(mapState, MAP_CHAR_ID).map(p => {
+        const tokens = Object.keys(pos).filter(cid => pos[cid] === p.id)
+            .map(cid => `<span class="ow-map-token">${esc(names[cid] || '?')}</span>`).join('');
+        return `<div class="ow-map-pin" style="left:${Number(p.x) || 0}%;top:${Number(p.y) || 0}%">`
+             + `<span class="ow-map-dot"></span>`
+             + `<span class="ow-map-label">${esc(p.name)}</span>`
+             + `<span class="ow-map-tokens">${tokens}</span></div>`;
+    }).join('');
 }
 
 let rollDismiss = null;
@@ -232,6 +263,12 @@ if (ABLY_KEY) {
         widget.config = { ...widget.config, monsters: msg.data.monsters };
         updateWidgetData();
     });
+
+    // Map. `state` replaces wholesale; `request` at connect is what gets a restarted OBS
+    // browser source its picture back mid-session.
+    const mapCh = ably.channels.get(campaignChannel('aria-map'));
+    mapCh.subscribe('state', msg => { mapState = msg.data || null; renderWidgetLayer(); });
+    mapCh.publish('request', {});
 
     if (OVERLAY_ID) {
         const cfgCh = ably.channels.get('aria-overlay-config');
@@ -862,8 +899,9 @@ function renderWidgetLayer() {
         el.style.fontSize = (widget.config?.fontSize ?? 14) + 'px';
         // Cameras go through the shared sync so a live, correctly-pointed iframe is
         // left untouched; everything else is cheap to re-render wholesale.
-        if (widget.type === 'camera') syncCameraWidget(el, widget, live);
-        else el.innerHTML = renderWidgetContent(widget);
+        if (widget.type === 'map')         syncMapWidget(el, widget);
+        else if (widget.type === 'camera') syncCameraWidget(el, widget, live);
+        else                               el.innerHTML = renderWidgetContent(widget);
     }
     applyEventWidgetPosition('roll-card', 'roll_card');
     applyEventWidgetPosition('drawn-card-overlay', 'card_draw');
@@ -879,6 +917,7 @@ function updateWidgetData() {
         const widget = overlayConfig.widgets.find(w => w.id === el.dataset.widgetId);
         if (!widget) return;
         if (widget.type === 'camera') return;
+        if (widget.type === 'map') return;   // updated by aria-map, not by presence
         el.innerHTML = renderWidgetContent(widget);
     });
 }

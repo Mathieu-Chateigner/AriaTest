@@ -26,6 +26,7 @@ const WIDGET_DEFS = {
         { type: 'inventory',         label: 'Inventaire',            defaultW: 28, defaultH: 20 },
         { type: 'potions',           label: 'Potions',               defaultW: 25, defaultH: 15 },
         { type: 'custom_text',       label: 'Texte libre',           defaultW: 30, defaultH: 10 },
+        { type: 'map',               label: 'Carte',                 defaultW: 40, defaultH: 45 },
         { type: 'campaign_name',     label: 'Nom campagne',          defaultW: 30, defaultH: 8,  gmOnly: true },
         { type: 'player_hp_summary', label: 'PV joueurs (résumé)',   defaultW: 30, defaultH: 30, gmOnly: true },
         { type: 'player_stats',      label: 'Stats joueurs',         defaultW: 35, defaultH: 35, gmOnly: true },
