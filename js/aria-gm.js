@@ -79,6 +79,7 @@ let gmFiles = [];
 let gmMaps = [];          // [{ id, name, imageUrl, imagePath, sourceUrl, pois, positions }]
 let activeMapId = null;   // map shown to the table (local: campaign_maps has no flag for it)
 let mapSelectedPoiId = null;   // POI whose floating card is open (GM tab only)
+let mapTableView = false;      // preview what the table sees, through the very same filter
 // Monster and file grouping (navigation aid). Groups are a campaign-scoped list
 // of { id, name }; membership is a flat { entityId: groupId } map. Both live in a
 // separate localStorage key (NOT in the synced monsters/campaign_files tables), so
@@ -3293,12 +3294,36 @@ function mapDeletePoi(id) {
     renderMapTab();
 }
 
+// Put a player's token on a POI. Moving a player there discovers it for them — the
+// checkboxes below are for revealing at a distance and for fixing a mistake.
+function mapBringHere(charId, poiId) {
+    const m = _activeMap(); if (!m) return;
+    const poi = m.pois.find(p => p.id === poiId); if (!poi) return;
+    m.positions[charId] = poiId;
+    if (!poi.discoveredBy.includes(charId)) poi.discoveredBy.push(charId);
+    saveMaps();
+    renderMapTab();
+}
+
+function mapToggleDiscovered(poiId, charId) {
+    const m = _activeMap(); if (!m) return;
+    const poi = m.pois.find(p => p.id === poiId); if (!poi) return;
+    poi.discoveredBy = poi.discoveredBy.includes(charId)
+        ? poi.discoveredBy.filter(c => c !== charId)
+        : [...poi.discoveredBy, charId];
+    saveMaps();
+    renderMapTab();
+}
+
 // The pin layer: one element per POI, positioned in percentages. Names arrive from the GM
 // but tokens carry player names taken from presence, so everything is built with el() and
 // textContent — never a string template.
 function _mapPinLayer(m) {
     const layer = el('div', { className: 'map-pins' });
-    m.pois.forEach(p => {
+    // Table view goes through the very same filter the overlay uses, so the preview
+    // cannot lie about what the table sees.
+    const list = mapTableView ? visiblePois(buildMapState(), null) : m.pois;
+    list.forEach(p => {
         const discovered = (p.discoveredBy || []).length > 0;
         const pin = el('div', {
             className: 'map-pin' + (discovered ? ' discovered' : '') + (p.id === mapSelectedPoiId ? ' selected' : ''),
@@ -3306,7 +3331,13 @@ function _mapPinLayer(m) {
             onpointerdown: e => _mapDragPin(e, p),
         },
             el('span', { className: 'map-pin-dot' }),
-            el('span', { className: 'map-pin-label', textContent: p.name }));
+            el('span', { className: 'map-pin-label', textContent: p.name }),
+            el('div', { className: 'map-tokens' },
+                Object.keys(m.positions)
+                    // A charId left in positions after the character left the campaign is not
+                    // in `players`, so no token is drawn for it — nothing to clean up.
+                    .filter(cid => m.positions[cid] === p.id && players.has(cid))
+                    .map(cid => el('span', { className: 'map-token', textContent: players.get(cid).name || '?' }))));
         layer.append(pin);
     });
     return layer;
@@ -3368,7 +3399,20 @@ function _poiCard(m, poi) {
         el('label', { className: 'map-poi-label', textContent: 'Note MJ (privée)' }),
         el('textarea', { className: 'map-poi-text gm', value: poi.gmNote || '',
             placeholder: 'Ne quitte jamais ce panneau',
-            oninput: e => { poi.gmNote = e.target.value; saveMaps(); } }));
+            oninput: e => { poi.gmNote = e.target.value; saveMaps(); } }),
+        el('label', { className: 'map-poi-label', textContent: 'Découvert par' }),
+        el('div', { className: 'map-poi-disc' },
+            [...players.values()].map(pl => el('label', { className: 'map-poi-check' },
+                el('input', { type: 'checkbox', checked: poi.discoveredBy.includes(pl.charId),
+                    onchange: () => mapToggleDiscovered(poi.id, pl.charId) }),
+                el('span', { textContent: pl.name || pl.charId })))),
+        el('label', { className: 'map-poi-label', textContent: 'Amener ici' }),
+        el('div', { className: 'map-poi-bring' },
+            [...players.values()].map(pl => el('button', { className: 'gm-btn ghost',
+                textContent: pl.name || pl.charId,
+                // One button per player, no drag and drop: this is the most frequent action
+                // in play, it has to be one click and no aiming.
+                onclick: () => mapBringHere(pl.charId, poi.id) }))));
 }
 
 // Render the whole Carte tab. Every map mutation calls this; there is no partial render,
@@ -3397,7 +3441,9 @@ function renderMapTab() {
             // never saw, and pasting the address bar back is the only way to fix that.
             oninput: e => { m.sourceUrl = e.target.value; saveMaps(); } }),
         m.sourceUrl && el('button', { className: 'gm-btn ghost', textContent: 'Rouvrir la source',
-            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }));
+            onclick: () => window.open(m.sourceUrl, '_blank', 'noopener') }),
+        el('button', { className: 'gm-btn' + (mapTableView ? ' active' : ''), textContent: 'Vue table',
+            onclick: () => { mapTableView = !mapTableView; renderMapTab(); } }));
 
     if (!m.imageUrl) {
         fill(stage, el('div', { className: 'map-empty', textContent: 'Aucune image. Importez-en une ou générez-en une.' }));

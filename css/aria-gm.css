@@ -1800,6 +1800,9 @@
 .map-poi-text { background: var(--bg3); border: 1px solid var(--border); color: var(--parchment);
                 border-radius: var(--radius); padding: 4px 6px; font-size: 12px; min-height: 48px; resize: vertical; }
 .map-poi-text.gm { border-color: rgba(var(--accent-rgb), .45); }
+.map-poi-disc  { display: flex; flex-wrap: wrap; gap: 6px; }
+.map-poi-check { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--parchment); }
+.map-poi-bring { display: flex; flex-wrap: wrap; gap: 4px; }
 
 /* ════════════════════════════════════════════
    LIGHT MODE
