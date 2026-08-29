@@ -99,6 +99,7 @@ let gmPlaylists = [];          // [{ id, name, tracks: [{id,name,type,url,youtub
 let activePlaylistId = null;   // playlist currently shown/edited in the Musique tab
 let musicPlayingPlaylistId = null; // playlist the now-playing track belongs to
 let ablyMusic = null;
+let ablyMap = null;
 const filesGrantedSessions = new Set();
 
 // Every row shape below comes from ENT in aria-supabase.js — see the note there.
@@ -601,7 +602,7 @@ function switchCampaign() {
     // closing (a fire-and-forget publish followed by close() would have been dropped).
     if (ablyInstance) { try { ablyInstance.close(); } catch(_){} }
     ablyInstance = null;
-    ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null;
+    ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyMap = null;
     ablyPresence = null; gmPresenceEntered = false;
     players.clear();
     // Emptying the Map is not enough — nothing re-renders the grid on this path
@@ -799,6 +800,10 @@ function initAbly() {
         ablyCards = ablyInstance.channels.get(campaignChannel('aria-cards'));
         ablyDamage = ablyInstance.channels.get(campaignChannel('aria-damage'));
         ablyMusic = ablyInstance.channels.get(campaignChannel('aria-music'));
+        ablyMap = ablyInstance.channels.get(campaignChannel('aria-map'));
+        // A late joiner — a player connecting an hour in, or an OBS browser source
+        // restarted mid-session — asks, and gets the whole state back.
+        ablyMap.subscribe('request', () => publishMapState());
         ablyInstance.connection.on('connected', () => { console.log('[GM] Ably connected'); setAblyStatus(true); });
         ablyInstance.connection.on('failed',    () => { console.error('[GM] Ably connection FAILED'); setAblyStatus(false); });
         ablyInstance.connection.on('disconnected', () => console.warn('[GM] Ably disconnected'));
@@ -812,6 +817,7 @@ function initAbly() {
         ablyPresence = ablyInstance.channels.get(campaignChannel('aria-presence'));
         ablyPresence.presence.subscribe(() => refreshPresenceSet());
         publishGMPresence();
+        publishMapState();
         console.log('[GM] initAbly: subscribed to all channels');
     } catch (e) { console.error('[GM] initAbly error:', e); setAblyStatus(false); }
 }
@@ -915,6 +921,9 @@ function applyPresenceSet(members) {
         '| online without a stream:', [...players].filter(([, p]) => p.online && !p.streamId).map(([, p]) => p.name).join(', ') || '(none)');
     clearTimeout(renderPlayerCardsTimer);
     renderPlayerCardsTimer = setTimeout(renderPlayerCards, 150);
+    // state.players carries display names from presence — republish so a player who
+    // connects after the map was last saved still gets their name on the token.
+    publishMapState();
 }
 
 // One command that prints the whole GM-side camera path: our own publishing state,
@@ -1408,6 +1417,7 @@ function saveMaps() {
     localStorage.setItem(mapsKey(), JSON.stringify(gmMaps));
     localStorage.setItem(activeMapKey(), activeMapId || '');
     debouncedSyncMaps();
+    publishMapState();
 }
 
 // Add one or more monsters from the add-monster form (supports a count field).
@@ -3403,4 +3413,37 @@ function renderMapTab() {
         mapAddPoi(x, y);
     });
     fill(stage, frame);
+}
+
+// The public projection of the active map. This is the ONLY place the broadcast payload is
+// built, which is what makes "gmNote is never published" a property of the code rather than
+// a convention — there is nowhere else it could slip in. `state` replaces on the receiving
+// side, it is never patched, so no client can drift.
+function buildMapState() {
+    const m = _activeMap();
+    if (!m) return null;
+    const names = {};
+    players.forEach((p, charId) => { names[charId] = p.name || ''; });
+    return {
+        mapId: m.id, name: m.name, imageUrl: m.imageUrl || '',
+        pois: (m.pois || [])
+            .filter(p => (p.discoveredBy || []).length > 0)
+            .map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y,
+                         publicDesc: p.publicDesc || '', discoveredBy: p.discoveredBy || [],
+                         zone: p.zone || [] })),
+        fog: [],                      // Task 14 fills this with geometry only
+        positions: m.positions || {},
+        players: names,
+    };
+}
+
+let _mapPubTimer = null;
+// Broadcast the map, debounced: a drag fires a mutation per pointer move.
+function publishMapState() {
+    clearTimeout(_mapPubTimer);
+    _mapPubTimer = setTimeout(() => {
+        if (!ablyMap) return;
+        const state = buildMapState();
+        if (state) ablyMap.publish('state', state);
+    }, 150);
 }
