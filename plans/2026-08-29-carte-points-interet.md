@@ -2457,6 +2457,16 @@ Dans le gestionnaire `click` du cadre (Task 5, Step 5), **en tête** :
         }
 ```
 
+Un changement de carte pendant le tracé (le POI tracé n'est pas sur la nouvelle carte) ou la
+suppression du POI tracé depuis sa propre fiche ouverte (`mapDeletePoi()` réinitialise
+`mapSelectedPoiId` mais ne sait rien de `zoneEditPoiId`) laisse sinon le mode de tracé actif sur
+une géométrie qui ne pourra jamais être validée. Un seul garde, en tête de `renderMapTab()`, à
+côté du nettoyage de `activeMapId` périmé, couvre les deux cas :
+
+```js
+    if (zoneEditPoiId && !_activeMap()?.pois.some(p => p.id === zoneEditPoiId)) { zoneEditPoiId = null; zoneDraft = []; }
+```
+
 Et poser la couche + la barre de tracé dans `renderMapTab()` quand `zoneEditPoiId` est défini :
 
 ```js

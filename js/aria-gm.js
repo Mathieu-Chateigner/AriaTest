@@ -3482,7 +3482,8 @@ function _zoneEditLayer() {
 // Same pointer pattern as _mapDragPin: one shared teardown for pointerup AND pointercancel
 // (a drag that ends abnormally — touch-scroll takeover, alt-tab — fires neither pointerup nor
 // click, and would otherwise leak a listener pair), plus an isConnected bail-out in onMove for
-// a re-render that detaches this node mid-drag (Suppr / closeZone / an incoming Ably state).
+// a re-render that detaches this node mid-drag (Suppr / closeZone / a player's move-request
+// arriving mid-drag — that handler calls renderMapTab() unconditionally).
 function _zoneDragVertex(e, i) {
     e.preventDefault();
     const frame = document.getElementById('map-frame');
@@ -3550,6 +3551,12 @@ function _poiCard(m, poi) {
 function renderMapTab() {
     // Drop a stale active id (map deleted on another device), then render the chips.
     if (activeMapId && !_activeMap()) activeMapId = gmMaps[0] ? gmMaps[0].id : null;
+    // A trace can be stranded two ways: the GM switches map mid-trace (the POI is not on the
+    // new map) or deletes the POI being traced from its own open card (mapDeletePoi() resets
+    // mapSelectedPoiId but has no reason to know about zoneEditPoiId). Either leaves the
+    // tracing UI up over geometry that can never be committed. One guard here catches both,
+    // and any future path that could make zoneEditPoiId dangle.
+    if (zoneEditPoiId && !_activeMap()?.pois.some(p => p.id === zoneEditPoiId)) { zoneEditPoiId = null; zoneDraft = []; }
     _renderGroupBar('map');
     const stage = document.getElementById('map-stage');
     const bar   = document.getElementById('map-toolbar');
