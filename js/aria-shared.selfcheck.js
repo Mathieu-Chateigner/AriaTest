@@ -15,8 +15,8 @@ const fs = require('fs');
 global.window = { addEventListener() {} };
 global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const src = fs.readFileSync(__dirname + '/aria-shared.js', 'utf8');
-const { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify } =
-    new Function(src + '\nreturn { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify };')();
+const { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append } =
+    new Function(src + '\nreturn { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append };')();
 
 // ── Dice formulas ─────────────────────────────────────────────────────────────
 // Flat terms are exact, so assert their totals directly.
@@ -81,6 +81,14 @@ assert.ok(!rollPassesFilter(plainOk, S('die')));
 // Pills combine as a union.
 assert.ok(rollPassesFilter(die, S('success', 'die')));
 assert.ok(rollPassesFilter(plainFail, S('success', 'fail')));
+
+// ── Child appending (append/el) ──────────────────────────────
+// `0` is falsy but was appended as the text "0", so `online.length && el(...)` printed
+// a stray 0 in the Jet MJ panel whenever nobody was online. Numbers are skipped too:
+// pass String(n) to render a real zero.
+const fakeParent = { kids: [], append(k) { this.kids.push(k); } };
+append(fakeParent, [0, '', null, undefined, false, NaN, 'a', ['b', 0, ['c']]]);
+assert.deepStrictEqual(fakeParent.kids, ['a', 'b', 'c']);
 
 // ── Map filters (aria-supabase.js) ────────────────────────────────────────────
 // Loaded by all four pages, so both filters are written once. They decide what each

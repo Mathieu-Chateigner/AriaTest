@@ -178,8 +178,9 @@ function campaignChannel(base) {
 // props are assigned directly onto the element, so anything the DOM exposes works:
 // className, textContent, id, title, src, onclick, value, placeholder. Two keys get
 // special handling: `style` and `dataset` take an object, and `class` is accepted as
-// an alias for className. Children may be nodes, strings, or null/false/undefined
-// (skipped), which makes conditional children read as `cond && el(...)`.
+// an alias for className. Children may be nodes, strings, or any falsy value (skipped —
+// 0 included, so `arr.length && el(...)` cannot leak a stray "0"; use String(n) for a
+// numeric child), which makes conditional children read as `cond && el(...)`.
 function el(tag, props = null, ...kids) {
     const n = document.createElement(tag);
     if (props) {
@@ -194,10 +195,10 @@ function el(tag, props = null, ...kids) {
     return n;
 }
 
-// Append children to a node, flattening arrays and skipping empty values.
+// Append children to a node, flattening arrays and skipping falsy values.
 function append(parent, kids) {
     for (const k of kids) {
-        if (k === null || k === undefined || k === false || k === '') continue;
+        if (!k) continue;
         if (Array.isArray(k)) append(parent, k);
         else parent.append(k);
     }
