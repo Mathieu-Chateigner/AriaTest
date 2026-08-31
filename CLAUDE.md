@@ -255,10 +255,12 @@ Consequences worth stating because they used to be code:
 ### VDO.ninja camera integration
 
 Each participant's camera stream is identified by an **auto-derived stream ID** — players never set this manually:
-- Player: `'aria-' + charId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria-'`
-- GM: `'aria-gm-' + campaignId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria-gm-'`
+- Player: `'aria_' + charId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria_'`
+- GM: `'aria_gm_' + campaignId.slice(0, 8)` — `cam.streamId()`, from `sidPrefix: 'aria_gm_'`
 
 The GM sets a `vdoRoom` (and optional `vdoRoomPassword`) once on the campaign via the `⚙` config modal. It reaches players as part of the GM's presence member data. Players activate their hidden push iframe (`#vdo-push-frame`) once they see a room. Camera push only works on HTTPS (GitHub Pages), not from `file://`.
+
+**Stream IDs must be `[A-Za-z0-9_]` — VDO.ninja rewrites everything else to `_`.** A stream pushed as `?push=aria-11b0286b` is announced in the room as `aria_11b0286b` (the push iframe says so itself: `stream-id-detected aria_e4d7af3c`, `share-link …?view=aria_gm_c2ac119b`, `getStats → {streamID:'aria_11b0286b'}`). A viewer asking for `?view=aria-11b0286b` therefore matches no publisher and stays **black on every side, forever** — with no error anywhere, since both halves believe they are working. The prefixes are `aria_` / `aria_gm_` for that reason, and `sidSafe()` (`\W+` → `_`, in `makeCamera` and again in `aria-overlay.js`) is applied to every id we push, advertise, view or compare — peers on an older build still advertise hyphens, and so do camera widgets saved by an older overlay editor. Never reintroduce a hyphen, or any other punctuation, into a stream id.
 
 **Viewer iframes need the room password too.** Streams pushed into a password-protected room are encrypted, so a bare `?view=SID` stays black — `cam.viewSrc()` (both panels) and `vdoCamSrc()` (overlay) all append `&room` + `&password`. (An earlier version of this file claimed viewers didn't need it; that was wrong and cost a debugging session.)
 
@@ -429,7 +431,7 @@ Published with `presence.enter()` / `presence.update()`, read with `presence.get
   campaignKey, ariaType, streamId, ts }
 ```
 - `charId` — character UUID (stable; never changes even if the name does). Also the `clientId`, so it keys the participant in every consumer.
-- `streamId` — `'aria-' + charId.slice(0, 8)`, or `''` unless a `vdoRoom` is active and the kill switch is off (`cam.advertisedId()`) (an advertised ID nobody is pushing renders as a black iframe on every receiver).
+- `streamId` — `'aria_' + charId.slice(0, 8)`, or `''` unless a `vdoRoom` is active and the kill switch is off (`cam.advertisedId()`) (an advertised ID nobody is pushing renders as a black iframe on every receiver).
 - `ts` — publish time. Used to pick the newest member when one `clientId` has several (two tabs, or the ghost of a refreshed tab).
 - `karma` — the character's stored karma. Seeds the GM's in-memory `gmKarma` map the first time a `charId` is seen (a GM page reload wipes the map; without seeding, the next ± click would send `karma-set` with ±1 and clobber the player's real karma). After seeding, the GM's local value is authoritative — the GM is the only karma writer.
 
@@ -439,7 +441,7 @@ Republished by `saveCurrentCharacter()`, `handleGMDamage()` / `handleGMHeal()`, 
 ```js
 { role: 'gm', streamId, vdoRoom, vdoRoomPassword, spotlightCharId, ts }
 ```
-`streamId` is `'aria-gm-' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on or no room is set (`cam.advertisedId()`). Players read `vdoRoom`/`vdoRoomPassword` from here to activate their push iframe. `spotlightCharId` lives here rather than in a broadcast so a late joiner picks it up from `presence.get()`.
+`streamId` is `'aria_gm_' + campaignId.slice(0, 8)`, or `''` while the GM's kill switch is on or no room is set (`cam.advertisedId()`). Players read `vdoRoom`/`vdoRoomPassword` from here to activate their push iframe. `spotlightCharId` lives here rather than in a broadcast so a late joiner picks it up from `presence.get()`.
 
 Republished by `toggleSpotlight()`, `cam.toggle()`, `saveConfig()` (via re-entry on the new connection), and when the spotlighted player leaves the set.
 

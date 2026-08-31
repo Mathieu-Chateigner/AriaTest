@@ -157,7 +157,7 @@ let localStageSid = '';       // locally chosen big tile in Tablée (clicking a 
 // rendering is ours.
 const cam = makeCamera({
     tag: '[VDO]',
-    sidPrefix: 'aria-',
+    sidPrefix: 'aria_',
     lockPrefix: 'aria-push-',
     frameId: 'vdo-push-frame',
     ownerId:  () => currentCharId,

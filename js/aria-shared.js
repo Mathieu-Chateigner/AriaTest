@@ -730,7 +730,8 @@ function makeNotes({ key, ids, sync, syncSoon, remove }) {
 // preview. That is the `onChange` hook, and nothing else is forked.
 //
 //   tag        — console prefix ('[VDO]' / '[GM]')
-//   sidPrefix  — stream id prefix ('aria-' / 'aria-gm-')
+//   sidPrefix  — stream id prefix ('aria_' / 'aria_gm_'; see sidSafe — VDO.ninja
+//                allows only [A-Za-z0-9_], so a hyphen would be rewritten under us)
 //   lockPrefix — Web Lock name prefix ('aria-push-' / 'aria-gm-push-')
 //   frameId    — element id of the hidden push iframe
 //   ownerId()  — charId / campaignId; falsy when nothing is open
@@ -749,9 +750,17 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
     // get pasted into bug reports.
     const _redact = u => String(u).replace(/([?&]password=)[^&]*/, '$1***');
 
+    // VDO.ninja sanitizes every stream id to [A-Za-z0-9_] (`\W+` → `_`) before it
+    // publishes, so `?push=aria-11b0286b` is announced in the room as `aria_11b0286b`
+    // — and a viewer asking for `?view=aria-11b0286b` matches nothing and stays
+    // black. Apply the same rule here so what we advertise, push and view is the id
+    // VDO.ninja actually uses. Also applied to ids received from peers, which may
+    // come from an older build that still advertised hyphens.
+    const sidSafe = s => String(s || '').replace(/\W+/g, '_');
+
     // The stream id is a pure function of the owner UUID, so every tab of one
     // participant derives the same one — which is exactly why only one may push.
-    const streamId = () => { const id = ownerId(); return id ? sidPrefix + id.slice(0, 8) : ''; };
+    const streamId = () => { const id = ownerId(); return id ? sidSafe(sidPrefix + id.slice(0, 8)) : ''; };
 
     // "Is anyone publishing this stream?" Every term is state that all of the
     // participant's tabs read identically, so they advertise the same id and no
@@ -774,7 +783,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         // password is required too: streams pushed into a protected room are
         // encrypted, so a bare ?view=SID stays black.
         viewSrc(sid, muted) {
-            let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput`;
+            let src = `https://vdo.ninja/?view=${encodeURIComponent(sidSafe(sid))}&autoplay&cleanoutput`;
             if (muted) src += '&muted';
             if (room()) src += `&solo&room=${encodeURIComponent(room())}`;
             if (password()) src += `&password=${encodeURIComponent(password())}`;

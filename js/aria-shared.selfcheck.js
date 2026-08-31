@@ -15,8 +15,8 @@ const fs = require('fs');
 global.window = { addEventListener() {} };
 global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const src = fs.readFileSync(__dirname + '/aria-shared.js', 'utf8');
-const { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append } =
-    new Function(src + '\nreturn { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append };')();
+const { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append, makeCamera } =
+    new Function(src + '\nreturn { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append, makeCamera };')();
 
 // ── Dice formulas ─────────────────────────────────────────────────────────────
 // Flat terms are exact, so assert their totals directly.
@@ -142,5 +142,28 @@ for (const z of aliceFog) {
     assert.strictEqual(z.name, undefined);
     assert.strictEqual(z.publicDesc, undefined);
 }
+
+// ── VDO.ninja stream ids ──────────────────────────────────────────────────────
+// VDO.ninja rewrites every stream id to [A-Za-z0-9_] before publishing, so an id we
+// push as `aria-gm-c2ac119b` is announced in the room as `aria_gm_c2ac119b`. What we
+// push, advertise and view must already be in that form or the viewer asks for a
+// stream nobody publishes and renders black — which is exactly what happened.
+const cam = makeCamera({
+    tag: '[TEST]', sidPrefix: 'aria_gm_', lockPrefix: 'x-', frameId: 'x',
+    ownerId: () => 'c2ac119b-25ff-439d-a37c-721ce29bb86d',
+    offKey: () => 'k', room: () => 'salle', password: () => 'pw',
+});
+assert.strictEqual(cam.streamId(), 'aria_gm_c2ac119b');
+assert.strictEqual(cam.advertisedId(), 'aria_gm_c2ac119b');
+// A peer on an older build still advertises hyphens; the viewer must normalise it
+// rather than open a URL VDO.ninja will never match.
+assert.ok(cam.viewSrc('aria-11b0286b').includes('view=aria_11b0286b'));
+assert.ok(!cam.viewSrc('aria-11b0286b').includes('aria-11b0286b'));
+// No room ⇒ nothing is published, so nothing is advertised.
+const dark = makeCamera({ tag: '[TEST]', sidPrefix: 'aria_', lockPrefix: 'x-', frameId: 'x',
+    ownerId: () => '11b0286b-09c0-4b93-82c2-c08116d09cae', offKey: () => 'k',
+    room: () => '', password: () => '' });
+assert.strictEqual(dark.streamId(), 'aria_11b0286b');
+assert.strictEqual(dark.advertisedId(), '');
 
 console.log('aria-shared self-check: all assertions passed');

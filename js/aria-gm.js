@@ -60,7 +60,7 @@ let currentVdoRoomPassword = '';
 // makeCamera(); only the preview and topbar work below is GM-specific.
 const cam = makeCamera({
     tag: '[GM]',
-    sidPrefix: 'aria-gm-',
+    sidPrefix: 'aria_gm_',
     lockPrefix: 'aria-gm-push-',
     frameId: 'vdo-gm-push-frame',
     ownerId:  () => currentCampaignId,

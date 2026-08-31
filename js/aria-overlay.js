@@ -45,8 +45,14 @@ const ROLL_HISTORY_MAX = 20;
 // required alongside &room or VDO.ninja shows its join page instead of the stream).
 let vdoRoom = '';
 let vdoRoomPassword = '';
+// VDO.ninja sanitizes stream ids to [A-Za-z0-9_] before publishing, so a stream
+// pushed as `aria-11b0286b` is announced as `aria_11b0286b`. Apply the same rule to
+// every id we view or compare — a widget config saved by an older editor, or a peer
+// on an older build, still carries hyphens and would never match.
+const sidSafe = s => String(s || '').replace(/\W+/g, '_');
+
 function vdoCamSrc(sid) {
-    let src = `https://vdo.ninja/?view=${encodeURIComponent(sid)}&autoplay&cleanoutput&transparent`;
+    let src = `https://vdo.ninja/?view=${encodeURIComponent(sidSafe(sid))}&autoplay&cleanoutput&transparent`;
     if (vdoRoom) src += `&solo&room=${encodeURIComponent(vdoRoom)}`;
     if (vdoRoomPassword) src += `&password=${encodeURIComponent(vdoRoomPassword)}`;
     return src;
@@ -61,8 +67,8 @@ let gmLiveStreamId = '';
 // GM. A widget pointing anywhere else is showing a stream nobody publishes.
 function liveStreamIds() {
     const live = new Set();
-    if (gmLiveStreamId) live.add(gmLiveStreamId);
-    presenceCache.forEach(p => { if (p.streamId) live.add(p.streamId); });
+    if (gmLiveStreamId) live.add(sidSafe(gmLiveStreamId));
+    presenceCache.forEach(p => { if (p.streamId) live.add(sidSafe(p.streamId)); });
     return live;
 }
 // Bring one camera widget's element in line with the current room/liveness, doing
@@ -72,7 +78,7 @@ function liveStreamIds() {
 // second or two. `live` is a liveStreamIds() set, passed in so a caller looping
 // over many widgets computes it once.
 function syncCameraWidget(el, widget, live) {
-    const sid = widget.config?.streamId || '';
+    const sid = sidSafe(widget.config?.streamId);
     const iframe = el.querySelector('iframe');
     if (!sid || !live.has(sid)) {
         // Nobody is pushing this stream — show the (invisible) placeholder rather
@@ -879,7 +885,7 @@ function renderWidgetContent(widget) {
             return `<div class="ow-list">${shown.map(r => `<div class="ow-roll-row"><span class="ow-roll-char">${esc(r.char || '')}</span><span class="ow-roll-skill">${esc(r.skillName)}</span><span class="ow-roll-result ${r.success ? 'success' : 'fail'}">${esc(r.roll)}</span></div>`).join('')}</div>`;
         }
         case 'camera': {
-            const sid = cfg.streamId || '';
+            const sid = sidSafe(cfg.streamId);
             // Same liveness rule as refreshCameraWidgets, so a layout re-render can't
             // recreate an iframe on a stream nobody is pushing.
             if (!sid || !liveStreamIds().has(sid)) return '<div class="ow-camera-empty">—</div>';

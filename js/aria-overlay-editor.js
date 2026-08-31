@@ -282,25 +282,25 @@ function syncPropsPanel() {
     }
 }
 
-// Stream IDs are derived from UUIDs (player: 'aria-' + charId[0..8], GM:
-// 'aria-gm-' + campaignId[0..8]) and displayed nowhere in the player/GM panels, so
+// Stream IDs are derived from UUIDs (player: 'aria_' + charId[0..8], GM:
+// 'aria_gm_' + campaignId[0..8]) and displayed nowhere in the player/GM panels, so
 // the camera widget's ID field was unfillable without the devtools. Rebuild the
 // list from the same localStorage the panels write, on the same origin.
 function availableStreams() {
     const out = [];
     if (OWNER_TYPE === 'gm' && OWNER_ID) {
-        out.push({ sid: 'aria-gm-' + OWNER_ID.slice(0, 8), label: 'MJ (vous)' });
+        out.push({ sid: 'aria_gm_' + OWNER_ID.slice(0, 8), label: 'MJ (vous)' });
         let known = {};
         try { known = JSON.parse(localStorage.getItem('aria-gm-known-players-' + OWNER_ID) || '{}'); } catch (_) {}
         Object.values(known).forEach(p => {
             if (!p?.charId) return;
-            out.push({ sid: 'aria-' + String(p.charId).slice(0, 8), label: p.name || p.charId });
+            out.push({ sid: 'aria_' + String(p.charId).slice(0, 8), label: p.name || p.charId });
         });
     } else if (OWNER_ID) {
         let chars = [];
         try { chars = JSON.parse(localStorage.getItem('aria-characters') || '[]'); } catch (_) {}
         const me = chars.find(c => c.id === OWNER_ID);
-        out.push({ sid: 'aria-' + OWNER_ID.slice(0, 8), label: (me?.name || 'Vous') + ' (vous)' });
+        out.push({ sid: 'aria_' + OWNER_ID.slice(0, 8), label: (me?.name || 'Vous') + ' (vous)' });
     }
     return out;
 }

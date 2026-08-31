@@ -35,6 +35,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{4D86993F-F
 		specs\2026-08-28-carte-points-interet-design.md = specs\2026-08-28-carte-points-interet-design.md
 		plans\2026-08-29-carte-points-interet.md = plans\2026-08-29-carte-points-interet.md
 		Docs\Aide aux combats.pdf = Docs\Aide aux combats.pdf
+		Docs\console_logs_gm.txt = Docs\console_logs_gm.txt
+		Docs\console_logs_player.txt = Docs\console_logs_player.txt
 		Docs\README.md = Docs\README.md
 	EndProjectSection
 EndProject
