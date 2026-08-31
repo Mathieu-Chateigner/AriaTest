@@ -294,7 +294,18 @@ There is no TTL, no timestamped record, no read-back-after-write, and no "taking
 
 **The push URL disables the microphone with `&audiodevice=0`, not `&noaudio`.** `&noaudio` is a *viewer-side* option — it silences incoming streams and does nothing to what a page publishes. With it, the push iframe asked for camera **and** microphone; Chrome bundles those into one prompt, and denying it fails `getUserMedia` outright, so the webcam never started and nothing on screen said why. If table voice chat over VDO.ninja is ever wanted, this is the one parameter to change (and peer viewer tiles are already unmuted).
 
-**The Bandeau rail and the Caméras grid must never both be live** — they open viewer iframes on the same streams, doubling the WebRTC connections per peer. `renderPresenceUI()` hides the rail while `tab-cameras` is in `openPanes`; `renderTabLayout()` calls `renderPresenceUI()` so docking/undocking the pane re-evaluates it.
+**The Caméras grid is never emptied while a room is known.** `.tab-content{display:none}` hides the iframes but leaves their WebRTC connections up, so leaving the tab for Inventaire and coming back costs nothing. `renderPresenceUI()` used to clear the grid whenever its pane closed, and every such trip meant watching the whole table reconnect from black. It still clears when `camerasAvailable()` goes false (session over) — `renderCamerasTab()` cannot, since it is unreachable once the pane is closed.
+
+`renderPresenceUI()` still hides the Bandeau rail while `tab-cameras` is in `openPanes` (`renderTabLayout()` calls it, so docking/undocking re-evaluates), but with the grid now persisting, a *closed* pane in Bandeau means the rail and the hidden grid each hold a viewer on the same streams — **2× inbound connections per peer**. That is the accepted trade for instant tab switching at a table of a handful; the fix, if it ever bites, is one shared iframe host that the rail and the grid both style, rather than two sets that must never be alive at once (marked `ponytail:` at the site).
+
+**Choosing which camera to publish — `&videodevice`.** VDO.ninja takes whatever camera Chrome offers first, which on a machine running OBS is the OBS virtual camera: the GM ends up broadcasting OBS's own output back into the table. `cam.setVideoDevice(v)` pins it, and the push URL carries `&videodevice=<v>`. Two things decide the shape of `v`:
+
+- VDO.ninja matches it against the **normalised label** — its `normalizeDeviceLabel()` is `\W+ → _` lowercased — trying `startsWith`, then `includes`, then an exact `deviceId`. A `deviceId` is base64 and gets mangled by that same normalisation, so **store the normalised label, never the id**.
+- The list comes from the **push iframe**, not from this page. `navigator.mediaDevices.enumerateDevices()` returns blank labels until *this origin* has been granted the camera, and it never is — the push iframe owns the webcam and is a different origin. `cam.askDevices()` posts `{getDeviceList:true}` to it 5s after load (alongside `pushStats()`); the reply is a flat array handled on the same `message` listener. It is cached in `aria-camera-device-list` so the picker is filled on the next load instead of sitting empty, and for tabs that hold no push frame at all.
+
+There is no documented postMessage to switch device at runtime, so `setVideoDevice()` re-srcs the push frame — a couple of seconds of black for everyone watching, acceptable for a setting changed once per machine. The choice lives in **`aria-camera-device`, deliberately unscoped**: it names a device on this machine, so it is right for every character the browser opens and for the GM panel in the next tab. `cam.renderDevicePick(selectId)` fills the `<select>` (`#cam-device-pick` in the player's Caméras toolbar, `#gm-cam-device-pick` in the GM's Joueurs tab, rendered *before* `updateGMPushIframe()`'s early return — the picker exists to fix a wrong camera, which is exactly when the preview is hidden) and hides it when no room is set.
+
+**Camera tile size is one number, not one per cell** — `aria-camera-size` (px), applied as `--cam-w` on `#cameras-grid` and read by `.camera-iframe-wrap{width:var(--cam-w,280px)}`. The `Taille` slider and the corner grip (`attachCamResize`, now on the self tile too) both move it. The grip used to write `wrap.style.width` directly, so the size was per-cell, undiscoverable, and lost on every rebuild.
 
 **Viewer URLs that include `&room=` MUST also include `&solo`** — without it VDO.ninja ignores `&view` and renders the "Join Room with Camera" landing page instead of the stream. `cam.viewSrc()` appends `&solo&room=...` together.
 
@@ -521,6 +532,8 @@ Lists all campaigns, each showing its join code (click to copy). `selectCampaign
 
 ### Player panel tabs
 `Compétences` | `Caractéristiques` | `Jet libre` | `Inventaire` | `Notes` | `Cartes` | `⚗ Alchimie` | `Fichiers` | `📹 Caméras` | `Personnage`
+
+The Caméras tab carries a toolbar above the grid: the camera picker (`#cam-device-pick`) and the tile-size slider (`#cam-size`) + `Réinit.` — see *Choosing which camera to publish* and *Camera tile size* under VDO.ninja.
 
 `Cartes` and `⚗ Alchimie` are hidden by default — shown only when GM enables them via `tab-config`. `Fichiers` auto-shows when the GM grants at least one file (`playerFiles.length > 0`). `Caméras` auto-shows while a `vdoRoom` is known (`camerasAvailable()`) — see *A viewer tile requires a room* below.
 

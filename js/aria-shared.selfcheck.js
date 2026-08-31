@@ -12,8 +12,14 @@ const fs = require('fs');
 
 // aria-shared.js is a classic script: eval it in this scope so its top-level
 // declarations become visible here, with the globals it reads at load time stubbed.
-global.window = { addEventListener() {} };
-global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+const _listeners = {};
+global.window = { addEventListener(type, fn) { (_listeners[type] ||= []).push(fn); } };
+const _store = new Map();
+global.localStorage = {
+    getItem: k => (_store.has(k) ? _store.get(k) : null),
+    setItem: (k, v) => _store.set(k, String(v)),
+    removeItem: k => _store.delete(k),
+};
 const src = fs.readFileSync(__dirname + '/aria-shared.js', 'utf8');
 const { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append, makeCamera } =
     new Function(src + '\nreturn { rollDiceFormula, formulaToDiceSpec, rollPassesFilter, classify, append, makeCamera };')();
@@ -165,5 +171,58 @@ const dark = makeCamera({ tag: '[TEST]', sidPrefix: 'aria_', lockPrefix: 'x-', f
     room: () => '', password: () => '' });
 assert.strictEqual(dark.streamId(), 'aria_11b0286b');
 assert.strictEqual(dark.advertisedId(), '');
+
+// -- Camera device selection ---------------------------------------------------
+// VDO.ninja picks whatever camera Chrome hands it first, which on a machine running
+// OBS is the OBS virtual camera. &videodevice pins it, matched against the label
+// normalised the same way VDO.ninja's own normalizeDeviceLabel does.
+{
+    // Minimal fake push iframe. syncPushFrame only reads .src and sets .onload, and
+    // the message handler checks e.source against .contentWindow.
+    const frame = { src: '', onload: null, contentWindow: { posted: [], postMessage(m) { this.posted.push(m); } } };
+    global.document = { getElementById: () => frame };
+    const dcam = makeCamera({
+        tag: '[TEST]', sidPrefix: 'aria_', lockPrefix: 'x-', frameId: 'x',
+        ownerId: () => '11b0286b-09c0-4b93-82c2-c08116d09cae',
+        offKey: () => 'off', room: () => 'salle', password: () => 'secret',
+    });
+    dcam.acquireLock();                     // no navigator.locks in node => sole owner
+    assert.ok(dcam.lockHeld);
+    dcam.syncPushFrame();
+    assert.ok(frame.src.includes('push=aria_11b0286b'));
+    assert.ok(!frame.src.includes('videodevice'), 'no device chosen => let VDO.ninja decide');
+
+    // The push iframe answers getDeviceList with a flat array; only cameras with a
+    // label are usable, since the label is what &videodevice matches on.
+    const onMessage = _listeners.message[_listeners.message.length - 1];
+    onMessage({ source: frame.contentWindow, data: { deviceList: [
+        { kind: 'videoinput', label: 'OBS Virtual Camera' },
+        { kind: 'audioinput', label: 'Microphone (USB)' },
+        { kind: 'videoinput', label: 'HD Pro Webcam C920' },
+        { kind: 'videoinput', label: '' },
+    ] } });
+    assert.deepStrictEqual(dcam.devices(), [
+        { value: 'obs_virtual_camera', label: 'OBS Virtual Camera' },
+        { value: 'hd_pro_webcam_c920', label: 'HD Pro Webcam C920' },
+    ]);
+
+    // Choosing one re-srcs the push frame with the pinned device, and it survives a
+    // reload: the value is stored, not held in the page.
+    dcam.setVideoDevice('hd_pro_webcam_c920');
+    assert.ok(frame.src.includes('videodevice=hd_pro_webcam_c920'), frame.src);
+    assert.strictEqual(localStorage.getItem('aria-camera-device'), 'hd_pro_webcam_c920');
+    const reloaded = makeCamera({
+        tag: '[TEST]', sidPrefix: 'aria_', lockPrefix: 'x-', frameId: 'x',
+        ownerId: () => '11b0286b-09c0-4b93-82c2-c08116d09cae',
+        offKey: () => 'off', room: () => 'salle', password: () => 'secret',
+    });
+    assert.strictEqual(reloaded.videoDevice, 'hd_pro_webcam_c920');
+    assert.strictEqual(reloaded.devices().length, 2, 'device list is cached for the next load');
+
+    // Back to automatic clears the param rather than pinning an empty device.
+    dcam.setVideoDevice('');
+    assert.ok(!frame.src.includes('videodevice'), frame.src);
+    delete global.document;
+}
 
 console.log('aria-shared self-check: all assertions passed');

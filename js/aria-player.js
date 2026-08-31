@@ -833,18 +833,24 @@ function renderPresenceUI() {
         // reconciler forgets the tiles too rather than holding detached nodes.
         else clearKeyed(document.getElementById('presence-rail-grid'));
     }
-    // The other half of that rule. Nothing else prunes the Caméras grid:
-    // renderCamerasTab() is the only function that removes cells, and it is
-    // unreachable once the pane closes — renderTabLayout just drops the .active
-    // class, and .tab-content{display:none} hides the iframes while leaving their
-    // WebRTC connections up. So closing the pane in Bandeau mode gave *two* live
-    // viewer iframes per stream (the rail rebuilds its own set), and a session that
-    // ended left iframes loaded on dead streams for good. Every path that closes the
-    // pane goes through renderTabLayout() → renderPresenceUI(), so this is the one
-    // place that needs it. Per-cell widths from the resize handle are lost on
-    // reopen — they already were whenever a peer reconnected.
+    // The grid is deliberately NOT emptied when its pane closes.
+    // .tab-content{display:none} hides the iframes while leaving their WebRTC
+    // connections up, so leaving the tab and coming back now costs nothing - which is
+    // the point: it used to clear here, and every trip to Inventaire meant watching
+    // the whole table reconnect from black on the way back.
+    //
+    // It is still cleared the moment the room goes (session over): those iframes are
+    // then pointed at streams nobody publishes and would sit loaded for good - the
+    // case renderCamerasTab() cannot handle, since it is unreachable once the pane is
+    // closed.
+    //
+    // ponytail: in Bandeau, a closed pane now means the rail and the hidden grid each
+    // hold a viewer on the same streams - 2x inbound connections per peer while you
+    // are on another tab. Fine for a table of a handful; if it ever bites, the fix is
+    // one shared iframe host that the rail and the grid both style, rather than two
+    // sets of iframes that must never be alive at once.
     const camGrid = document.getElementById('cameras-grid');
-    if (camGrid && !camsOpen && camGrid.childElementCount) camGrid.innerHTML = '';
+    if (camGrid && !hasAny && camGrid.childElementCount) camGrid.innerHTML = '';
     // Tablée — the cameras grid renders as a stage
     camGrid?.classList.toggle('stage-mode', presenceMode === 'tablee');
     if (presenceMode === 'tablee') applyStageMain();
@@ -906,6 +912,54 @@ function applyStageMain() {
     cells.forEach(c => c.classList.toggle('stage-main', c === main));
 }
 
+// -- Camera tile size ---------------------------------------------------------
+// One width for every tile, not one per cell. The drag handle used to write
+// wrap.style.width directly, so the size was per-cell, invisible until you found the
+// corner grip, and lost the moment the cell was rebuilt. A single number driving a
+// CSS variable on the grid survives every re-render for free, and gives the slider
+// and the grip the same thing to move.
+const CAM_SIZE_KEY = 'aria-camera-size', CAM_SIZE_DEFAULT = 280;
+let camSize = Math.min(640, Math.max(160, parseInt(localStorage.getItem(CAM_SIZE_KEY), 10) || CAM_SIZE_DEFAULT));
+
+function applyCamSize(persist) {
+    const grid = document.getElementById('cameras-grid');
+    if (grid) grid.style.setProperty('--cam-w', camSize + 'px');
+    const slider = document.getElementById('cam-size');
+    if (slider && slider.value !== String(camSize)) slider.value = camSize;
+    if (persist) localStorage.setItem(CAM_SIZE_KEY, String(camSize));
+}
+function setCamSize(px, persist) {
+    camSize = Math.min(640, Math.max(160, Math.round(px)));
+    applyCamSize(persist);
+}
+function resetCamSize() { setCamSize(CAM_SIZE_DEFAULT, true); }
+
+// The corner grip. Same knob as the slider - it just drags it. Attached to every
+// tile including our own, which had no way to be resized at all.
+function attachCamResize(wrap) {
+    const handle = document.createElement('div');
+    handle.className = 'camera-resize-handle';
+    handle.addEventListener('mousedown', e => {
+        const startX = e.clientX, startW = wrap.offsetWidth;
+        // A shield over the page keeps the drag alive across the camera iframes,
+        // which would otherwise swallow mousemove as soon as the pointer entered one.
+        const shield = document.createElement('div');
+        shield.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;cursor:nwse-resize;';
+        document.body.appendChild(shield);
+        const onMove = ev => setCamSize(startW + ev.clientX - startX, false);
+        const onUp = () => {
+            shield.remove();
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            applyCamSize(true);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        e.preventDefault();
+    });
+    wrap.appendChild(handle);
+}
+
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
     const grid = document.getElementById('cameras-grid');
@@ -954,6 +1008,7 @@ function renderCamerasTab() {
             iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
             iframe.src = viewSrc;
             wrap.appendChild(iframe);
+            attachCamResize(wrap);
             const labelEl = document.createElement('div');
             labelEl.className = 'camera-label';
             labelEl.textContent = character.name || 'Vous';
@@ -1029,21 +1084,7 @@ function renderCamerasTab() {
             iframe.allowFullscreen = true;
             iframe.className = 'camera-iframe';
             wrap.appendChild(iframe);
-            const handle = document.createElement('div');
-            handle.className = 'camera-resize-handle';
-            handle.addEventListener('mousedown', e => {
-                const startX = e.clientX;
-                const startW = wrap.offsetWidth;
-                const shield = document.createElement('div');
-                shield.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;cursor:nwse-resize;';
-                document.body.appendChild(shield);
-                const onMove = ev => { wrap.style.width = Math.max(140, startW + ev.clientX - startX) + 'px'; };
-                const onUp = () => { shield.remove(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-                e.preventDefault();
-            });
-            wrap.appendChild(handle);
+            attachCamResize(wrap);
             const labelEl = document.createElement('div');
             labelEl.className = 'camera-label';
             labelEl.textContent = label;
@@ -1060,6 +1101,8 @@ function renderCamerasTab() {
     grid.querySelectorAll('.camera-cell').forEach(cell =>
         cell.classList.toggle('spotlit', !!spot && cellSid(cell) === spot));
     if (presenceMode === 'tablee') applyStageMain();
+    cam.renderDevicePick('cam-device-pick');
+    applyCamSize(false);
     // What the grid decided to show, and why it might be empty. A tile only exists
     // for a stream someone advertises, and only while a room is known.
     console.log('[VDO] renderCamerasTab | self tile:', cam.live() ? cam.streamId() : 'none (' + (cam.off ? 'camera cut' : !vdoRoom ? 'no room' : 'not live') + ')',

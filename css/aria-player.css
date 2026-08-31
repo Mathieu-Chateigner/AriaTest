@@ -1994,6 +1994,43 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     padding: 9px 12px;
     margin-bottom: 10px;
 }
+.cameras-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 4px 0 2px;
+}
+.cam-device-pick {
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    color: var(--parchment);
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 6px;
+    max-width: 260px;
+}
+.cam-size-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 8.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+.cam-size { width: 140px; accent-color: var(--gold); }
+.cam-size-reset {
+    font-family: 'Archivo', sans-serif;
+    font-size: 11px;
+    color: var(--parchment-dim);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 3px 8px;
+    cursor: pointer;
+}
+.cam-size-reset:hover { color: var(--gold-light); border-color: var(--gold-dim); }
+
 .cameras-grid {
     display: flex;
     flex-wrap: wrap;
@@ -2006,7 +2043,9 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     flex-direction: column;
 }
 .camera-iframe-wrap {
-    width: 280px;
+    /* One knob for every tile: the slider and the corner grip both move --cam-w on
+       the grid, so the size survives a re-render instead of living on each cell. */
+    width: var(--cam-w, 280px);
     min-width: 140px;
     aspect-ratio: 16 / 9;
     overflow: hidden;

@@ -1036,6 +1036,10 @@ function toggleSpotlight(charId) {
 function updateGMPushIframe() {
     cam.renderToggle('tb-cam-toggle');
     cam.syncPushFrame();
+    // Before the early return below: the picker exists to fix a wrong camera, which
+    // is exactly the case where the preview is black or hidden. It hides itself when
+    // no room is set.
+    cam.renderDevicePick('gm-cam-device-pick');
     const wrap = document.getElementById('gm-self-view-wrap');
     const section = document.getElementById('gm-self-view-section');
     if (!wrap || !section) return;

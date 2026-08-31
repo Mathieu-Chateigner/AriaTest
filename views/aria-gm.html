@@ -134,6 +134,7 @@
                     <input class="gm-input" id="bulk-heal-input" type="text" inputmode="numeric" placeholder="Soins" style="width:80px;" oninput="this.value=this.value.replace(/[^0-9]/g,'')" onkeydown="if(event.key==='Enter')bulkHealAll()" />
                     <button class="gm-action-btn gm-action-heal" onclick="bulkHealAll()">Soigner</button>
                 </div>
+                <select id="gm-cam-device-pick" class="gm-input" style="display:none;margin-top:10px;max-width:280px;" title="Caméra à diffuser"></select>
                 <div id="gm-self-view-section" style="display:none;margin-top:10px;">
                     <div class="section-header">
                         <span class="section-icon">📹</span>

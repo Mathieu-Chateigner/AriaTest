@@ -745,6 +745,26 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
                       onChange = () => {}, announce = () => {} }) {
     let off = false, lockHeld = false, _release = null, _abort = null;
 
+    // ── Which physical camera to publish ──────────────────────────────────────
+    // Not scoped to the character/campaign: it names a device on *this machine*, so
+    // the same choice is right for every character the browser opens, and for the GM
+    // panel in the next tab. A machine running OBS has a virtual camera that Chrome
+    // is perfectly happy to hand out first, which is how you end up broadcasting
+    // OBS's own output back into the table.
+    //
+    // VDO.ninja matches &videodevice against the *normalised label* — its
+    // normalizeDeviceLabel() is `\W+ → _` lowercased, and it tries startsWith, then
+    // includes, then an exact deviceId. deviceIds are base64 and would be mangled by
+    // that same normalisation, so the label is the only value worth storing.
+    const DEV_KEY = 'aria-camera-device', DEV_LIST_KEY = 'aria-camera-device-list';
+    const devLabel = l => String(l || '').replace(/\W+/g, '_').toLowerCase();
+    let videoDevice = localStorage.getItem(DEV_KEY) || '';
+    // Cached so the picker is populated on the next page load instead of sitting
+    // empty until the push iframe answers — which it can only do once it has the
+    // webcam, several seconds in, and never at all when this tab isn't the pusher.
+    let devices = [];
+    try { devices = JSON.parse(localStorage.getItem(DEV_LIST_KEY) || '[]'); } catch (_) {}
+
     // Every log line that carries a VDO.ninja URL goes through this: the room
     // password is enough to join the room and watch the whole table, and these logs
     // get pasted into bug reports.
@@ -882,6 +902,9 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             // webcam then never starts and nothing on screen says why. &audiodevice=0
             // disables the mic before capture, so only the camera is requested.
             let src = `https://vdo.ninja/?push=${streamId()}&room=${encodeURIComponent(room())}&view&autostart&webcam&audiodevice=0&cleanoutput`;
+            // Without this VDO.ninja takes whatever Chrome offers first, which on a
+            // streaming machine is usually the OBS virtual camera.
+            if (videoDevice) src += `&videodevice=${encodeURIComponent(videoDevice)}`;
             if (password()) src += `&password=${encodeURIComponent(password())}`;
             if (frame.src === src) { console.log(tag, 'PUSHING (unchanged):', _redact(src)); return; }
             console.log(tag, 'PUSHING:', _redact(src));
@@ -889,8 +912,8 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             // Everything after it happens inside a cross-origin iframe, so ask
             // VDO.ninja directly once it has had time to get the webcam.
             frame.onload = () => {
-                console.log(tag, 'push iframe loaded — requesting VDO.ninja stats in 5s');
-                setTimeout(() => cam.pushStats(), 5000);
+                console.log(tag, 'push iframe loaded — requesting VDO.ninja stats + device list in 5s');
+                setTimeout(() => { cam.pushStats(); cam.askDevices(); }, 5000);
             };
             frame.src = src;
         },
@@ -954,6 +977,52 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         // publishing" while the webcam was never granted, or granted and reaching
         // nobody. total_outbound_connections in the reply is the number that settles
         // it. The answer arrives asynchronously on the message listener below.
+        // ── Camera device picker ──────────────────────────────────────────────
+        // The parent page can't enumerate cameras usefully: enumerateDevices() returns
+        // blank labels until *this origin* has been granted the camera, and it never
+        // is — the push iframe owns the webcam and it is a different origin. So ask
+        // the iframe, which does have the grant. The answer lands on the message
+        // listener below.
+        askDevices() {
+            const frame = document.getElementById(frameId);
+            if (!frame?.contentWindow || !frame.src || frame.src === 'about:blank') return;
+            frame.contentWindow.postMessage({ getDeviceList: true }, '*');
+        },
+        get videoDevice() { return videoDevice; },
+        devices() { return devices.slice(); },
+
+        // Re-src the push iframe onto the chosen camera. There is no documented
+        // postMessage to switch device at runtime, so the URL is the switch — which
+        // means a reload of the push frame, and a couple of seconds of black for
+        // everyone watching. Acceptable for a setting changed once per machine.
+        setVideoDevice(v) {
+            videoDevice = String(v || '');
+            if (videoDevice) localStorage.setItem(DEV_KEY, videoDevice);
+            else localStorage.removeItem(DEV_KEY);
+            console.log(tag, 'camera device →', videoDevice || '(auto)');
+            const frame = document.getElementById(frameId);
+            if (frame) frame.src = 'about:blank';   // force syncPushFrame past its "unchanged" check
+            cam.syncPushFrame();
+            onChange();
+        },
+
+        // Fill a <select> with the known cameras. Kept here rather than in each panel
+        // because both need exactly this, and the list lives in this closure.
+        renderDevicePick(selectId) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return;
+            sel.style.display = room() ? '' : 'none';   // nothing is published without a room
+            fill(sel, el('option', { value: '', textContent: 'Caméra : automatique' }),
+                ...devices.map(d => el('option', { value: d.value, textContent: d.label })));
+            // A device saved on a previous run may not be plugged in now; keep the
+            // stored value selectable rather than silently falling back to automatic.
+            if (videoDevice && !devices.some(d => d.value === videoDevice)) {
+                sel.appendChild(el('option', { value: videoDevice, textContent: videoDevice + ' (absente)' }));
+            }
+            sel.value = videoDevice;
+            sel.onchange = () => cam.setVideoDevice(sel.value);
+        },
+
         pushStats() {
             const frame = document.getElementById(frameId);
             if (!frame?.contentWindow || !frame.src || frame.src === 'about:blank') {
@@ -973,7 +1042,15 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         const frame = document.getElementById(frameId);
         if (!frame || !e.source || e.source !== frame.contentWindow) return;
         const d = e.data;
-        if (d && d.stats) {
+        if (d && d.deviceList) {
+            // A flat array of MediaDeviceInfo-shaped entries; we only publish video.
+            devices = (Array.isArray(d.deviceList) ? d.deviceList : [])
+                .filter(x => x && x.kind === 'videoinput' && x.label)
+                .map(x => ({ value: devLabel(x.label), label: x.label }));
+            console.log(tag, 'cameras ←', devices.map(x => x.label).join(' | ') || '(none reported)');
+            try { localStorage.setItem(DEV_LIST_KEY, JSON.stringify(devices)); } catch (_) {}
+            onChange();
+        } else if (d && d.stats) {
             const out = d.stats.total_outbound_connections;
             console.log(tag, 'push stats ←', out === 0 ? 'NOBODY IS RECEIVING THIS STREAM (0 outbound)' : `${out} outbound connection(s)`, d.stats);
         } else if (d && d.action) {
