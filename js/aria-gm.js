@@ -988,6 +988,7 @@ function applyPresenceSet(members) {
 // the room we are advertising, and every player card's camera decision with its URL.
 // Type ariaCamDiag() in the console.
 window.ariaCamDiag = function () {
+    ariaCamLog(true);   // the pushStats reply below arrives async, on camLog
     console.log('[GM] ── camera diagnostic ─────────────────────────────');
     console.log('[GM] me:', cam.diag());
     console.log('[GM] session: room=', currentVdoRoom || '(NONE)', '| password=', currentVdoRoomPassword ? '(set)' : '(none)',
@@ -1048,7 +1049,7 @@ function updateGMPushIframe() {
     // safe to *leave loaded* behind a display:none pane, which keeps its WebRTC
     // connection up. Dropped with the pane; renderTabLayout() rebuilds it on reopen.
     if (!cam.live() || !openPanes.includes('tab-players')) {
-        console.log('[GM] "Votre caméra" preview hidden —',
+        camLog('[GM] "Votre caméra" preview hidden —',
             !cam.live() ? (cam.off ? 'camera cut locally' : !currentVdoRoom ? 'no vdoRoom set' : 'not live') : 'Joueurs pane is closed');
         if (wrap.innerHTML) wrap.innerHTML = '';
         section.style.display = 'none';   // nothing published ⇒ no empty preview box
@@ -2259,7 +2260,8 @@ function loadConfigInputs() {
     document.getElementById('cfg-vdo-room').value = currentVdoRoom;
     document.getElementById('cfg-vdo-room-password').value = currentVdoRoomPassword;
 }
-// Save config modal changes: VDO room, theme, and reinitialize Ably/dddice/presence.
+// Save config modal changes: VDO room, theme, dddice. Republishes presence; it does
+// not reconnect Ably unless the connection is actually gone — see below.
 function saveConfig() {
     const newVdoRoom = document.getElementById('cfg-vdo-room').value.trim();
     const newVdoRoomPassword = document.getElementById('cfg-vdo-room-password').value.trim();
@@ -2279,13 +2281,17 @@ function saveConfig() {
     teardownDddice();
     clearTimeout(gmRollSafetyTimer);
     pendingGMRoll = null;
-    // Close the old Ably connection before reinit — nulling the refs without closing
-    // leaves the old WebSocket subscribed, duplicating every incoming roll/presence.
-    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
-    ablyInstance = null; ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyMap = null;
     if (config.dddiceKey && config.dddiceRoom) initDddice();
-    ablyPresence = null; gmPresenceEntered = false;
-    if (config.ablyKey) initAbly();   // re-enters presence with the new room
+    // The Ably connection is NOT torn down here. Nothing in this modal can change it:
+    // the key comes from index.html and the channel suffix from the join code, which
+    // this modal only displays. Closing it left the presence set, and the GM leaving
+    // the set is the session-over signal — every player dropped the room, blanked
+    // their push iframe and rebuilt every tile, so one "Reconnecter" restarted the
+    // whole table's cameras. The room/password live in our presence member data, so
+    // an update() is all they need. Reconnecting is still the fallback when the
+    // connection is actually gone.
+    if (ablyInstance) publishGMPresence();
+    else if (config.ablyKey) initAbly();
     // No cam.acquireLock() here. The lock is named after currentCampaignId, which
     // this modal cannot change, so we already hold it — and acquireLock() *releases*
     // first, which dropped lockHeld to false for the round-trip of the re-grant. The

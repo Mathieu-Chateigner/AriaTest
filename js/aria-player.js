@@ -727,7 +727,7 @@ function updateCamerasTabVisibility() {
     const hasAny = camerasAvailable();
     const btn = document.getElementById('tab-btn-cameras');
     if (!btn) return;
-    console.log('[VDO] Caméras tab', hasAny ? 'SHOWN' : 'HIDDEN (no vdoRoom)', '| pane open:', openPanes.includes('tab-cameras'));
+    camLog('[VDO] Caméras tab', hasAny ? 'SHOWN' : 'HIDDEN (no vdoRoom)', '| pane open:', openPanes.includes('tab-cameras'));
     btn.style.display = hasAny ? '' : 'none';
     if (!hasAny && openPanes.includes('tab-cameras')) {
         if (openPanes.length === 1) switchTab('tab-skills');
@@ -886,7 +886,7 @@ function renderPresenceRail() {
         tile._label.textContent = label;
         tile.classList.toggle('spotlit', !!spot && sid === spot);
     });
-    console.log('[VDO] renderPresenceRail |', [...expected].map(([sid, l]) => `${l}=${sid}`).join(', ') || '(no tiles)');
+    camLog('[VDO] renderPresenceRail |', [...expected].map(([sid, l]) => `${l}=${sid}`).join(', ') || '(no tiles)');
 }
 
 // The stream ID a rendered camera cell is showing, read back off its iframe URL.
@@ -913,40 +913,60 @@ function applyStageMain() {
 }
 
 // -- Camera tile size ---------------------------------------------------------
-// One width for every tile, not one per cell. The drag handle used to write
-// wrap.style.width directly, so the size was per-cell, invisible until you found the
-// corner grip, and lost the moment the cell was rebuilt. A single number driving a
-// CSS variable on the grid survives every re-render for free, and gives the slider
-// and the grip the same thing to move.
-const CAM_SIZE_KEY = 'aria-camera-size', CAM_SIZE_DEFAULT = 280;
-let camSize = Math.min(640, Math.max(160, parseInt(localStorage.getItem(CAM_SIZE_KEY), 10) || CAM_SIZE_DEFAULT));
+// Two knobs. The slider moves --cam-w on the grid — one width for every tile, the
+// common zoom. The corner grip moves that one tile only, stored per stream ID in
+// camSizes so the override survives a re-render (a cell is rebuilt whenever the
+// roster changes). A tile with no override follows the slider; Réinit. drops both.
+const CAM_SIZE_KEY = 'aria-camera-size', CAM_SIZES_KEY = 'aria-camera-sizes', CAM_SIZE_DEFAULT = 280;
+const camClampW = px => Math.min(640, Math.max(160, Math.round(px)));
+let camSize = camClampW(parseInt(localStorage.getItem(CAM_SIZE_KEY), 10) || CAM_SIZE_DEFAULT);
+let camSizes = {};
+try { camSizes = JSON.parse(localStorage.getItem(CAM_SIZES_KEY)) || {}; } catch {}
 
 function applyCamSize(persist) {
     const grid = document.getElementById('cameras-grid');
-    if (grid) grid.style.setProperty('--cam-w', camSize + 'px');
+    if (grid) {
+        grid.style.setProperty('--cam-w', camSize + 'px');
+        // Per-tile overrides, re-applied on every render: '' hands the cell back to
+        // the slider rather than freezing it at whatever it happened to measure.
+        grid.querySelectorAll('.camera-cell').forEach(cell => {
+            const wrap = cell.querySelector('.camera-iframe-wrap');
+            const w = camSizes[cellSid(cell)];
+            if (wrap) wrap.style.width = w ? w + 'px' : '';
+        });
+    }
     const slider = document.getElementById('cam-size');
     if (slider && slider.value !== String(camSize)) slider.value = camSize;
-    if (persist) localStorage.setItem(CAM_SIZE_KEY, String(camSize));
+    if (persist) {
+        localStorage.setItem(CAM_SIZE_KEY, String(camSize));
+        localStorage.setItem(CAM_SIZES_KEY, JSON.stringify(camSizes));
+    }
 }
 function setCamSize(px, persist) {
-    camSize = Math.min(640, Math.max(160, Math.round(px)));
+    camSize = camClampW(px);
     applyCamSize(persist);
 }
-function resetCamSize() { setCamSize(CAM_SIZE_DEFAULT, true); }
+function resetCamSize() { camSizes = {}; setCamSize(CAM_SIZE_DEFAULT, true); }
 
-// The corner grip. Same knob as the slider - it just drags it. Attached to every
-// tile including our own, which had no way to be resized at all.
+// The corner grip — this tile only. Attached to every tile including our own, which
+// had no way to be resized at all. A cell with no stream ID (placeholder) has nothing
+// to key an override on, so its grip falls back to moving the common size.
 function attachCamResize(wrap) {
     const handle = document.createElement('div');
     handle.className = 'camera-resize-handle';
     handle.addEventListener('mousedown', e => {
         const startX = e.clientX, startW = wrap.offsetWidth;
+        const sid = cellSid(wrap.closest('.camera-cell'));
         // A shield over the page keeps the drag alive across the camera iframes,
         // which would otherwise swallow mousemove as soon as the pointer entered one.
         const shield = document.createElement('div');
         shield.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;cursor:nwse-resize;';
         document.body.appendChild(shield);
-        const onMove = ev => setCamSize(startW + ev.clientX - startX, false);
+        const onMove = ev => {
+            const w = camClampW(startW + ev.clientX - startX);
+            if (sid) { camSizes[sid] = w; wrap.style.width = w + 'px'; }
+            else setCamSize(w, false);
+        };
         const onUp = () => {
             shield.remove();
             document.removeEventListener('mousemove', onMove);
@@ -963,7 +983,7 @@ function attachCamResize(wrap) {
 // Render/update the cameras grid: self-view, GM iframe, and peer VDO.ninja iframes.
 function renderCamerasTab() {
     const grid = document.getElementById('cameras-grid');
-    if (!grid) { console.warn('[VDO] renderCamerasTab: #cameras-grid not found'); return; }
+    if (!grid) { camLog('[VDO] renderCamerasTab: #cameras-grid not found'); return; }
     // Push failure used to be silent — the self tile just stayed black and the only
     // clue was a console line. getUserMedia needs a secure context, so the file://
     // case is detectable up front; a cut camera is stated too.
@@ -988,7 +1008,7 @@ function renderCamerasTab() {
         }
         warn.textContent = msg;
         warn.style.display = msg ? '' : 'none';
-        if (msg) console.warn('[VDO] cameras warning:', msg);
+        if (msg) camLog('[VDO] cameras warning:', msg);
     }
     // Self tile: a muted viewer of our own pushed stream. The camera itself belongs to
     // #vdo-push-frame; there is no native <video> path. No room or camera cut ⇒ nothing
@@ -1105,7 +1125,7 @@ function renderCamerasTab() {
     applyCamSize(false);
     // What the grid decided to show, and why it might be empty. A tile only exists
     // for a stream someone advertises, and only while a room is known.
-    console.log('[VDO] renderCamerasTab | self tile:', cam.live() ? cam.streamId() : 'none (' + (cam.off ? 'camera cut' : !vdoRoom ? 'no room' : 'not live') + ')',
+    camLog('[VDO] renderCamerasTab | self tile:', cam.live() ? cam.streamId() : 'none (' + (cam.off ? 'camera cut' : !vdoRoom ? 'no room' : 'not live') + ')',
         '| peer/MJ tiles:', [...expected].map(([sid, l]) => `${l}=${sid}`).join(', ') || '(none)',
         '| cells in DOM:', grid.querySelectorAll('.camera-cell').length);
 }
@@ -2519,7 +2539,7 @@ function applyPresenceSet(members) {
     // is the log that says whether the session even has a picture to render: no GM
     // member ⇒ no room ⇒ nothing is published by anybody, and every downstream
     // "black tile" question is answered already.
-    console.log('[VDO] presence applied |', members?.length ?? 0, 'members →', byId.size, 'participants |',
+    camLog('[VDO] presence applied |', members?.length ?? 0, 'members →', byId.size, 'participants |',
         'GM:', gm ? 'present' : 'ABSENT (no room, no session)',
         '| room:', vdoRoom || '(none)', vdoRoomPassword ? '(password set)' : '(no password)',
         '| roomChanged:', roomChanged,
@@ -2545,6 +2565,7 @@ window.ariaCamDiag = function () {
         label: t._label?.textContent,
         src: (t._frame?.src || '(none)').replace(/([?&]password=)[^&]*/, '$1***'),
     }));
+    ariaCamLog(true);   // the pushStats reply below arrives async, on camLog
     console.log('[VDO] ── camera diagnostic ─────────────────────────────');
     console.log('[VDO] me:', cam.diag());
     console.log('[VDO] session: room=', vdoRoom || '(none)', '| MJ stream=', gmStreamId || '(none)',
@@ -2584,7 +2605,8 @@ function loadConfigInputs() {
     document.getElementById('cfg-dddice-theme').value = config.dddiceTheme || '';
     document.getElementById('cfg-light-mode').checked = !!config.lightMode;
 }
-// Save config modal changes to localStorage and reinitialize Ably and dddice.
+// Save config modal changes to localStorage. Reconnects Ably only on a campaign
+// switch (or when the connection is gone) — see below.
 function saveConfig() {
     const newCampaignKey = document.getElementById('cfg-campaign-key').value.trim().toUpperCase();
     // Editing the join code re-subscribes every channel onto another campaign's
@@ -2605,21 +2627,27 @@ function saveConfig() {
     teardownDddice();
     clearTimeout(dddiceRollSafetyTimer);
     pendingDddiceRoll = null;
-    // Close the old Ably connection before reinit — nulling the refs without closing
-    // leaves the old WebSocket subscribed, duplicating every incoming message. The
-    // close is also what leaves the old campaign's presence set, so there is nothing
-    // to publish first and nothing to await before closing.
-    if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
-    ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
-    ablyPresence = null; presenceEntered = false;
+    if (config.dddiceKey && config.dddiceRoom) initDddice();
+    // The Ably connection is only torn down when the campaign changed. It used to be
+    // closed unconditionally, which left the presence set: every peer saw us leave and
+    // rebuilt our tile, and this tab rebuilt its whole grid from an empty set — one
+    // "Reconnecter" and the table's cameras all restarted. Nothing else in this modal
+    // touches the connection (the Ably key comes from index.html). Reconnecting is
+    // still the fallback when the connection is actually gone.
     if (campaignChanged) {
+        // Close before reinit — nulling the refs without closing leaves the old
+        // WebSocket subscribed, duplicating every incoming message. The close is also
+        // what leaves the old campaign's presence set, so there is nothing to publish
+        // first and nothing to await before closing.
+        if (ablyInstance) { try { ablyInstance.close(); } catch (_) {} }
+        ablyRolls = null; ablyRollsHidden = null; ablyCards = null; ablyDamage = null; ablyMusic = null; ablyInstance = null;
+        ablyPresence = null; presenceEntered = false;
         resetCameraState();
         // Soigner targets are campaign-scoped too; the new campaign's presence set
         // repopulates the picker.
         Object.keys(knownPlayers).forEach(k => delete knownPlayers[k]);
     }
-    if (config.dddiceKey && config.dddiceRoom) initDddice();
-    if (config.ablyKey) initAbly();
+    if (!ablyInstance && config.ablyKey) initAbly();
 }
 
 // ═══════════════════════════════════════════

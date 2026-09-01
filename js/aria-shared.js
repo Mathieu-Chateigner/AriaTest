@@ -716,6 +716,15 @@ function makeNotes({ key, ids, sync, syncSoon, remove }) {
     return { load, add, select, del, save, rename, get list() { return list; } };
 }
 
+// Camera logging, off by default. The push/lock/device/stats chatter narrated every
+// render and every presence change and drowned everything else in the console. The
+// state it printed is still available on demand — ariaCamDiag() prints a snapshot,
+// and ariaCamLog(true) turns the running commentary back on for the session (which
+// ariaCamDiag does itself, so the async pushStats reply still lands).
+let camLogOn = false;
+function camLog(...a) { if (camLogOn) console.log(...a); }
+window.ariaCamLog = (on = true) => (camLogOn = !!on, 'camera logs ' + (camLogOn ? 'ON' : 'OFF'));
+
 // ═══════════════════════════════════════════
 //  CAMERA (VDO.ninja push + view)
 // ═══════════════════════════════════════════
@@ -831,7 +840,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
                 navigator.locks.request(lockPrefix + ownerId(), { mode: 'exclusive', signal: ac.signal },
                     () => new Promise(res => {
                         _abort = null; _release = res; lockHeld = true;
-                        console.log(tag, 'push lock acquired — this tab owns the webcam');
+                        camLog(tag, 'push lock acquired — this tab owns the webcam');
                         onChange();
                     })
                 ).catch(() => {});   // AbortError when we left the queue before being granted
@@ -854,7 +863,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         toggle() {
             off = !off;
             if (ownerId()) localStorage.setItem(offKey(), off ? '1' : '0');
-            console.log(tag, 'camera', off ? 'OFF (local)' : 'ON');
+            camLog(tag, 'camera', off ? 'OFF (local)' : 'ON');
             onChange();      // the lock stays ours; we just stop publishing into it
             announce();
         },
@@ -869,7 +878,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             const v = e.newValue === '1';
             if (v === off) return false;
             off = v;
-            console.log(tag, 'camera', off ? 'OFF' : 'ON', '(synced from another tab)');
+            camLog(tag, 'camera', off ? 'OFF' : 'ON', '(synced from another tab)');
             onChange();
             announce();
             return true;
@@ -882,13 +891,13 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         // what its sibling publishes.
         syncPushFrame() {
             const frame = document.getElementById(frameId);
-            if (!frame) { console.warn(tag, 'push frame not found: #' + frameId); return; }
+            if (!frame) { camLog(tag, 'push frame not found: #' + frameId); return; }
             if (!(live() && lockHeld)) {
                 const why = off ? 'camera cut locally'
                           : !room() ? 'no vdoRoom (the GM has not set one, or its presence has not arrived)'
                           : !ownerId() ? 'nothing open'
                           : 'another tab holds the push lock';
-                console.log(tag, 'NOT PUSHING —', why, '| clearing push iframe |', cam.diag());
+                camLog(tag, 'NOT PUSHING —', why, '| clearing push iframe |', cam.diag());
                 cam.blankPushFrame();
                 return;
             }
@@ -906,13 +915,13 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             // streaming machine is usually the OBS virtual camera.
             if (videoDevice) src += `&videodevice=${encodeURIComponent(videoDevice)}`;
             if (password()) src += `&password=${encodeURIComponent(password())}`;
-            if (frame.src === src) { console.log(tag, 'PUSHING (unchanged):', _redact(src)); return; }
-            console.log(tag, 'PUSHING:', _redact(src));
+            if (frame.src === src) { camLog(tag, 'PUSHING (unchanged):', _redact(src)); return; }
+            camLog(tag, 'PUSHING:', _redact(src));
             // The load event is the last thing this side can observe by itself.
             // Everything after it happens inside a cross-origin iframe, so ask
             // VDO.ninja directly once it has had time to get the webcam.
             frame.onload = () => {
-                console.log(tag, 'push iframe loaded — requesting VDO.ninja stats + device list in 5s');
+                camLog(tag, 'push iframe loaded — requesting VDO.ninja stats + device list in 5s');
                 setTimeout(() => { cam.pushStats(); cam.askDevices(); }, 5000);
             };
             frame.src = src;
@@ -925,7 +934,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         blankPushFrame() {
             const frame = document.getElementById(frameId);
             if (frame && frame.src && frame.src !== 'about:blank') {
-                console.log(tag, 'push iframe blanked — the webcam is released');
+                camLog(tag, 'push iframe blanked — the webcam is released');
                 frame.onload = null;   // don't run the stats probe against about:blank
                 frame.src = 'about:blank';
             }
@@ -999,7 +1008,7 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             videoDevice = String(v || '');
             if (videoDevice) localStorage.setItem(DEV_KEY, videoDevice);
             else localStorage.removeItem(DEV_KEY);
-            console.log(tag, 'camera device →', videoDevice || '(auto)');
+            camLog(tag, 'camera device →', videoDevice || '(auto)');
             const frame = document.getElementById(frameId);
             if (frame) frame.src = 'about:blank';   // force syncPushFrame past its "unchanged" check
             cam.syncPushFrame();
@@ -1026,10 +1035,10 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
         pushStats() {
             const frame = document.getElementById(frameId);
             if (!frame?.contentWindow || !frame.src || frame.src === 'about:blank') {
-                console.log(tag, 'pushStats: no push iframe loaded — nothing to ask');
+                camLog(tag, 'pushStats: no push iframe loaded — nothing to ask');
                 return;
             }
-            console.log(tag, 'pushStats: asking VDO.ninja…');
+            camLog(tag, 'pushStats: asking VDO.ninja…');
             frame.contentWindow.postMessage({ getStats: true }, '*');
         },
     };
@@ -1047,16 +1056,16 @@ function makeCamera({ tag, sidPrefix, lockPrefix, frameId,
             devices = (Array.isArray(d.deviceList) ? d.deviceList : [])
                 .filter(x => x && x.kind === 'videoinput' && x.label)
                 .map(x => ({ value: devLabel(x.label), label: x.label }));
-            console.log(tag, 'cameras ←', devices.map(x => x.label).join(' | ') || '(none reported)');
+            camLog(tag, 'cameras ←', devices.map(x => x.label).join(' | ') || '(none reported)');
             try { localStorage.setItem(DEV_LIST_KEY, JSON.stringify(devices)); } catch (_) {}
             onChange();
         } else if (d && d.stats) {
             const out = d.stats.total_outbound_connections;
-            console.log(tag, 'push stats ←', out === 0 ? 'NOBODY IS RECEIVING THIS STREAM (0 outbound)' : `${out} outbound connection(s)`, d.stats);
+            camLog(tag, 'push stats ←', out === 0 ? 'NOBODY IS RECEIVING THIS STREAM (0 outbound)' : `${out} outbound connection(s)`, d.stats);
         } else if (d && d.action) {
-            console.log(tag, 'push action ←', d.action, d.value ?? '');
+            camLog(tag, 'push action ←', d.action, d.value ?? '');
         } else {
-            console.log(tag, 'push message ←', d);
+            camLog(tag, 'push message ←', d);
         }
     });
 

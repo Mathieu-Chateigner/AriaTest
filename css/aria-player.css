@@ -2043,8 +2043,9 @@ body.light-mode .other-roll-toast .ort-verdict.cf { color: var(--bad); }
     flex-direction: column;
 }
 .camera-iframe-wrap {
-    /* One knob for every tile: the slider and the corner grip both move --cam-w on
-       the grid, so the size survives a re-render instead of living on each cell. */
+    /* Common size: the slider moves --cam-w on the grid, so it survives a re-render
+       instead of living on each cell. The corner grip overrides one tile with an
+       inline width, re-applied from camSizes[streamId] by applyCamSize(). */
     width: var(--cam-w, 280px);
     min-width: 140px;
     aspect-ratio: 16 / 9;
