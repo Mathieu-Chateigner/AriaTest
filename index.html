@@ -41,6 +41,7 @@
             --ink:#050608; --bg:#0b0e13; --panel:#10141b; --raise:#161b25;
             --line:rgba(150,168,200,.10); --line2:rgba(150,168,200,.20);
             --text:#e8ebf1; --warm:#f3ede1; --dim:#868f9f; --faint:#586273;
+            --bad:#e25a4f;
             --ember:#eca456; --ember2:#f6c07e; --embersoft:rgba(236,164,86,.12);
             --violet:#a98bdd; --violet2:#c4aef0; --violetsoft:rgba(169,139,221,.12);
             --field:rgba(0,0,0,.30);
@@ -273,6 +274,69 @@
             color: var(--faint);
             margin-top: 10px;
         }
+        /* Carte de connexion de l'accueil. Elle reprend .config-input et
+           .config-save-btn de la modale : meme page, memes champs. */
+        .home-auth {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 340px;
+            max-width: calc(100vw - 48px);
+            margin: 0 auto;
+            padding: 30px 30px 26px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            background: var(--panel);
+        }
+        .home-auth-title {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 23px;
+            font-weight: 600;
+            color: var(--warm);
+        }
+        .home-auth-desc {
+            font-family: 'Cormorant Garamond', serif;
+            font-style: italic;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--dim);
+            margin: 0 0 4px;
+        }
+        .home-auth-error {
+            font-family: 'Archivo', sans-serif;
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--bad);
+            border-left: 2px solid var(--bad);
+            padding: 2px 0 2px 10px;
+        }
+        .home-auth-switch {
+            background: none;
+            border: none;
+            color: var(--dim);
+            font-family: 'Archivo', sans-serif;
+            font-size: 11.5px;
+            letter-spacing: .06em;
+            padding: 6px 4px;
+            cursor: pointer;
+            transition: color .15s;
+        }
+        .home-auth-switch:hover { color: var(--ember); }
+        .home-account {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 22px;
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 12px;
+            color: var(--dim);
+        }
+        .home-account-btn { text-transform: uppercase; font-weight: 600; font-size: 11px; color: var(--faint); }
         .config-input {
             background: var(--field);
             border: 1px solid var(--line2);
@@ -308,6 +372,7 @@
             --ink:#ddd4c2; --bg:#f4efe4; --panel:#fcf9f1; --raise:#fff;
             --line:rgba(70,56,30,.13); --line2:rgba(70,56,30,.24);
             --text:#2c2820; --warm:#1b1710; --dim:#6c6353; --faint:#9c917a;
+            --bad:#bd3528;
             --ember:#a9620f; --ember2:#8a4f0c; --embersoft:rgba(169,98,15,.14);
             --violet:#6a47a3; --violet2:#523784; --violetsoft:rgba(106,71,163,.13);
             --field:rgba(50,38,14,.05);
@@ -353,7 +418,19 @@
         <div class="divider"></div>
     </div>
 
-    <div class="cards">
+    <!-- Sans session, les deux panneaux ne peuvent rien lire : RLS ne rend rien.
+         Les proposer reviendrait a envoyer l'utilisateur vers un ecran vide. -->
+    <div class="home-auth" id="home-auth" style="display:none;">
+        <div class="home-auth-title" id="home-auth-title">Connexion</div>
+        <p class="home-auth-desc">Vos personnages et vos campagnes sont rattachés à votre compte : lui seul y donne accès.</p>
+        <input class="config-input" id="home-email" type="email" autocomplete="email" placeholder="Adresse e-mail" onkeydown="if(event.key==='Enter')homeSubmitAuth()" />
+        <input class="config-input" id="home-password" type="password" autocomplete="current-password" placeholder="Mot de passe" onkeydown="if(event.key==='Enter')homeSubmitAuth()" />
+        <div class="home-auth-error" id="home-auth-error" style="display:none;"></div>
+        <button class="config-save-btn" id="home-auth-submit" onclick="homeSubmitAuth()">Se connecter</button>
+        <button class="home-auth-switch" id="home-auth-switch" onclick="homeSetAuthMode(_homeAuthMode === 'up' ? 'in' : 'up')">Créer un compte</button>
+    </div>
+
+    <div class="cards" id="home-cards" style="display:none;">
         <a class="card card-player" href="views/aria-player.html">
             <div class="card-icon"></div>
             <div class="card-title">Joueur</div>
@@ -367,6 +444,11 @@
             <p class="card-desc">Gestion des campagnes, monstres, joueurs, cartes et alchimie.</p>
             <div class="card-badge">Diriger &rarr;</div>
         </a>
+    </div>
+
+    <div class="home-account" id="home-account" style="display:none;">
+        <span id="home-account-mail"></span>
+        <button class="home-auth-switch home-account-btn" onclick="homeSignOut()">Déconnexion</button>
     </div>
 
     <button class="config-btn" onclick="openConfig()">Configuration</button>
@@ -388,11 +470,65 @@
     </div>
 
     <script src="js/aria-dungeon-bg.js"></script>
+    <script src="js/aria-supabase.js"></script>
     <script>
         (function () {
             const cfg = JSON.parse(localStorage.getItem('aria-config') || '{}');
             if (cfg.lightMode) document.body.classList.add('light-mode');
         })();
+
+        // ── Compte ────────────────────────────────────────────────────────
+        // Les deux cartes mènent à des panneaux qui ne peuvent rien lire sans
+        // session : RLS ne rend rien. Cette page montre donc l'un ou l'autre,
+        // jamais les deux. La logique de session vit dans aria-supabase.js —
+        // ici il n'y a qu'un formulaire de plus, pas un second modèle.
+        let _homeAuthMode = 'in';
+
+        function homeSetAuthMode(mode) {
+            _homeAuthMode = mode;
+            const signup = mode === 'up';
+            document.getElementById('home-auth-title').textContent  = signup ? 'Créer un compte' : 'Connexion';
+            document.getElementById('home-auth-submit').textContent = signup ? 'Créer le compte' : 'Se connecter';
+            document.getElementById('home-auth-switch').textContent = signup ? "J'ai déjà un compte" : 'Créer un compte';
+            homeAuthError('');
+        }
+
+        function homeAuthError(msg) {
+            const box = document.getElementById('home-auth-error');
+            box.textContent = msg;
+            box.style.display = msg ? '' : 'none';
+        }
+
+        function renderHome() {
+            const signedIn = sbSignedIn();
+            document.getElementById('home-auth').style.display    = signedIn ? 'none' : '';
+            document.getElementById('home-cards').style.display   = signedIn ? '' : 'none';
+            document.getElementById('home-account').style.display = signedIn ? '' : 'none';
+            if (signedIn) document.getElementById('home-account-mail').textContent = sbUserEmail();
+        }
+
+        async function homeSubmitAuth() {
+            const email = document.getElementById('home-email').value.trim();
+            const pass  = document.getElementById('home-password').value;
+            if (!email || !pass) { homeAuthError('Adresse et mot de passe requis.'); return; }
+            if (_homeAuthMode === 'up' && pass.length < 6) { homeAuthError('Mot de passe : 6 caractères minimum.'); return; }
+
+            const btn = document.getElementById('home-auth-submit');
+            btn.disabled = true;
+            homeAuthError('');
+            const res = _homeAuthMode === 'up' ? await sbSignUp(email, pass) : await sbSignIn(email, pass);
+            btn.disabled = false;
+            if (res.error) { homeAuthError(res.error); return; }
+            document.getElementById('home-password').value = '';
+            renderHome();
+        }
+
+        function homeSignOut() {
+            sbSignOut();
+            renderHome();
+        }
+
+        renderHome();
 
         function openConfig() {
             const cfg = JSON.parse(localStorage.getItem('aria-config') || '{}');
@@ -420,6 +556,10 @@
         }
 
         window.addEventListener('storage', e => {
+            // Se connecter ou se déconnecter dans un panneau doit se voir ici :
+            // sans cela, cette page proposerait encore les deux cartes après une
+            // déconnexion faite dans l'onglet d'à côté.
+            if (e.key === 'aria-session') { location.reload(); return; }
             if (e.key !== 'aria-config') return;
             const cfg = JSON.parse(e.newValue || '{}');
             document.body.classList.toggle('light-mode', !!cfg.lightMode);
