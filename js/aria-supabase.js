@@ -2,20 +2,162 @@
 //  SUPABASE SHARED PRIMITIVES
 //  Loaded before aria-player.js and aria-gm.js
 // ═══════════════════════════════════════════
-const SUPABASE_URL      = 'https://npybuksklkvdmbhyzdjs.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_hUkdwmlgNNhLXn6t38GHHg_N7XXVOn4';
+const SUPABASE_URL      = 'https://qpxaaauzzbahsdhsjaqn.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_VzeSCICN3NTL0cjVJaULVg_s4ojUG1z';
 
-// Internal Supabase REST fetch with API key auth headers.
-function _sbFetch(path, options = {}) {
-    return fetch(SUPABASE_URL + path, {
+// ═══════════════════════════════════════════
+//  SESSION
+// ═══════════════════════════════════════════
+// Every table but two is now behind RLS keyed on saves.owner, so a request without
+// a session reads nothing and writes nothing. The two exceptions are what the OBS
+// overlay needs with no session at all: overlay_configs, and the
+// save_key/ably_key/type columns of saves. See specs/auth_rls.sql.
+//
+// The session is the anon key's replacement as the Authorization bearer — the anon
+// key stays in `apikey`, which is what routes the request to the project. A page
+// with no session (the overlay) sends the anon key as both, exactly as before.
+//
+// ARIA_ANON_ONLY is set by the overlay page. It shares an origin — and therefore
+// localStorage — with the panels, but has no business holding a session: reading one
+// would make a failed refresh there sign the panel out in the next tab. Anonymous is
+// also exactly what the RLS design grants it (see specs/auth_rls.sql).
+let _session = null;
+if (!window.ARIA_ANON_ONLY) {
+    try { _session = JSON.parse(localStorage.getItem('aria-session') || 'null'); } catch(e) {}
+}
+
+function sbAccessToken() { return _session && _session.access_token || null; }
+function sbUserId()      { return _session && _session.user && _session.user.id || null; }
+function sbUserEmail()   { return _session && _session.user && _session.user.email || ''; }
+function sbSignedIn()    { return !!sbAccessToken(); }
+
+// The one description of how a request authenticates. The GM's four Storage calls
+// build their own fetch and used to inline the anon key twice each; they call this
+// instead, so a page that is signed in cannot end up uploading as anon.
+function sbAuthHeaders() {
+    return {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + (sbAccessToken() || SUPABASE_ANON_KEY),
+    };
+}
+
+function _storeSession(s) {
+    // GoTrue returns expires_in (seconds from now); expires_at is what we can
+    // actually compare against later, so derive it once here rather than at
+    // every check.
+    if (s && s.access_token) {
+        _session = { ...s, expires_at: s.expires_at || (Date.now() / 1000 + (s.expires_in || 3600)) };
+        localStorage.setItem('aria-session', JSON.stringify(_session));
+    } else {
+        _session = null;
+        if (!window.ARIA_ANON_ONLY) localStorage.removeItem('aria-session');
+    }
+    return _session;
+}
+
+function _authFetch(path, body) {
+    return fetch(SUPABASE_URL + '/auth/v1/' + path, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+}
+
+// Create an account. Email confirmation is off on the project (supabase/config.toml),
+// so this already returns a usable session — with it on, it would return a user and
+// no token, and the caller would have nothing to continue with.
+async function sbSignUp(email, password) {
+    const res  = await _authFetch('signup', { email, password });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: body.msg || body.error_description || 'Inscription refusée.' };
+    if (!body.access_token) return { error: 'Compte créé, mais aucune session — la confirmation par mail est-elle activée ?' };
+    _storeSession(body);
+    return { ok: true };
+}
+
+async function sbSignIn(email, password) {
+    const res  = await _authFetch('token?grant_type=password', { email, password });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.access_token) {
+        return { error: body.error_description || body.msg || 'Identifiants refusés.' };
+    }
+    _storeSession(body);
+    return { ok: true };
+}
+
+function sbSignOut() {
+    const tok = sbAccessToken();
+    if (tok) {
+        fetch(SUPABASE_URL + '/auth/v1/logout', {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + tok },
+        }).catch(() => {});
+    }
+    _storeSession(null);
+}
+
+// Exchange the refresh token for a new access token. Returns false when the refresh
+// token itself is dead (password changed, session revoked, weeks offline), and drops
+// the session in that case so the caller falls back to the sign-in panel rather than
+// retrying forever.
+let _refreshing = null;
+function sbRefreshSession() {
+    if (_refreshing) return _refreshing;          // concurrent syncs must not each refresh
+    const rt = _session && _session.refresh_token;
+    if (!rt) return Promise.resolve(false);
+    _refreshing = (async () => {
+        const res  = await _authFetch('token?grant_type=refresh_token', { refresh_token: rt });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.access_token) { _storeSession(null); return false; }
+        _storeSession(body);
+        return true;
+    })().catch(() => false).finally(() => { _refreshing = null; });
+    return _refreshing;
+}
+
+// Refresh a minute before expiry rather than waiting for the 401: a sync fires a
+// dozen requests at once, and letting them all fail first would retry the lot.
+function _sbFreshSession() {
+    if (!_session || !_session.expires_at) return Promise.resolve();
+    if (_session.expires_at - 60 > Date.now() / 1000) return Promise.resolve();
+    return sbRefreshSession();
+}
+
+// Attach an existing save key to the signed-in account. Keys created before accounts
+// existed have owner null, so RLS hides them from everyone until their holder claims
+// one here. Returns false for an unknown key, or one already held by someone else.
+async function sbClaimSaveKey(key) {
+    const res = await _sbFetch('/rest/v1/rpc/claim_save_key', {
+        method: 'POST',
+        body: JSON.stringify({ p_key: key }),
+    });
+    if (!res.ok) { console.warn('[ARIA] claim_save_key failed:', await res.text()); return false; }
+    return await res.json().catch(() => false) === true;
+}
+
+// The save keys this account owns. RLS does the filtering, so there is no `owner`
+// filter to write here — and no way for it to return someone else's.
+async function sbOwnedSaves() {
+    return await sbSelect('saves', 'select=save_key,type,updated_at&order=updated_at.desc');
+}
+
+// Internal Supabase REST fetch, authenticated as the signed-in user when there is one.
+async function _sbFetch(path, options = {}, _retry = true) {
+    await _sbFreshSession();
+    const res = await fetch(SUPABASE_URL + path, {
         ...options,
         headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            ...sbAuthHeaders(),
             'Content-Type': 'application/json',
             ...options.headers,
         },
     });
+    // A 401 that survives a refresh means the session is gone, not stale — falling
+    // through returns it to the caller, which reports the failure as any other.
+    if (res.status === 401 && _retry && _session && await sbRefreshSession()) {
+        return _sbFetch(path, options, false);
+    }
+    return res;
 }
 
 // Upsert a row into a Supabase table, merging on conflict.

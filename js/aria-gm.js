@@ -2855,7 +2855,7 @@ async function deleteMusicFileFromStorage(path) {
     try {
         await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-music/${path}`, {
             method: 'DELETE',
-            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            headers: sbAuthHeaders(),
         });
     } catch(e) { console.warn('[ARIA] Music storage delete failed:', e); }
 }
@@ -2973,8 +2973,7 @@ async function musicUploadFile(input) {
         const res  = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-music/${path}`, {
             method: 'POST',
             headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                ...sbAuthHeaders(),
                 'Content-Type': file.type || 'audio/mpeg',
                 'x-upsert': 'false',
             },
@@ -3028,8 +3027,7 @@ async function uploadFileToStorage(file) {
     const res = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-files/${path}`, {
         method: 'POST',
         headers: {
-            'apikey': SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            ...sbAuthHeaders(),
             'Content-Type': file.type || 'application/octet-stream',
             'x-upsert': 'false',
         },
@@ -3047,7 +3045,7 @@ async function deleteFileFromStorage(path) {
     try {
         await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-files/${path}`, {
             method: 'DELETE',
-            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            headers: sbAuthHeaders(),
         });
     } catch(e) { console.warn('[ARIA] Storage delete failed:', e); }
 }

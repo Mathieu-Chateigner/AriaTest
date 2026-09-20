@@ -68,6 +68,9 @@
         </div>
     </div>
 
+    <!-- Pas de session ici : meme origine que les panneaux, donc meme localStorage,
+         et l'overlay n'a besoin que de ce qu'anon peut lire. -->
+    <script>window.ARIA_ANON_ONLY = true;</script>
     <script src="../js/aria-supabase.js"></script>
     <script src="../js/aria-overlay.js"></script>
 </body>

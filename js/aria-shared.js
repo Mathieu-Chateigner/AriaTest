@@ -1157,17 +1157,109 @@ function wireImageZoom(img) {
 let saveKey = localStorage.getItem('aria-save-key') || null;
 let _pendingNewKey = null;
 
-// Check whether Supabase sync is configured and a save key is available.
-function _supabaseReady() { return !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !!saveKey; }
+// Check whether Supabase sync is configured and a save key is available. Every
+// table but overlay_configs is behind RLS now, so a save key without a session
+// reads and writes nothing — being signed in is part of being ready.
+function _supabaseReady() { return !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !!saveKey && sbSignedIn(); }
 
-// Show the two-panel gateway (new key + existing key) with a freshly generated key.
-function showGateway() {
+// The gateway has two stages and shows exactly one: sign in, then — only for an
+// account that owns no save yet — choose between a new save and claiming an old
+// key. An account that already owns one never sees the second stage at all.
+function showGateway(stage) {
+    const signedIn = sbSignedIn();
+    const keys = stage === 'keys' || (stage === undefined && signedIn);
     _pendingNewKey = uid();
     document.getElementById('gateway-key-display').textContent = _pendingNewKey;
+
+    document.getElementById('gateway-auth').style.display = keys ? 'none' : '';
+    document.getElementById('gateway-keys').style.display = keys ? '' : 'none';
+
+    const who = document.getElementById('gateway-account');
+    if (who) {
+        who.style.display = signedIn ? '' : 'none';
+        const label = document.getElementById('gateway-account-mail');
+        if (label) label.textContent = sbUserEmail();
+    }
     const cancel = document.getElementById('gateway-cancel');
     if (cancel) cancel.style.display = saveKey ? '' : 'none';
     document.getElementById('file-gateway').style.display = 'flex';
     if (window.ariaDungeonBg) window.ariaDungeonBg.setActive(true);
+}
+
+// ── Sign in / sign up ─────────────────────────────────────────────────────
+// One form, one toggle: the two flows differ by which endpoint they post to and
+// by nothing else, so a second form would be a second thing to keep in step.
+let _authMode = 'in';
+
+function setAuthMode(mode) {
+    _authMode = mode;
+    const signup = mode === 'up';
+    document.getElementById('gateway-auth-title').textContent   = signup ? 'Créer un compte' : 'Connexion';
+    document.getElementById('gateway-auth-submit').textContent  = signup ? 'Créer le compte →' : 'Se connecter →';
+    document.getElementById('gateway-auth-switch').textContent  = signup ? "J'ai déjà un compte" : 'Créer un compte';
+    _authError('');
+}
+
+function _authError(msg) {
+    const box = document.getElementById('gateway-auth-error');
+    if (!box) return;
+    box.textContent = msg;
+    box.style.display = msg ? '' : 'none';
+}
+
+async function submitAuth() {
+    const email = (document.getElementById('gateway-email').value || '').trim();
+    const pass  = document.getElementById('gateway-password').value || '';
+    if (!email || !pass) { _authError('Adresse et mot de passe requis.'); return; }
+    if (_authMode === 'up' && pass.length < 6) { _authError('Mot de passe : 6 caractères minimum.'); return; }
+
+    const btn = document.getElementById('gateway-auth-submit');
+    btn.disabled = true;
+    _authError('');
+    const res = _authMode === 'up' ? await sbSignUp(email, pass) : await sbSignIn(email, pass);
+    btn.disabled = false;
+    if (res.error) { _authError(res.error); return; }
+
+    // A save key held from before this account existed is not evidence of anything —
+    // only the saves rows the account actually owns are.
+    saveKey = null;
+    localStorage.removeItem('aria-save-key');
+    await enterWithSession();
+}
+
+// Sign out and return to the first stage. The local data stays: it belongs to the
+// save key, and clearing it here would lose anything not yet synced.
+function signOut() {
+    sbSignOut();
+    saveKey = null;
+    localStorage.removeItem('aria-save-key');
+    const sel = document.getElementById('selection-screen');
+    if (sel) sel.style.display = 'none';
+    showGateway('auth');
+}
+
+// Adopt the account's own save key, or ask which one to set up. Shared by the
+// sign-in path and by the reload path, so both resolve the key the same way.
+async function enterWithSession() {
+    const owned = await sbOwnedSaves();
+    // sbOwnedSaves() returns [] both for a new account and for a session whose
+    // refresh token died in _sbFetch. Those need different stages, and only the
+    // session says which: offering "new save / claim a key" to a signed-out user
+    // would land on a write nothing can accept.
+    if (!sbSignedIn()) { showGateway('auth'); return; }
+
+    // One account can hold both a player save and a GM save — `type` is what tells
+    // them apart, and only this panel knows which one it is.
+    const mine = owned.find(r => r.type === ARIA.role) || owned[0];
+    if (!mine) { showGateway('keys'); return; }   // nothing yet: new save, or claim an old key
+
+    saveKey = mine.save_key;
+    localStorage.setItem('aria-save-key', saveKey);
+    const ok = await loadFromSupabase();
+    hideGateway();
+    showSelectionScreen();
+    if (ok) ARIA.syncAll();
+    ARIA.afterRestore();
 }
 
 // Hide the file-gateway panel.
@@ -1188,21 +1280,31 @@ async function confirmNewKey() {
     if (!_pendingNewKey) return;
     saveKey = _pendingNewKey;
     localStorage.setItem('aria-save-key', saveKey);
+    // `owner` is not sent: the column defaults to auth.uid(), so the row belongs to
+    // whoever is signed in. Sending it from here would be a second place to get it
+    // wrong, and RLS would reject any value but this one anyway.
     await sbUpsert('saves', { save_key: saveKey, type: ARIA.role });
     await ARIA.syncAll();
     hideGateway();
     showSelectionScreen();
 }
 
-// Load data from Supabase using an existing save key entered by the user.
+// Attach a save key created before accounts existed to the signed-in account.
+//
+// This used to just verify the key existed and adopt it locally, because the key
+// was the whole access control. It no longer is: claim_save_key() writes the
+// ownership row-side, and until it succeeds RLS returns nothing for that key — so
+// adopting it locally without claiming would give a panel that syncs into a void.
 async function submitExistingKey() {
     const input = document.getElementById('gateway-key-input');
     const key = input ? input.value.trim() : '';
     if (!key) return;
-    // Verify the key exists before adopting it — a typo would otherwise push the
-    // previous key's local data under a brand-new key on the next sync.
-    const rows = await sbSelect('saves', 'save_key=eq.' + encodeURIComponent(key) + '&select=save_key');
-    if (!rows.length) { alert('Clé introuvable. Vérifiez la clé saisie.'); return; }
+    if (!sbSignedIn()) { _authError('Connectez-vous avant de rattacher une clé.'); return; }
+
+    if (!await sbClaimSaveKey(key)) {
+        alert('Clé introuvable, ou déjà rattachée à un autre compte.');
+        return;
+    }
     // Switching keys: drop the old key's local data so it never merges into the new one.
     if (saveKey && key !== saveKey) ARIA.clearLocal();
     saveKey = key;
@@ -1210,19 +1312,24 @@ async function submitExistingKey() {
     await loadFromSupabase();
     hideGateway();
     showSelectionScreen();
+    ARIA.afterRestore();
 }
 
 // Update the save-key status label on the selection screen.
+// The account is what the row identifies now, so it shows the address rather than
+// eight characters of a UUID. The key itself is still behind `Copier` — the OBS
+// overlay URL is built from it.
 function updateSaveKeyStatus() {
     const label = document.getElementById('sel-save-label');
     if (!label) return;
-    label.textContent = saveKey ? saveKey.slice(0, 8) + '…' : '—';
+    label.textContent = sbUserEmail() || (saveKey ? saveKey.slice(0, 8) + '…' : '—');
     label.className = 'sel-save-label' + (saveKey ? ' connected' : '');
 }
 
-// Show the gateway and focus the existing-key input so the user can switch keys.
+// Open the claim panel and focus its input. Reachable from the selection screen so
+// a key from before accounts can still be attached after the fact.
 function changeSaveKey() {
-    showGateway();
+    showGateway('keys');
     const input = document.getElementById('gateway-key-input');
     if (input) input.focus();
 }
@@ -1272,18 +1379,15 @@ function cancelGateway() {
     if (saveKey) { hideGateway(); } else { showGateway(); }
 }
 
-// On load: restore from Supabase if a save key exists, otherwise show the gateway.
+// On load: the session decides. Without one, nothing can be read at all, so the
+// gateway comes up on its sign-in stage rather than trying and failing silently.
+//
+// enterWithSession() does the rest — including the push-back sync, which only runs
+// when the load succeeded: after a failed (offline) load, syncing would overwrite
+// newer remote data with stale local state.
 async function tryRestoreSupabase() {
-    if (!saveKey) { showGateway(); return; }
-    const ok = await loadFromSupabase();
-    hideGateway();
-    showSelectionScreen();
-    // Only push local data back up if the load succeeded — after a failed (offline)
-    // load, syncing would overwrite newer remote data with stale local state.
-    if (ok) ARIA.syncAll();
-    // After showSelectionScreen so that screen stays the fallback when nothing is
-    // remembered, and the place "changer de personnage/campagne" returns to.
-    ARIA.afterRestore();
+    if (!sbSignedIn()) { showGateway('auth'); return; }
+    await enterWithSession();
 }
 
 // ═══════════════════════════════════════════

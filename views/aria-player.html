@@ -19,30 +19,55 @@
          Paused (setActive(false)) once the app panel is shown; see aria-shared.js. -->
     <div id="dungeon-bg-root" style="position:fixed;inset:0;z-index:9998;"></div>
 
-    <!-- SAVE KEY GATEWAY (two-panel: Nouvelle clé | Clé existante — design frame 01) -->
+    <!-- GATEWAY : connexion, puis (compte sans sauvegarde) nouvelle clé ou rattachement -->
     <div id="file-gateway" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:10000;padding:24px;overflow-y:auto;">
         <div class="gateway-shell">
             <div class="gateway-brand">ARIA</div>
             <div class="gateway-brand-rule"></div>
-            <div class="gateway-cols">
-                <!-- New key panel -->
-                <div class="gateway-card" id="gateway-new">
-                    <div class="gateway-eyebrow ember">Nouvelle clé</div>
-                    <div class="gateway-card-title">Clé de sauvegarde</div>
-                    <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
-                    <div class="gateway-key-box" id="gateway-key-display"></div>
-                    <div class="gateway-btn-row">
-                        <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
-                        <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+            <!-- Stage 1 : compte. Sans session, RLS ne rend rien : c'est le seul
+                 écran possible, pas une politesse. -->
+            <div id="gateway-auth">
+                <div class="gateway-cols">
+                    <div class="gateway-card">
+                        <div class="gateway-eyebrow ember">Compte</div>
+                        <div class="gateway-card-title" id="gateway-auth-title">Connexion</div>
+                        <p class="gateway-desc">Vos personnages et vos campagnes sont rattachés à ce compte : lui seul y donne accès.</p>
+                        <input class="gateway-key-input gateway-auth-field" id="gateway-email" type="email" autocomplete="email" placeholder="Adresse e-mail" onkeydown="if(event.key==='Enter')submitAuth()" />
+                        <input class="gateway-key-input" id="gateway-password" type="password" autocomplete="current-password" placeholder="Mot de passe" onkeydown="if(event.key==='Enter')submitAuth()" />
+                        <div class="gateway-auth-error" id="gateway-auth-error" style="display:none;"></div>
+                        <button class="gateway-btn gateway-btn-full" id="gateway-auth-submit" onclick="submitAuth()">Se connecter &rarr;</button>
+                        <button class="gateway-auth-switch" id="gateway-auth-switch" onclick="setAuthMode(_authMode === 'up' ? 'in' : 'up')">Créer un compte</button>
                     </div>
                 </div>
-                <!-- Existing key panel -->
-                <div class="gateway-card" id="gateway-existing">
-                    <div class="gateway-eyebrow">Clé existante</div>
-                    <div class="gateway-card-title">Retrouver une partie</div>
-                    <p class="gateway-desc">Saisissez votre clé pour retrouver votre progression sur cet appareil.</p>
-                    <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
-                    <button class="gateway-btn-secondary gateway-btn-full" onclick="submitExistingKey()">Charger →</button>
+            </div>
+
+            <!-- Stage 2 : uniquement pour un compte qui ne possède encore aucune
+                 sauvegarde. Nouvelle clé, ou rattachement d'une clé d'avant les comptes. -->
+            <div id="gateway-keys" style="display:none;">
+                <div class="gateway-account" id="gateway-account" style="display:none;">
+                    <span id="gateway-account-mail"></span>
+                    <button class="gateway-account-btn" onclick="signOut()">Déconnexion</button>
+                </div>
+                <div class="gateway-cols">
+                    <!-- New key panel -->
+                    <div class="gateway-card" id="gateway-new">
+                        <div class="gateway-eyebrow ember">Nouvelle clé</div>
+                        <div class="gateway-card-title">Clé de sauvegarde</div>
+                        <p class="gateway-desc">Votre clé identifie votre progression. Notez-la précieusement — elle sera nécessaire sur un autre appareil.</p>
+                        <div class="gateway-key-box" id="gateway-key-display"></div>
+                        <div class="gateway-btn-row">
+                            <button class="gateway-btn-secondary" id="gateway-copy-btn" onclick="copyGatewayKey()">Copier</button>
+                            <button class="gateway-btn" onclick="confirmNewKey()">Continuer →</button>
+                        </div>
+                    </div>
+                    <!-- Existing key panel -->
+                    <div class="gateway-card" id="gateway-existing">
+                        <div class="gateway-eyebrow">Clé existante</div>
+                        <div class="gateway-card-title">Retrouver une partie</div>
+                        <p class="gateway-desc">Saisissez la clé d’une sauvegarde créée avant les comptes : elle sera rattachée définitivement à celui-ci.</p>
+                        <input class="gateway-key-input" id="gateway-key-input" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" onkeydown="if(event.key==='Enter')submitExistingKey()" />
+                        <button class="gateway-btn-secondary gateway-btn-full" onclick="submitExistingKey()">Rattacher →</button>
+                    </div>
                 </div>
             </div>
             <button class="gateway-cancel" id="gateway-cancel" onclick="cancelGateway()" style="display:none;">Annuler</button>
@@ -72,10 +97,11 @@
             </div>
             <button class="sel-add-btn" onclick="createCharacter()">+ Nouveau personnage</button>
             <div class="sel-save-row">
-                <span class="sel-save-icon">Clé</span>
+                <span class="sel-save-icon">Compte</span>
                 <span class="sel-save-label" id="sel-save-label">—</span>
                 <button class="sel-save-btn" onclick="copySaveKey()">Copier</button>
-                <button class="sel-save-btn" onclick="changeSaveKey()">Changer…</button>
+                <button class="sel-save-btn" onclick="changeSaveKey()">Rattacher…</button>
+                <button class="sel-save-btn" onclick="signOut()">Déconnexion</button>
             </div>
         </div>
     </div>

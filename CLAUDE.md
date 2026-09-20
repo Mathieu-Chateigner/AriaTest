@@ -162,18 +162,41 @@ The UI is `#chat-global-log` / `#chat-global-input` (player sidebar, under the w
 
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are hardcoded at the top of `js/aria-supabase.js`. Change only that file when switching Supabase projects. The GM uses two Supabase Storage buckets: `campaign-files` (GM file sharing with players) and `campaign-music` (uploaded audio tracks).
 
+Project **AriaTest** (`qpxaaauzzbahsdhsjaqn`, eu-west-3). The former project `npybuksklkvdmbhyzdjs` ("Aria") is the pre-authentication one — it has no RLS and no accounts, and nothing points at it any more.
+
+### Accounts — Supabase Auth + RLS
+
+**Every table but two is behind row level security, keyed on `saves.owner` → `auth.users`.** A request with no session reads nothing and writes nothing, so being signed in is not a convenience — it is the only way in. `specs/auth_rls.sql` is the schema of record and `specs/auth_rls.check.py` asserts the twelve properties it rests on (keys from the environment, never the repo).
+
+**Ownership is stated once, on `saves`.** Children reach it by joining up the tree — `owns_save(save_key)`, `owns_character(character_id)`, `owns_campaign(campaign_id)`, all `stable security definer` so the subquery is evaluated once per statement. Duplicating an `owner` column onto all 18 tables would have needed a backfill per table and would have allowed a child whose owner contradicts its parent; here that is unrepresentable. **Adding a table means adding one policy that calls the right helper** — never a new ownership column.
+
+**Two anonymous holes, both deliberate, both for OBS.** The overlay runs in a browser source with no session and never has one:
+- `overlay_configs` — readable by `anon` (widget layout, nothing else).
+- `saves` — readable by `anon` **at column level**: `grant select (save_key, ably_key, type)`. The `data` blob is not anon-readable. This is what resolves `?s=SAVEKEY` into an Ably key.
+
+`views/aria-overlay.html` sets `window.ARIA_ANON_ONLY = true` before loading `aria-supabase.js`, so the overlay never reads or writes `aria-session`. It shares an origin with the panels, and without the flag a failed refresh there would sign the panel out in the next tab.
+
+**`campaign_chat` is the known hole.** Both ends of a conversation write it, their `save_key`s differ, and it is keyed by a 5-character join code — nothing in the schema proves an account belongs to a campaign, so the only barrier available is "be signed in". `anon` does lose it. Closing it properly needs a `campaign_members (join_code, user_id)` table; marked `ponytail:` at the policy.
+
+**`claim_save_key(uuid)` is the migration path.** Keys created before accounts existed have `owner is null` and are therefore invisible to everyone; their holder attaches one to their account once, from the gateway's second stage. It is `security definer` precisely because the `saves` policy already hides the unclaimed row. **Anyone signed in who guesses an unclaimed key can take it** — the same threat model as before accounts (the key was the whole secret, and it is in the OBS URL), but it means keys should be claimed early. Once claimed, a second account gets `false`.
+
 ### Save key / Supabase sync
 
-Both player and GM use a **save key** (UUID) to sync localStorage to Supabase, enabling multi-device access.
+The **save key** (UUID) still keys every row; what changed is that it no longer grants anything by itself. `saveKey` lives in `localStorage('aria-save-key')` and in the module-level variable, as before.
 
-- On page load, `#file-gateway` starts `display:none`. `tryRestoreSupabase()` checks `localStorage('aria-save-key')`:
-  - Key found → calls `loadFromSupabase()` then `hideGateway()` + `showSelectionScreen()` (no flash)
-  - No key → calls `showGateway()` which sets `display:flex`, prompting the user to create or enter a key
-- `saveKey` is stored in `localStorage('aria-save-key')` and also held in the module-level `saveKey` variable
-- **Never set `#file-gateway` to `display:flex` in HTML** — it must start hidden to avoid the flash on load
-- `loadFromSupabase()` returns `true`/`false`; `tryRestoreSupabase()` only runs the full push-sync when the load **succeeded** — syncing after a failed (offline) load would overwrite newer remote data with stale local state
-- **GM child tables are restored unconditionally** (even when the DB result is empty): a campaign row only exists after a full sync, so an empty child table means "deleted on another device". Guarding writes with `if (rows.length)` resurrects deleted monsters/potions/files on the next sync — don't reintroduce it
-- `submitExistingKey()` first verifies the key exists in `saves`, then (when switching keys) clears the previous key's local data via `_clearLocalPlayerData()` / `_clearLocalGMData()` so the old key's characters/campaigns never merge into the new key
+- On page load `#file-gateway` starts `display:none`. `tryRestoreSupabase()` now asks the **session**, not the key: no session → `showGateway('auth')`; session → `enterWithSession()`.
+- `enterWithSession()` reads `sbOwnedSaves()` — RLS does the filtering, so there is no `owner` filter to write and no way for it to return someone else's. It picks the row whose `type` matches `ARIA.role` (one account can hold a player save *and* a GM save), falls back to the first, and only when the account owns **none** shows the gateway's second stage. An empty list also means "the refresh token died mid-request", so it re-checks `sbSignedIn()` first — otherwise a signed-out user would be offered a write nothing can accept.
+- **Never set `#file-gateway` to `display:flex` in HTML** — it must start hidden to avoid the flash on load.
+- `loadFromSupabase()` returns `true`/`false`; the push-sync only runs when the load **succeeded** — syncing after a failed (offline) load would overwrite newer remote data with stale local state.
+- **GM child tables are restored unconditionally** (even when the DB result is empty): a campaign row only exists after a full sync, so an empty child table means "deleted on another device". Guarding writes with `if (rows.length)` resurrects deleted monsters/potions/files on the next sync — don't reintroduce it.
+- `submitExistingKey()` no longer just checks that a key exists — it **claims** it. Adopting a key locally without claiming would leave the panel syncing into a void, since RLS returns nothing for a key the account does not own. When switching keys it still clears the previous key's local data via `_clearLocalPlayerData()` / `_clearLocalGMData()`.
+- `confirmNewKey()` does **not** send `owner`: the column defaults to `auth.uid()`, and RLS would reject any other value. Sending it would be a second place to get it wrong.
+
+**The session layer lives in `js/aria-supabase.js`** — `sbSignUp` / `sbSignIn` / `sbSignOut` / `sbRefreshSession` / `sbClaimSaveKey` / `sbOwnedSaves`, over the GoTrue REST endpoints (no SDK, in keeping with the no-build rule). `_sbFetch` refreshes a minute before expiry rather than waiting for the 401 — a sync fires a dozen requests at once and letting them all fail first would retry the lot — and retries once on a 401 that a refresh fixes. Concurrent callers share one in-flight refresh (`_refreshing`).
+
+**`sbAuthHeaders()` is the one description of how a request authenticates.** The anon key stays in `apikey` (it routes the request to the project); the session token replaces it as the bearer. The GM's four Storage calls build their own `fetch` and used to inline the anon key twice each — they call this instead, so a signed-in page cannot upload as anon.
+
+Email confirmation is **off** (`supabase/config.toml`, pushed with `supabase config push`). With it on, signup returns a user and no token, and the gateway would have nothing to continue with.
 
 **Sync architecture** — `js/aria-supabase.js` exposes shared helpers (`sbUpsert`, `sbDelete`, `sbSelect`, `sbInsert`, `runMigration`). Both panels use **per-entity granular sync** — separate debounced functions per data type — rather than one monolithic blob. `localStorage` is always the runtime source of truth; Supabase is only the persistence layer.
 
@@ -764,7 +787,9 @@ Resolution order at startup: `?s=` → the `saves` row (`specs/saves_ably_key.sq
 
 During bootstrap **only the route channel is opened** (`startFromSaveKey()`), not the game channels — their campaign is not known yet, so they would subscribe to the global fallback and be thrown away by the reload a round-trip later. Ignore a `route` whose `overlay` is empty (panel sitting on the selection screen), and reload only when the pair actually differs — otherwise it is a reload loop.
 
-**The save key is now the whole secret** — it is in an OBS browser-source URL, and it grants every character and campaign under it, plus the Ably key. Treat the overlay URL as sensitive: no screenshots, no bug reports.
+**The save key in the OBS URL still resolves the Ably key**, and the Ably key is what carries the live game data — rolls, presence, the VDO room password. So the overlay URL stays sensitive: no screenshots, no bug reports.
+
+What it no longer does is open the database. Since RLS, `anon` can read the `save_key`/`ably_key`/`type` columns of `saves` and `overlay_configs`, and nothing else — a save key without an account reaches no character, no campaign and no chat. An unclaimed key can still be *claimed* by any signed-in user who has it, which is the one thing to weigh before pasting one anywhere (see *Accounts*).
 
 **Pinned form** — what the button emits with no save key in this browser, and what the stable URL resolves itself into:
 
