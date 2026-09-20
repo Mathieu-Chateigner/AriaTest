@@ -3,7 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ARIA</title>
+
+    <!-- ── SEO : remplacez aria-jdr.fr par votre domaine dans TOUTES les URL absolues ── -->
+    <title>ARIA Table — feuille de personnage, écran de MJ et overlay OBS</title>
+    <meta name="description" content="Table virtuelle gratuite pour le jeu de rôle ARIA : feuille de personnage, écran de Maître de Jeu, jets de dés partagés, webcams et overlay OBS. Sans installation.">
+    <link rel="canonical" href="https://aria-jdr.fr/">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <meta name="author" content="Mathieu Chateigner">
+    <meta name="theme-color" content="#050608" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
+    <link rel="alternate" hreflang="fr" href="https://aria-jdr.fr/">
+    <link rel="alternate" hreflang="x-default" href="https://aria-jdr.fr/">
+
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="fr_FR">
+    <meta property="og:site_name" content="ARIA Table">
+    <meta property="og:title" content="ARIA Table — la table virtuelle du jeu de rôle ARIA">
+    <meta property="og:description" content="Feuille de personnage, écran de MJ, jets de dés en direct, webcams et overlay OBS. Gratuit, sans installation, dans le navigateur.">
+    <meta property="og:url" content="https://aria-jdr.fr/">
+    <meta property="og:image" content="https://aria-jdr.fr/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="L'écran de Maître de Jeu d'ARIA Table avec les fiches des joueurs et leurs webcams.">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ARIA Table — la table virtuelle du jeu de rôle ARIA">
+    <meta name="twitter:description" content="Feuille de personnage, écran de MJ, jets de dés en direct, webcams et overlay OBS. Gratuit, sans installation.">
+    <meta name="twitter:image" content="https://aria-jdr.fr/og-image.png">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeD0iMTYiIHk9IjI4IiBmb250LXNpemU9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzlhODRjIj7imZs8L3RleHQ+PC9zdmc+">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -289,13 +315,40 @@
             --pageGlow:rgba(169,98,15,.05);
         }
     </style>
+
+    <!-- Donnees structurees : l'application -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "ARIA Table",
+      "url": "https://aria-jdr.fr/",
+      "applicationCategory": "GameApplication",
+      "operatingSystem": "Navigateur web (Chrome recommandé)",
+      "inLanguage": "fr",
+      "description": "Table virtuelle pour le jeu de rôle ARIA : feuille de personnage interactive, écran de Maître de Jeu, jets de dés partagés en temps réel, webcams intégrées et overlay OBS pour le streaming.",
+      "browserRequirements": "Requiert JavaScript. Chrome ou Edge recommandés pour la webcam.",
+      "author": { "@type": "Person", "name": "Mathieu Chateigner" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR", "category": "free" },
+      "featureList": [
+        "Feuille de personnage interactive",
+        "Jets de dés partagés en temps réel",
+        "Écran de Maître de Jeu",
+        "Webcams intégrées à la table",
+        "Overlay OBS pour le streaming",
+        "Bestiaire et gestion des monstres",
+        "Musique d'ambiance synchronisée",
+        "Messagerie privée entre joueurs"
+      ]
+    }
+    </script>
 </head>
 <body>
 
     <div id="dungeon-bg-root" style="position:fixed;inset:0;z-index:0;"></div>
 
     <div class="header">
-        <div class="brand">ARIA</div>
+        <h1 class="brand">ARIA</h1>
         <div class="tagline">Système de jeu de rôle sur table</div>
         <div class="divider"></div>
     </div>

@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Pages applicatives : etat rendu en JS, et URL portant des cles. Rien a indexer.
+Disallow: /views/
+Disallow: /*?s=
+Disallow: /*?ably=
+
+Sitemap: https://aria-jdr.fr/sitemap.xml
