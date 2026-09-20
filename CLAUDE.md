@@ -225,7 +225,17 @@ Both apps read from the **same** key:
 ```
 `youtubeApiKey` is optional — used only for YouTube Data API v3 playlist import in the GM Musique tab.
 
-Keys are entered once on `index.html`. The in-app ⚙ modal in each panel can also update this key (for theme and reconnecting), but uses the same `aria-config` storage. **Never use `aria-gm-config`** — it is obsolete.
+**`ablyKey` is no longer typed by anyone.** It is a setting of the table, not a personal preference — one key serves all three apps — so it lives in one row of `app_config` (`specs/app_config.sql`), readable by any signed-in account and writable by none of them. `sbSyncAblyKey()` copies it into `aria-config` at startup (from `enterWithSession()` on the panels, and on sign-in on `index.html`), so **every existing reader of `config.ablyKey` is untouched**. A locally stored key still works as the fallback when the row is empty.
+
+Setting it is a deliberate trip to the Supabase dashboard, or:
+```sql
+update public.app_config set ably_key = 'xxxxxxxx:xxxxxxxx' where id = 'default';
+```
+A write policy open to signed-in accounts would let any player replace the whole table's key. The ⚙ modal on `index.html` now *displays* the key's state rather than accepting it.
+
+The overlay does **not** read `app_config` — it has no session. It still reads `saves.ably_key`, which the panels write on every entry (`initRouteChannel`).
+
+`youtubeApiKey` is still per-browser and still entered in that modal. **Never use `aria-gm-config`** — it is obsolete.
 
 **VDO.ninja room** (`vdoRoom`, `vdoRoomPassword`) is **campaign-scoped** — stored on the campaign object in `aria-gm-campaigns`, NOT in `aria-config`.
 

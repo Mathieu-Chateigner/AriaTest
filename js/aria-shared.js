@@ -1248,6 +1248,11 @@ async function enterWithSession() {
     // would land on a write nothing can accept.
     if (!sbSignedIn()) { showGateway('auth'); return; }
 
+    // Before anything can enter a character or a campaign: ARIA.afterRestore() ends
+    // up in initAbly(), which reads config.ablyKey. Fetching it later would mean a
+    // first load with no realtime connection at all.
+    await sbSyncAblyKey();
+
     // One account can hold both a player save and a GM save — `type` is what tells
     // them apart, and only this panel knows which one it is.
     const mine = owned.find(r => r.type === ARIA.role) || owned[0];

@@ -349,6 +349,16 @@
             transition: border-color .2s;
         }
         .config-input:focus { outline: none; border-color: var(--ember); }
+        .config-readonly {
+            font-family: ui-monospace, Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--dim);
+            background: var(--field);
+            border: 1px dashed var(--line2);
+            border-radius: 3px;
+            padding: 9px 12px;
+        }
         .config-save-btn {
             margin-top: 14px;
             background: var(--ember);
@@ -461,8 +471,11 @@
                 <div class="config-panel-title">Configuration</div>
                 <button class="modal-close" onclick="closeConfig()">✕</button>
             </div>
+            <!-- La clé Ably n'est plus saisie ici : c'est un réglage de la table,
+                 servi par app_config une fois connecté, et que l'application ne peut
+                 pas écrire. Voir specs/app_config.sql. -->
             <label class="config-label">Clé Ably</label>
-            <input class="config-input" id="cfg-ably" type="password" placeholder="xxxxxxxx:xxxxxxxx" />
+            <div class="config-readonly" id="cfg-ably-state">—</div>
             <label class="config-label">Clé API YouTube <span style="font-size:11px;opacity:.6;">(optionnel — pour les playlists)</span></label>
             <input class="config-input" id="cfg-youtube-key" type="password" placeholder="AIzaSy…" />
             <button class="config-save-btn" id="cfg-save-btn" onclick="saveConfig()">Sauvegarder</button>
@@ -520,6 +533,7 @@
             btn.disabled = false;
             if (res.error) { homeAuthError(res.error); return; }
             document.getElementById('home-password').value = '';
+            await sbSyncAblyKey();
             renderHome();
         }
 
@@ -529,11 +543,17 @@
         }
 
         renderHome();
+        // La cle de la table arrive avec la session, pas avec le navigateur.
+        if (sbSignedIn()) sbSyncAblyKey();
 
         function openConfig() {
             const cfg = JSON.parse(localStorage.getItem('aria-config') || '{}');
-            document.getElementById('cfg-ably').value        = cfg.ablyKey       || '';
             document.getElementById('cfg-youtube-key').value = cfg.youtubeApiKey || '';
+            document.getElementById('cfg-ably-state').textContent = !sbSignedIn()
+                ? 'Connectez-vous pour la recevoir.'
+                : (cfg.ablyKey
+                    ? 'Fournie par le compte — ' + cfg.ablyKey.slice(0, 8) + '…'
+                    : 'Aucune clé configurée pour cette table.');
             document.getElementById('cfg-scrim').classList.add('show');
         }
 
@@ -547,7 +567,6 @@
 
         function saveConfig() {
             const cfg = JSON.parse(localStorage.getItem('aria-config') || '{}');
-            cfg.ablyKey       = document.getElementById('cfg-ably').value.trim();
             cfg.youtubeApiKey = document.getElementById('cfg-youtube-key').value.trim();
             localStorage.setItem('aria-config', JSON.stringify(cfg));
             const btn = document.getElementById('cfg-save-btn');

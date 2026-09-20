@@ -135,6 +135,31 @@ async function sbClaimSaveKey(key) {
     return await res.json().catch(() => false) === true;
 }
 
+// The table's Ably key, shared by all three apps and by everyone at the table.
+//
+// It used to be pasted by hand into every browser. It is a setting of the table,
+// not a personal preference, so it lives in one row that any signed-in account can
+// read — and that none of them can write (see specs/app_config.sql).
+//
+// The result is copied into `aria-config` so that every existing reader of
+// `config.ablyKey` keeps working untouched. A locally stored key is kept as the
+// fallback: the row starts empty, and a browser that already had one should not
+// stop connecting the day this shipped.
+async function sbSyncAblyKey() {
+    const rows = await sbSelect('app_config', 'id=eq.default&select=ably_key');
+    const remote = rows.length ? (rows[0].ably_key || '') : '';
+    if (!remote) return false;
+
+    const cfg = JSON.parse(localStorage.getItem('aria-config') || '{}');
+    if (cfg.ablyKey === remote) return true;
+    cfg.ablyKey = remote;
+    localStorage.setItem('aria-config', JSON.stringify(cfg));
+    // `config` is the panels' live copy, declared in aria-shared.js; the overlay
+    // editor and index.html read localStorage directly and have no such variable.
+    if (typeof config === 'object' && config) config.ablyKey = remote;
+    return true;
+}
+
 // The save keys this account owns. RLS does the filtering, so there is no `owner`
 // filter to write here — and no way for it to return someone else's.
 async function sbOwnedSaves() {
