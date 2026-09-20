@@ -67,14 +67,33 @@ try:
 except urllib.error.HTTPError as e:
     print("reset:", e.read().decode()[:120])
 
-_, chars = req("/rest/v1/characters?select=id,save_key,name", SR)
-by_key = {}
-for c in chars:
-    by_key.setdefault(c["save_key"], []).append(c)
-keys = list(by_key)[:2]
-mine, theirs = keys[0], keys[1]
-print("cle A :", mine, "->", len(by_key[mine]), "personnage(s)")
-print("cle B :", theirs, "->", len(by_key[theirs]), "personnage(s)")
+# Le test a besoin de deux cles appartenant a deux personnes differentes. Il les
+# seme lui-meme plutot que de compter sur les donnees en place : sur un projet
+# vide il ne prouvait rien, et sur un projet peuple il devait deviner lesquelles
+# etaient jetables.
+FIXTURES = ["00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000b2"]
+
+
+def seed():
+    for i, k in enumerate(FIXTURES):
+        req("/rest/v1/saves", SR, data={"save_key": k, "type": "player"},
+            prefer="resolution=merge-duplicates,return=minimal")
+        req("/rest/v1/characters", SR,
+            data={"id": "rls-fixture-%d" % i, "save_key": k, "name": "Fixture %d" % i},
+            prefer="resolution=merge-duplicates,return=minimal")
+
+
+def unseed():
+    for i, k in enumerate(FIXTURES):
+        req("/rest/v1/characters?id=eq.rls-fixture-%d" % i, SR, method="DELETE")
+        req("/rest/v1/saves?save_key=eq." + k, SR, method="DELETE")
+
+
+unseed()
+seed()
+mine, theirs = FIXTURES
+print("cle A :", mine)
+print("cle B :", theirs)
 print()
 
 tok = account("aria-rls-a@example.com")
@@ -96,8 +115,7 @@ check("ecriture refusee sous une cle non rattachee", st in (401, 403), st)
 st, ok = req("/rest/v1/rpc/claim_save_key", ANON, tok, data={"p_key": mine})
 check("claim_save_key rattache la cle", ok is True, (st, ok))
 st, rows = req("/rest/v1/characters?select=id,name", ANON, tok)
-check("voit ses %d personnage(s) apres rattachement" % len(by_key[mine]),
-      len(rows or []) == len(by_key[mine]), rows)
+check("voit son personnage apres rattachement", len(rows or []) == 1, rows)
 st, notes = req("/rest/v1/character_notes?select=id", ANON, tok)
 st, state = req("/rest/v1/character_state?select=character_id", ANON, tok)
 check("les enfants suivent (notes + etat lisibles)", isinstance(notes, list) and isinstance(state, list))
@@ -121,7 +139,8 @@ req("/rest/v1/characters?id=eq.rls-probe", SR, method="DELETE")
 print()
 print("ECHECS:", fails if fails else "aucun")
 
-# Nettoyage : les cles redeviennent non reclamees, les comptes de test disparaissent.
+# Nettoyage : fixtures retirees, cles non reclamees, comptes de test supprimes.
+unseed()
 r = urllib.request.Request(URL + "/rest/v1/saves?owner=not.is.null", method="PATCH",
                            data=json.dumps({"owner": None}).encode())
 for k, v in (("apikey", SR), ("Authorization", "Bearer " + SR), ("Content-Type", "application/json")):
