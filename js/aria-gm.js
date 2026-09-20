@@ -335,11 +335,39 @@ function _clearLocalGMData() {
 //  CAMPAIGN MANAGEMENT
 // ═══════════════════════════════════════════
 // Generate a random 5-character alphanumeric join code for a campaign.
-function generateJoinCode() {
+// Draw a code, avoiding any in `taken`. The alphabet drops I, O, 0 and 1 — the code
+// gets read aloud and typed by hand.
+function generateJoinCode(taken) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const used = taken || new Set(getCampaigns().map(c => c.joinCode).filter(Boolean));
     let code = '';
-    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    // 32^5 ≈ 33M codes against a handful of campaigns, so this loop is a formality;
+    // it exists so that "already ours" is impossible rather than merely unlikely.
+    for (let attempt = 0; attempt < 50; attempt++) {
+        code = '';
+        for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        if (!used.has(code)) return code;
+    }
     return code;
+}
+
+// A code nobody is using — ours or anyone else's. The database is the only place
+// that knows the second half of that question, since RLS hides other accounts'
+// campaigns, and a shared code means two tables on the same Ably channels.
+//
+// Falls back to a locally-unique code after a few refusals: the unique constraint
+// on campaigns.join_code is the real guarantee, and refusing to create a campaign
+// because Supabase is unreachable would be a worse failure than a duplicate that
+// cannot actually be stored.
+async function freeJoinCode() {
+    const used = new Set(getCampaigns().map(c => c.joinCode).filter(Boolean));
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const code = generateJoinCode(used);
+        if (!await sbJoinCodeTaken(code)) return code;
+        used.add(code);
+    }
+    console.warn('[GM] freeJoinCode: aucune réponse exploitable, code local retenu');
+    return generateJoinCode(used);
 }
 
 // Return the campaign-scoped localStorage key for monsters.
@@ -401,6 +429,10 @@ function loadCampaignState(id) {
     const campaigns = getCampaigns();
     const camp = campaigns.find(c => c.id === id);
     if (!camp) { console.warn('[GM] loadCampaignState: campaign not found', id); return false; }
+    // Back-fill for a campaign saved before join codes existed. Locally unique only:
+    // loadCampaignState is synchronous and called from a dozen places, and this path
+    // fires once per legacy campaign. The unique constraint still catches a global
+    // duplicate — it would refuse the row rather than merge two tables' channels.
     if (!camp.joinCode) { camp.joinCode = generateJoinCode(); saveCampaigns(campaigns); }
     currentCampaignId = id;
     currentJoinCode = camp.joinCode;
@@ -558,12 +590,15 @@ function createCampaign() {
 }
 
 // Create a new campaign from the form and immediately select it.
-function confirmCreateCampaign() {
+async function confirmCreateCampaign() {
     const name = document.getElementById('new-campaign-name').value.trim() || 'Nouvelle campagne';
     const ariaType = document.querySelector('input[name="new-campaign-type"]:checked')?.value || 'ancient';
     const id = uid();
+    // Awaited before the push: this is the one path that runs on every campaign
+    // ever created, so it is the one that has to ask the database.
+    const joinCode = await freeJoinCode();
     const campaigns = getCampaigns();
-    campaigns.push({ id, name, joinCode: generateJoinCode(), ariaType });
+    campaigns.push({ id, name, joinCode, ariaType });
     saveCampaigns(campaigns);
     document.getElementById('new-campaign-form').style.display = 'none';
     selectCampaign(id);

@@ -268,7 +268,13 @@ Helper functions `monstersKey()`, `rollsKey()`, `cardHistKey()`, `potionsKey()`,
 
 This replaced a prefix literal repeated at every call site plus a hand-typed list inside `deleteCampaign()`; neither copy knew about `aria-gm-camera-off-`, so it leaked on every delete. **Adding a scoped key means adding one line to `CAMP_KEYS` / `CHAR_KEYS` and nothing else.** (Non-campaign-scoped GM keys: `aria-gm-split-layout` for the multi-pane layout, `aria-gm-read-table` for the bigger-faces toggle, `aria-gm-last-campaign` for auto re-entry.)
 
-`generateJoinCode()` produces the join code. If a campaign loaded from storage lacks one, it is generated and saved on `loadCampaignState()`.
+**A join code names the Ably channels** (`aria-rolls-{CODE}`, `aria-presence-{CODE}`…), so two campaigns sharing one are not two games — they are one, with both tables' rolls, presence and cameras mixed together. Nothing used to prevent that: five random characters, and no one checked.
+
+- `campaigns.join_code` is **unique** (`specs/join_code_unique.sql`) — the guarantee.
+- `generateJoinCode(taken)` draws one, skipping a `Set` that defaults to this GM's own codes.
+- `freeJoinCode()` is the async one that also asks the *database*, via the `join_code_taken(text)` RPC. It has to be an RPC: under RLS an account sees only its own campaigns, so a plain `select` would answer "free" for every other account's code — precisely the collision worth avoiding. `security definer` for that reason. A network failure answers "taken", costing a retry rather than handing out a duplicate.
+- **`confirmCreateCampaign()` awaits `freeJoinCode()`** — it is the path that runs for every campaign ever created, so it is the one that asks.
+- The back-fill in `loadCampaignState()` and the legacy migration stay synchronous and locally-unique only: `loadCampaignState` is called from a dozen places and the back-fill fires once per pre-join-code campaign. The unique constraint still catches a global duplicate there.
 
 ### Player identity
 

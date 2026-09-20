@@ -160,6 +160,24 @@ async function sbSyncAblyKey() {
     return true;
 }
 
+// Is this join code already in use — by anyone, not just by us?
+//
+// It has to be asked of the database rather than of our own campaign list: a code
+// names the Ably channels, so a duplicate held by another account is exactly the
+// collision worth avoiding, and RLS hides that account's campaigns from us. The
+// function behind it is `security definer` for that reason (specs/join_code_unique.sql).
+//
+// A network failure answers "taken", which costs a retry and never a collision —
+// the opposite default would hand out a duplicate the moment Supabase blinked.
+async function sbJoinCodeTaken(code) {
+    const res = await _sbFetch('/rest/v1/rpc/join_code_taken', {
+        method: 'POST',
+        body: JSON.stringify({ p_code: code }),
+    });
+    if (!res.ok) { console.warn('[ARIA] join_code_taken failed:', await res.text()); return true; }
+    return await res.json().catch(() => true) !== false;
+}
+
 // The save keys this account owns. RLS does the filtering, so there is no `owner`
 // filter to write here — and no way for it to return someone else's.
 async function sbOwnedSaves() {
