@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIA – Rendez-vous</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHRleHQgeD0iMTYiIHk9IjI4IiBmb250LXNpemU9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzlhODRjIj7imZs8L3RleHQ+PC9zdmc+">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+    <link rel="stylesheet" href="../css/aria-panel.css">
+    <link rel="stylesheet" href="../css/aria-sessions.css">
+</head>
+<body>
+
+    <div class="sx-top">
+        <a class="sx-brand" href="../index.html">ARIA</a>
+        <div class="sx-sep"></div>
+        <div class="sx-title">Rendez-vous</div>
+        <div class="sx-spacer"></div>
+        <span class="sx-mail" id="sx-mail"></span>
+        <button class="sx-btn" id="sx-new-btn" onclick="sxOpenForm()" style="display:none;">＋ Nouveau rendez-vous</button>
+    </div>
+
+    <!-- Sans session, RLS ne rend rien : le tableau serait vide et l'inscription
+         impossible. La connexion vit sur l'accueil, pas en double ici. -->
+    <div class="sx-gate" id="sx-gate" style="display:none;">
+        <div>Connectez-vous pour voir et créer des rendez-vous.</div>
+        <div><a href="../index.html">← Retour à l'accueil</a></div>
+    </div>
+
+    <div class="sx-layout" id="sx-layout" style="display:none;">
+        <div class="sx-board">
+            <div class="sx-board-head">
+                <div class="sx-h1">Séances à venir</div>
+                <div class="sx-count" id="sx-count"></div>
+            </div>
+            <div id="sx-list"></div>
+        </div>
+
+        <!-- DISCUSSION — Général + fil privé avec le MJ. La liste, le journal et le
+             titre sont remplis par makeChat() (js/aria-shared.js), exactement comme
+             dans les deux panneaux : mêmes ids, mêmes threads, même table. -->
+        <aside class="sx-chat-col">
+            <div class="sx-chat-head">
+                <span class="sx-chat-label">Discussion</span>
+                <div id="sx-chat-codes" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+            </div>
+            <div class="sx-chat-body" id="sx-chat-body">
+                <div class="sx-chat-none" id="sx-chat-none">Inscrivez-vous à un rendez-vous pour ouvrir la discussion de sa campagne.</div>
+                <div class="chat-wrap" id="sx-chat-wrap" style="display:none;">
+                    <div class="chat-threads" id="chat-thread-list"></div>
+                    <div class="chat-main">
+                        <div class="chat-title" id="chat-thread-title">Général</div>
+                        <div class="chat-log" id="chat-log"></div>
+                        <div class="chat-input-row">
+                            <input class="chat-input" id="chat-input" placeholder="Message…" onkeydown="if(event.key==='Enter')sxChat.send()" />
+                            <button class="chat-send" onclick="sxChat.send()">Envoyer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="sx-scrim" id="sx-scrim" onclick="sxScrimClick(event)">
+        <div class="sx-form">
+            <div class="sx-form-title" id="sx-form-title">Nouveau rendez-vous</div>
+
+            <div class="sx-label">Titre</div>
+            <input class="sx-input" id="sx-f-title" placeholder="La Tour engloutie — séance 1" />
+
+            <div class="sx-label">Code de campagne</div>
+            <input class="sx-input" id="sx-f-code" maxlength="5" placeholder="X7K2M"
+                   oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" />
+            <div class="sx-hint" id="sx-f-code-hint"></div>
+
+            <div class="sx-row">
+                <div>
+                    <div class="sx-label">Date et heure</div>
+                    <input class="sx-input" id="sx-f-when" type="datetime-local" />
+                </div>
+                <div>
+                    <div class="sx-label">Durée (min)</div>
+                    <input class="sx-input" id="sx-f-dur" type="text" inputmode="numeric" value="180"
+                           oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                </div>
+            </div>
+
+            <div class="sx-row">
+                <div>
+                    <div class="sx-label">Récurrence</div>
+                    <select class="sx-input" id="sx-f-rec">
+                        <option value="once">One shot</option>
+                        <option value="weekly">Toutes les semaines</option>
+                        <option value="biweekly">Toutes les deux semaines</option>
+                        <option value="monthly">Tous les mois</option>
+                    </select>
+                </div>
+                <div>
+                    <div class="sx-label">Joueurs max</div>
+                    <input class="sx-input" id="sx-f-max" type="text" inputmode="numeric" value="5"
+                           oninput="this.value=this.value.replace(/[^0-9]/g,'')" />
+                </div>
+            </div>
+
+            <div class="sx-label">Description</div>
+            <textarea class="sx-input" id="sx-f-desc" placeholder="Ce qui attend la table, ce qu'il faut savoir…"></textarea>
+
+            <div class="sx-label">Personnages proposés</div>
+            <textarea class="sx-input" id="sx-f-chars" placeholder="* Kaelen, le prêtre&#10;Yrsa, l'éclaireuse&#10;Bron, le mercenaire"></textarea>
+            <div class="sx-hint">Un par ligne. Préfixez d'une <b>*</b> ceux qui sont obligatoires : ils devront être pris avant les autres.</div>
+
+            <div class="sx-form-err" id="sx-f-err" style="display:none;"></div>
+
+            <div class="sx-form-btns">
+                <button class="sx-btn ghost" onclick="sxCloseForm()">Annuler</button>
+                <button class="sx-btn" id="sx-f-save" onclick="sxSubmitForm()">Créer</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../js/aria-supabase.js"></script>
+    <script src="../js/aria-shared.js"></script>
+    <script src="../js/aria-sessions.js"></script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+/* ═══════════════════════════════════════════════
+   ARIA RENDEZ-VOUS — tableau d'affichage des séances
+   ═══════════════════════════════════════════════
+   Chargé APRÈS css/aria-panel.css, qui apporte le reset, le body, et surtout
+   tout le bloc .chat-* : cette page réutilise makeChat() tel quel, donc elle
+   réutilise aussi son habillage. Le :root ci-dessous n'est là que pour ça — les
+   poignées d'accent que aria-panel.css attend (--gold, --accent-rgb, …), en
+   ambre comme le panneau joueur.
+   ═══════════════════════════════════════════════ */
+:root {
+    --ink:#050608; --bg:#0b0e13; --panel:#10141b; --raise:#161b25;
+    --line:rgba(150,168,200,.10); --line2:rgba(150,168,200,.20);
+    --text:#e8ebf1; --warm:#f3ede1; --dim:#868f9f; --faint:#586273;
+    --ember:#eca456; --ember2:#f6c07e; --embersoft:rgba(236,164,86,.12);
+    --violet:#a98bdd; --violet2:#c4aef0;
+    --ok:#5bc98e; --bad:#e25a4f; --warn:#e9aa45;
+    --field:rgba(0,0,0,.30);
+    --chrome1:#0e1219; --rail:#0a0d12;
+    --pageGlow:rgba(236,164,86,.035);
+    --accent-soft: var(--embersoft);
+    --accent-rgb: 236,164,86;
+    --gold: var(--ember); --gold-light: var(--ember2); --gold-dim: var(--faint);
+    --bg2: var(--panel); --bg3: var(--raise);
+    --parchment: var(--text); --parchment-dim: var(--dim);
+    --success: var(--ok); --fail: var(--bad);
+    --border: var(--line); --border-strong: var(--line2);
+    --radius: 4px;
+}
+body.light-mode {
+    --ink:#ddd4c2; --bg:#f4efe4; --panel:#fcf9f1; --raise:#fff;
+    --line:rgba(70,56,30,.13); --line2:rgba(70,56,30,.24);
+    --text:#2c2820; --warm:#1b1710; --dim:#6c6353; --faint:#9c917a;
+    --ember:#a9620f; --ember2:#8a4f0c; --embersoft:rgba(169,98,15,.14);
+    --ok:#2f7d54; --bad:#bd3528; --warn:#9a6a10;
+    --field:rgba(50,38,14,.05);
+    --chrome1:#efe8d8; --rail:#e7dfcc;
+    --pageGlow:rgba(169,98,15,.05);
+    --accent-rgb: 169,98,15;
+}
+
+/* ── Barre du haut ── */
+.sx-top {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 18px; height: 58px; flex-shrink: 0;
+    background: linear-gradient(180deg, var(--chrome1), var(--rail));
+    border-bottom: 1px solid var(--line2);
+}
+.sx-brand {
+    font-family: 'Cormorant Garamond', serif; font-size: 21px; font-weight: 600;
+    color: var(--ember2); letter-spacing: .16em; text-indent: .16em; text-decoration: none;
+}
+.sx-title {
+    font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+    letter-spacing: .22em; text-transform: uppercase; color: var(--faint);
+}
+.sx-sep { width: 1px; height: 24px; background: var(--line); }
+.sx-spacer { flex: 1; }
+.sx-mail { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--dim); }
+.sx-top .sx-btn { white-space: nowrap; padding: 8px 14px; flex-shrink: 0; }
+
+/* ── Mise en page ── */
+.sx-layout { flex: 1; min-height: 0; display: flex; }
+.sx-board { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 26px 60px; }
+.sx-board-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.sx-h1 {
+    font-family: 'Cormorant Garamond', serif; font-size: 27px; font-weight: 600;
+    color: var(--warm); letter-spacing: .02em;
+}
+.sx-count { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--faint); }
+.sx-empty {
+    font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 16px;
+    color: var(--dim); padding: 40px 0; text-align: center;
+}
+.sx-gate {
+    margin: auto; text-align: center; display: flex; flex-direction: column; gap: 14px;
+    font-family: 'Cormorant Garamond', serif; font-size: 17px; font-style: italic; color: var(--dim);
+}
+.sx-gate a { color: var(--ember2); }
+
+/* ── Carte de rendez-vous ── */
+.sx-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 18px 20px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.sx-card.mine { border-color: rgba(var(--accent-rgb), .40); }
+.sx-card-head { display: flex; align-items: flex-start; gap: 12px; }
+.sx-card-title {
+    font-family: 'Cormorant Garamond', serif; font-size: 21px; font-weight: 600;
+    color: var(--warm); line-height: 1.15; flex: 1; min-width: 0; word-break: break-word;
+}
+.sx-when {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--ember2);
+    white-space: nowrap;
+}
+.sx-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sx-chip {
+    font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim);
+    border: 1px solid var(--line2); border-radius: 999px; padding: 3px 9px;
+}
+.sx-chip.accent { color: var(--ember2); border-color: rgba(var(--accent-rgb), .45); }
+.sx-chip.full { color: var(--bad); border-color: rgba(226,90,79,.45); }
+.sx-desc {
+    font-family: 'Cormorant Garamond', serif; font-size: 15px; line-height: 1.55;
+    color: var(--dim); white-space: pre-wrap;
+}
+.sx-roles { display: flex; flex-wrap: wrap; gap: 6px; }
+.sx-role {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text);
+    border: 1px solid var(--line2); border-radius: 3px; padding: 4px 9px;
+    background: var(--field);
+}
+.sx-role.mandatory { border-color: rgba(233,170,69,.45); }
+.sx-role.taken { opacity: .55; }
+.sx-role-tag {
+    font-family: ui-monospace, Menlo, monospace; font-size: 9px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--warn);
+}
+.sx-role-by { font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--faint); }
+.sx-players { display: flex; flex-wrap: wrap; gap: 6px; }
+.sx-player {
+    font-size: 12px; color: var(--dim);
+    border-bottom: 1px solid var(--line2); padding: 2px 2px 3px;
+}
+.sx-player.me { color: var(--ember2); }
+.sx-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+.sx-note { font-size: 12px; color: var(--warn); font-style: italic; flex: 1; min-width: 160px; }
+.sx-note.bad { color: var(--bad); }
+.sx-select {
+    background: var(--field); border: 1px solid var(--line2); border-radius: 3px;
+    color: var(--text); font-family: 'Archivo', sans-serif; font-size: 13px; padding: 7px 9px;
+    max-width: 260px;
+}
+.sx-btn {
+    font-family: 'Archivo', sans-serif; font-size: 11.5px; font-weight: 700;
+    letter-spacing: .09em; text-transform: uppercase;
+    background: var(--ember); border: none; color: var(--ink);
+    padding: 9px 18px; border-radius: 3px; cursor: pointer; transition: filter .2s;
+}
+.sx-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.sx-btn:disabled { opacity: .35; cursor: not-allowed; }
+.sx-btn.ghost { background: transparent; border: 1px solid var(--line2); color: var(--dim); }
+.sx-btn.ghost:hover { border-color: var(--text); color: var(--text); }
+.sx-btn.danger { background: transparent; border: 1px solid rgba(226,90,79,.4); color: var(--bad); }
+
+/* ── Colonne de discussion ── */
+.sx-chat-col {
+    width: 380px; flex-shrink: 0; display: flex; flex-direction: column;
+    border-left: 1px solid var(--line2); background: var(--bg);
+}
+.sx-chat-head {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+.sx-chat-label {
+    font-family: ui-monospace, Menlo, monospace; font-size: 9.5px;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--faint);
+}
+.sx-code-chip {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; letter-spacing: .1em;
+    color: var(--dim); background: none; border: 1px solid var(--line2);
+    border-radius: 999px; padding: 4px 11px; cursor: pointer; transition: all .15s;
+}
+.sx-code-chip.active { color: var(--ember2); border-color: rgba(var(--accent-rgb), .5); background: var(--accent-soft); }
+.sx-chat-body { flex: 1; min-height: 0; display: flex; }
+.sx-chat-body .chat-wrap { flex: 1; min-width: 0; min-height: 0; }
+.sx-chat-body .chat-threads { width: 128px; }
+.sx-chat-none {
+    margin: auto; padding: 30px 22px; text-align: center;
+    font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 15px; color: var(--faint);
+}
+
+/* ── Formulaire de création ── */
+.sx-scrim {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,.65); overflow-y: auto; padding: 30px 16px;
+}
+.sx-scrim.show { display: block; }
+.sx-form {
+    width: 100%; max-width: 520px; margin: 0 auto;
+    background: var(--panel); border: 1px solid var(--line2); border-radius: 6px; padding: 26px;
+    display: flex; flex-direction: column;
+}
+.sx-form-title {
+    font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 600;
+    color: var(--warm); margin-bottom: 10px;
+}
+.sx-label {
+    font-family: ui-monospace, Menlo, monospace; font-size: 9.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--faint); margin-top: 12px; margin-bottom: 4px;
+}
+.sx-hint { font-size: 11.5px; color: var(--faint); font-style: italic; margin-top: 3px; }
+.sx-input {
+    background: var(--field); border: 1px solid var(--line2); border-radius: 3px;
+    color: var(--text); font-family: 'Archivo', sans-serif; font-size: 14px;
+    padding: 9px 11px; width: 100%; outline: none; transition: border-color .2s;
+}
+.sx-input:focus { border-color: var(--ember); }
+textarea.sx-input { resize: vertical; min-height: 70px; }
+.sx-row { display: flex; gap: 10px; }
+.sx-row > div { flex: 1; min-width: 0; }
+.sx-form-err {
+    font-size: 12.5px; color: var(--bad); border-left: 2px solid var(--bad);
+    padding: 3px 0 3px 10px; margin-top: 12px;
+}
+.sx-form-btns { display: flex; gap: 9px; justify-content: flex-end; margin-top: 20px; }
+
+@media (max-width: 900px) {
+    .sx-layout { flex-direction: column; }
+    .sx-chat-col { width: auto; border-left: none; border-top: 1px solid var(--line2); height: 420px; }
+}

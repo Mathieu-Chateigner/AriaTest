@@ -53,14 +53,17 @@ views/
   aria-gm.html
   aria-overlay.html
   aria-overlay-editor.html  ← drag-and-drop overlay layout editor (opened from player/GM panel)
+  aria-sessions.html        ← rendez-vous board: announce a session, sign up, campaign chat
 css/
   aria-panel.css            ← rules shared by both panels (loaded first on each page)
   aria-player.css
   aria-gm.css
   aria-overlay.css
   aria-overlay-editor.css
+  aria-sessions.css
 js/
   aria-shared.selfcheck.js  ← node-runnable check for the pure logic in aria-shared.js
+  aria-sessions.selfcheck.js ← same, for the recurrence / overlap rules
   aria-supabase.js          ← shared Supabase helpers (loaded first, before panel scripts)
   aria-shared.js            ← shared runtime: el() DOM builder, split-pane engine,
                               music transport, save-key gateway, card deck, utils
@@ -68,6 +71,7 @@ js/
   aria-gm.js
   aria-overlay.js
   aria-overlay-editor.js
+  aria-sessions.js
 ```
 
 `aria-control-panel.html` and `aria-dice-roller.html` are **deprecated**.
@@ -156,6 +160,8 @@ A thread id is `'global'`, or the two participant ids **sorted and joined with `
 
 **Persistence is `campaign_chat`** (`specs/campaign_chat.sql`), keyed by **join code** rather than `campaign_id`: both ends know the code, only the GM knows the campaign UUID. Nothing is kept in localStorage — a chat that only exists on the device it was typed on is not a chat. `load()` reads the same slice the transport delivers (`thread.eq.global` or `thread.like.*self*`), newest 500. Because the table hangs off the join code, `sbDeleteCascade` cannot reach it — `deleteCampaign()` deletes those rows by join code itself.
 
+`views/aria-sessions.html` is a third consumer of the same factory — see *Rendez-vous board* — so a change here shows up on three pages, not two.
+
 The UI is `#chat-global-log` / `#chat-global-input` (player sidebar, under the weapons — the GM page has no sidebar and reads the same thread through the `Général` row) and the `Messages` tab (`#tab-chat`: `#chat-thread-list`, `#chat-thread-title`, `#chat-log`, `#chat-input`) on both panels. Contacts come from the roster — presence peers plus the GM on the player side, the `players` Map on the GM's — and any thread with history whose other end is no longer listed keeps a row of its own, so a conversation outlives the connection it happened over. Unread marks a thread until its pane is actually open (`openPanes.includes('tab-chat')`), and dots `#tab-btn-chat`.
 
 ### Supabase credentials
@@ -177,6 +183,8 @@ Project **AriaTest** (`qpxaaauzzbahsdhsjaqn`, eu-west-3). The former project `np
 `views/aria-overlay.html` sets `window.ARIA_ANON_ONLY = true` before loading `aria-supabase.js`, so the overlay never reads or writes `aria-session`. It shares an origin with the panels, and without the flag a failed refresh there would sign the panel out in the next tab.
 
 **`campaign_chat` is the known hole.** Both ends of a conversation write it, their `save_key`s differ, and it is keyed by a 5-character join code — nothing in the schema proves an account belongs to a campaign, so the only barrier available is "be signed in". `anon` does lose it. Closing it properly needs a `campaign_members (join_code, user_id)` table; marked `ponytail:` at the policy.
+
+**`campaign_sessions` / `session_signups` make the same trade, deliberately.** The rendez-vous board is an announcement: it must be readable by accounts that hold nothing of the host's, so `select` is open to `authenticated` and ownership lives on the write policies instead (`host_id` / `user_id` = `auth.uid()`). See *Rendez-vous board* under Key UI components, and `specs/campaign_sessions.sql`.
 
 **`claim_save_key(uuid)` is the migration path.** Keys created before accounts existed have `owner is null` and are therefore invisible to everyone; their holder attaches one to their account once, from the gateway's second stage. It is `security definer` precisely because the `saves` policy already hides the unclaimed row. **Anyone signed in who guesses an unclaimed key can take it** — the same threat model as before accounts (the key was the whole secret, and it is in the OBS URL), but it means keys should be claimed early. Once claimed, a second account gets `false`.
 
@@ -574,7 +582,33 @@ GM plays locally via `_musicTriggerPlay()` AND broadcasts — it does not subscr
 ## Key UI components
 
 ### Home screen (`index.html`)
-Displays Joueur / Maître de Jeu cards and a **⚙ Configuration** panel at the bottom. Reads and writes `aria-config` via inline `<script>`. This is the canonical entry point for key configuration.
+Displays Joueur / Maître de Jeu / Rendez-vous cards and a **⚙ Configuration** panel at the bottom. Reads and writes `aria-config` via inline `<script>`. This is the canonical entry point for key configuration.
+
+### Rendez-vous board (`views/aria-sessions.html`)
+
+A page of its own, outside both panels: announce a future session, sign up for one, and talk about it. `specs/campaign_sessions.sql` is the schema, `js/aria-sessions.selfcheck.js` the runnable check (`node js/aria-sessions.selfcheck.js`).
+
+**It is a public board, which is why ownership by `saves.owner` cannot key it.** An announcement has to be readable by the people it invites, and they hold no save key of the host's — so `campaign_sessions` and `session_signups` are readable by any signed-in account, exactly the compromise `campaign_chat` already makes. Writing is nominative: `host_id = auth.uid()` on a session, `user_id = auth.uid()` on a signup, both defaulted by the column like `saves.owner`. A player who deletes someone else's session gets a 204 that changed nothing, and a signup written for someone else is refused 42501.
+
+**There is no occurrence table.** `starts_at` carries the first sitting and `recurrence` the cadence (`once` / `weekly` / `biweekly` / `monthly`); `sxNextStart()` rolls a past recurring session forward to its next one, and one signs up to the series rather than to a date. It steps with `setDate` / `setMonth` rather than adding milliseconds, so a weekly session stays at the same *local* hour across a DST change. Marked `ponytail:` in the spec — per-occurrence signup needs `session_occurrences` and the FK moved onto it.
+
+**One cannot be at two tables at once.** `sxOverlap()` compares the next occurrences, and the sign-up is refused — with the clashing session named — whenever a session I am signed up to *or host* overlaps. Hosted sessions count: a GM cannot run two tables at 19:00 either.
+
+**Every sign-up rule is re-read from the database immediately before the write, never checked against what is on screen.** Two windows of one account are not at the same point: the one that has been sitting there still shows the seat free, the role open and the evening clear, so refusing on what *it* displays refuses nothing. `sxJoin()` therefore reads the select, calls `sxLoad()`, and only then runs `sxJoinRefusal()` — which is also what the card calls (through `sxHardRefusal()`, the subset no character choice can lift) to grey the button and say why, so an enabled *S'inscrire* cannot end in an alert.
+
+The guarantee underneath is `unique (session_id, user_id)`: whatever the timing, one account holds one seat per session. `sbInsert()` returns whether the row landed precisely so that refusal reaches the user instead of a `console.warn` — a sign-up that silently did nothing is the one failure mode this page cannot afford. Capacity and overlap are narrowed to the round-trip rather than closed; that is the remaining `ponytail:`, and the fix is a `before insert` trigger, which would mean writing the recurrence arithmetic a second time in plpgsql.
+
+A window that has been left aside re-reads when you come back to it — **`focus` and `visibilitychange` both**, because they cover different cases: two windows side by side both stay `visible` and only `focus` tells them apart, while switching tabs inside one window goes through `visibilitychange`. The board is an announcement board; a read on return is enough, there is nothing to subscribe to.
+
+**Offered characters, and what "mandatory" means.** `campaign_sessions.characters` is `[{ id, name, mandatory }]`, typed one per line in the form with a `*` marking a mandatory one.
+
+Mandatory means **filled by the end, not filled first**. `sxMandatoryForced(seatsLeft, unfilled)` is the whole rule — `unfilled > 0 && seatsLeft <= unfilled` — and it is the one place that decides: taking an optional role would leave `seatsLeft - 1` seats for `unfilled` mandatory ones, which is fine while `seatsLeft - 1 >= unfilled`. So on 5 seats with 10 roles of which 2 are mandatory, the menu offers everything until only two seats are left, and narrows to the unfilled mandatory roles from there. How many players that leaves free is not fixed: `unfilled` is recounted from the signups every time, so a mandatory role taken during the free phase pushes the reserved window back a seat, and two taken early mean no seat is ever reserved. The dropdown and `sxJoin()`'s guard both call it, so what the menu offers and what a signup accepts cannot drift.
+
+When nothing is forced, the list is the remaining offered roles, **plus this browser's own characters** (`aria-characters`), plus *Sans personnage*.
+
+That last option is not a convenience. A signup's `char_id` is the identity the chat uses, and a character played in the panels carries its real `charId` — so signing up as one's own character makes the private thread with the MJ *the same thread* on both pages. An offered role gets an id invented here, which reaches the GM (whose id is `'gm'` everywhere) but not that player's own panel.
+
+**Signing up opens the campaign's chat**, and it is `makeChat()` from `aria-shared.js` — the same factory, the same element ids, the same `aria-chat-{CODE}` channels and the same `campaign_chat` rows as the Messages tab of either panel. The page loads `aria-shared.js` for it, sets `ARIA.joinCode` to the open campaign and `openPanes = ['tab-chat']`, and nothing else. `sxIdentity(code)` decides who we are in that campaign: `'gm'` if we host a session under that code, our signup's `char_id` if we are a player, a stable `u_{uid}` otherwise. One chip per campaign we are in, above the log — the threads of two campaigns never mix, since the channel and the read filter both carry the join code.
 
 ### Player character selection screen
 Lists all saved characters. Creating a character prompts for name, class, an optional campaign join code, and the character type (Médiéval/Contemporain radio — picks the template). The join code and type are shown as badges on each character card. `selectCharacter(id)` → `loadCharacterState(id)` → `initApp()`. `switchCharacter()` closes Ably (which leaves the presence set) and releases the push lock before returning.

@@ -234,7 +234,9 @@ async function sbSelect(table, filterStr) {
     } catch(e) { console.warn('[ARIA] sbSelect error:', table, e); return []; }
 }
 
-// Insert a new row into a Supabase table.
+// Insert a new row into a Supabase table. Returns whether it landed — a unique
+// constraint or an RLS refusal comes back false, and a caller that cannot simply
+// log and move on (the rendez-vous sign-up) says so to the user instead.
 async function sbInsert(table, row) {
     try {
         const res = await _sbFetch('/rest/v1/' + table, {
@@ -242,7 +244,8 @@ async function sbInsert(table, row) {
             body: JSON.stringify(row),
         });
         if (!res.ok) console.warn('[ARIA] sbInsert failed:', table, await res.text());
-    } catch(e) { console.warn('[ARIA] sbInsert error:', table, e); }
+        return res.ok;
+    } catch(e) { console.warn('[ARIA] sbInsert error:', table, e); return false; }
 }
 
 // Partially update rows in a Supabase table matching a filter.
